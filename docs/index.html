@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- CUSTOMIZE: Update title -->
+    <title>dissertation | Project Hub</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #64748b;
+            --background: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --github: #24292f;
+            --asana: #f06a6a;
+            --zotero: #cc2936;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--background);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            padding: 3rem 0;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .team-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: white;
+        }
+
+        .card-icon.github { background: var(--github); }
+        .card-icon.asana { background: var(--asana); }
+        .card-icon.zotero { background: var(--zotero); }
+
+        .card h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .card p {
+            color: var(--text-light);
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
+        }
+
+        .card-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        .card-link:hover {
+            text-decoration: underline;
+        }
+
+        .card-link svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+
+        .team-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid var(--border);
+        }
+
+        .team-section h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .team-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .team-member {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--background);
+            border-radius: 8px;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .member-info {
+            flex: 1;
+        }
+
+        .member-name {
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        .member-email {
+            font-size: 0.8rem;
+            color: var(--text-light);
+        }
+
+        .quick-links {
+            margin-top: 2rem;
+            text-align: center;
+            padding: 1.5rem;
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .quick-links h3 {
+            font-size: 1rem;
+            color: var(--text-light);
+            margin-bottom: 1rem;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            justify-content: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+
+        .btn-github { background: var(--github); color: white; }
+        .btn-asana { background: var(--asana); color: white; }
+        .btn-zotero { background: var(--zotero); color: white; }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-light);
+            font-size: 0.875rem;
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 1rem; }
+            header { padding: 2rem 1rem; }
+            header h1 { font-size: 1.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <!-- CUSTOMIZE: Project name and description -->
+            <h1>dissertation</h1>
+            <p>Dissertation Research Project</p>
+            <span class="team-badge">Roseboro Foundation</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="grid">
+            <!-- GitHub Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon github">
+                        <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                    </div>
+                    <h2>Code Repository</h2>
+                </div>
+                <p>Source code, version control, issues, and pull requests. Clone, branch, and collaborate on code.</p>
+                <!-- CUSTOMIZE: GitHub URL -->
+                <a href="https://github.com/RoseboroFoundation/Signalsandsystems" target="_blank" class="card-link">
+                    Open GitHub
+                    <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                </a>
+            </div>
+
+            <!-- Asana Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon asana">
+                        <svg viewBox="0 0 24 24"><path d="M18.78 12.653c-2.478 0-4.486 2.008-4.486 4.486s2.008 4.486 4.486 4.486 4.486-2.008 4.486-4.486-2.008-4.486-4.486-4.486zm-13.56 0c-2.478 0-4.486 2.008-4.486 4.486s2.008 4.486 4.486 4.486 4.486-2.008 4.486-4.486-2.008-4.486-4.486-4.486zm6.78-10.278c-2.478 0-4.486 2.008-4.486 4.486s2.008 4.486 4.486 4.486 4.486-2.008 4.486-4.486-2.008-4.486-4.486-4.486z"/></svg>
+                    </div>
+                    <h2>Project Management</h2>
+                </div>
+                <p>Tasks, milestones, assignments, and project timeline. Track progress and manage deadlines.</p>
+                <!-- CUSTOMIZE: Asana URL -->
+                <a href="https://app.asana.com/0/1212849183115159" target="_blank" class="card-link">
+                    Open Asana
+                    <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                </a>
+            </div>
+
+            <!-- Zotero Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon zotero">
+                        <svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm0 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
+                    </div>
+                    <h2>Reference Library</h2>
+                </div>
+                <p>Research papers, citations, and literature. Organize sources and generate bibliographies.</p>
+                <!-- CUSTOMIZE: Zotero URL -->
+                <a href="https://www.zotero.org/users/15762531/collections/2PCBMR7C" target="_blank" class="card-link">
+                    Open Zotero
+                    <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                </a>
+            </div>
+        </div>
+
+        <!-- Team Section -->
+        <!-- CUSTOMIZE: Add/remove team members as needed -->
+        <div class="team-section">
+            <h2>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+                Team Members
+            </h2>
+            <div class="team-list">
+                <!-- CUSTOMIZE: Team member 1 -->
+                <div class="team-member">
+                    <div class="avatar"></div>
+                    <div class="member-info">
+                        <div class="member-name"></div>
+                        <div class="member-email"></div>
+                    </div>
+                </div>
+                <!-- CUSTOMIZE: Team member 2 -->
+                <div class="team-member">
+                    <div class="avatar"></div>
+                    <div class="member-info">
+                        <div class="member-name"></div>
+                        <div class="member-email"></div>
+                    </div>
+                </div>
+                <!-- CUSTOMIZE: Team member 3 -->
+                <div class="team-member">
+                    <div class="avatar"></div>
+                    <div class="member-info">
+                        <div class="member-name"></div>
+                        <div class="member-email"></div>
+                    </div>
+                </div>
+                <!-- Add more team members by copying the block above -->
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="quick-links">
+            <h3>Quick Actions</h3>
+            <div class="btn-group">
+                <!-- CUSTOMIZE: Update URLs -->
+                <a href="https://github.com/RoseboroFoundation/Signalsandsystems/issues/new" target="_blank" class="btn btn-github">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    New Issue
+                </a>
+                <a href="https://app.asana.com/0/1212849183115159" target="_blank" class="btn btn-asana">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    New Task
+                </a>
+                <a href="https://www.zotero.org/users/15762531/collections/2PCBMR7C" target="_blank" class="btn btn-zotero">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    Add Reference
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <!-- CUSTOMIZE: Footer text -->
+        <p>dissertation &bull; Roseboro Foundation</p>
+    </footer>
+</body>
+</html>
+
+<!--
+===========================================
+PROJECT HUB TEMPLATE - CUSTOMIZATION GUIDE
+===========================================
+
+Replace these placeholders with your project details:
+
+BASIC INFO:
+  dissertation        - Your project name (e.g., "Broken Boundaries")
+  Dissertation Research Project - Short description (e.g., "Research Project Hub")
+  Roseboro Foundation           - Team/organization name (e.g., "Roseboro Foundation")
+
+URLS:
+  https://github.com/RoseboroFoundation/Signalsandsystems          - Full GitHub repo URL (e.g., "https://github.com/user/repo")
+  https://app.asana.com/0/1212849183115159           - Asana project URL (e.g., "https://app.asana.com/0/PROJECT_ID")
+  https://www.zotero.org/users/15762531/collections/2PCBMR7C          - Zotero collection URL (e.g., "https://www.zotero.org/users/ID/collections/KEY")
+
+TEAM MEMBERS (add/remove as needed):
+      - Two-letter initials (e.g., "TS")
+          - Full name (e.g., "Tim Spivey")
+         - Email address
+
+SETUP STEPS:
+1. Copy this template to your project's docs/index.html
+2. Replace all {{PLACEHOLDER}} values
+3. Add/remove team member blocks as needed
+4. Commit and push to GitHub
+5. Enable GitHub Pages (Settings > Pages > Source: main, /docs)
+
+Your site will be live at: https://USERNAME.github.io/REPO-NAME/
+===========================================
+-->
