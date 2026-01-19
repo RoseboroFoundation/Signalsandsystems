@@ -32,6 +32,13 @@ This module provides functions to:
     * Capacity Utilization rates (Total, Manufacturing, Mining, Utilities)
     * Growth rates (Year-over-Year, Month-over-Month)
     * Diffusion indices (1M, 3M, 6M)
+- Load M2 Money Supply data from FRED (2000-2025):
+    * Money supply aggregates (M1, M2, Monetary Base)
+    * Money supply components (Currency, Deposits, Money Funds)
+    * Money velocity (M1V, M2V)
+    * Federal Reserve balance sheet (Total Assets, Treasury/MBS Holdings)
+    * Bank reserves (Required, Excess, Total)
+    * M2 growth rates (YoY, MoM, 3M/6M annualized)
 """
 
 # =============================================================================
@@ -2944,6 +2951,574 @@ def load_comprehensive_ip_data(
     return result
 
 
+# =============================================================================
+# M2 MONEY SUPPLY DATA
+# =============================================================================
+def load_money_supply_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load Money Supply (M1, M2) data from FRED (2000-2025).
+
+    Provides comprehensive money supply measures:
+    - M1: Currency + demand deposits + other checkable deposits
+    - M2: M1 + savings deposits + small time deposits + retail money funds
+    - Monetary Base
+    - Currency in Circulation
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'aggregates': M1, M2, and monetary base
+        - 'components': Components of money supply
+        - 'combined': All money supply measures in one DataFrame
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'money_supply_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached money supply data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading Money Supply data from FRED...")
+
+    # Money supply aggregates
+    aggregate_series = {
+        'M1': 'M1SL',                           # M1 Money Stock
+        'M2': 'M2SL',                           # M2 Money Stock
+        'Monetary_Base': 'BOGMBASE',            # Monetary Base; Total
+        'Monetary_Base_Adjusted': 'BOGMBASEW',  # Monetary Base (Weekly)
+    }
+
+    # Money supply components
+    component_series = {
+        'Currency_Circulation': 'CURRSL',       # Currency in Circulation
+        'Demand_Deposits': 'DEMDEPSL',          # Demand Deposits
+        'Savings_Deposits': 'SAVINGSL',         # Savings Deposits
+        'Retail_Money_Funds': 'RMFSL',          # Retail Money Market Funds
+        'Small_Time_Deposits': 'STDSL',         # Small Time Deposits
+        'Checkable_Deposits': 'TCDSL',          # Total Checkable Deposits
+        'Travelers_Checks': 'TVCKSSL',          # Travelers Checks Outstanding
+    }
+
+    try:
+        # Download money supply aggregates
+        print("\n--- Money Supply Aggregates ---")
+        aggregate_data = {}
+        for name, code in aggregate_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                aggregate_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        aggregate_df = pd.DataFrame(aggregate_data)
+
+        # Download money supply components
+        print("\n--- Money Supply Components ---")
+        component_data = {}
+        for name, code in component_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                component_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        component_df = pd.DataFrame(component_data)
+
+        # Combine all data
+        combined_df = pd.concat([aggregate_df, component_df], axis=1)
+
+        result = {
+            'aggregates': aggregate_df,
+            'components': component_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached money supply data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Money Supply Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Aggregate series: {len(aggregate_df.columns)}")
+        print(f"Component series: {len(component_df.columns)}")
+
+        print("\nLatest values (Billions USD):")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                print(f"  {col}: ${latest:,.1f}B")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading money supply data: {e}")
+        return None
+
+
+def load_money_velocity_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load Money Velocity data from FRED.
+
+    Velocity measures how quickly money circulates in the economy.
+    V = GDP / Money Stock
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'velocity': M1 and M2 velocity measures
+        - 'combined': All velocity measures
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'money_velocity_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached money velocity data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading Money Velocity data from FRED...")
+
+    velocity_series = {
+        'M1_Velocity': 'M1V',                   # Velocity of M1 Money Stock
+        'M2_Velocity': 'M2V',                   # Velocity of M2 Money Stock
+    }
+
+    try:
+        print("\n--- Money Velocity ---")
+        velocity_data = {}
+        for name, code in velocity_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                velocity_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        velocity_df = pd.DataFrame(velocity_data)
+
+        result = {
+            'velocity': velocity_df,
+            'combined': velocity_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached money velocity data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Money Velocity Summary ===")
+        print("=" * 60)
+        print(f"Date range: {velocity_df.index.min()} to {velocity_df.index.max()}")
+        print(f"Observations: {len(velocity_df)}")
+
+        print("\nLatest values:")
+        for col in velocity_df.columns:
+            latest = velocity_df[col].dropna().iloc[-1] if len(velocity_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                print(f"  {col}: {latest:.2f}")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading money velocity data: {e}")
+        return None
+
+
+def load_fed_balance_sheet_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load Federal Reserve Balance Sheet data from FRED.
+
+    Provides Fed assets, liabilities, and reserve measures:
+    - Total Assets
+    - Treasury Holdings
+    - MBS Holdings
+    - Reserve Balances
+    - Excess Reserves
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'assets': Fed asset holdings
+        - 'reserves': Bank reserve measures
+        - 'combined': All balance sheet data
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'fed_balance_sheet_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached Fed balance sheet data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading Federal Reserve Balance Sheet data from FRED...")
+
+    # Fed assets
+    asset_series = {
+        'Fed_Total_Assets': 'WALCL',            # Total Assets
+        'Fed_Treasury_Holdings': 'TREAST',      # Treasury Securities Held
+        'Fed_MBS_Holdings': 'WSHOMCB',          # Mortgage-Backed Securities Held
+        'Fed_Agency_Debt': 'WSHOFDSL',          # Federal Agency Debt Securities
+    }
+
+    # Reserve measures
+    reserve_series = {
+        'Reserve_Balances': 'WRESBAL',          # Reserve Balances with Fed
+        'Required_Reserves': 'REQRESNS',        # Required Reserves
+        'Excess_Reserves': 'EXCSRESNS',         # Excess Reserves
+        'Total_Reserves': 'TOTRESNS',           # Total Reserves
+    }
+
+    try:
+        # Download Fed assets
+        print("\n--- Federal Reserve Assets ---")
+        asset_data = {}
+        for name, code in asset_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                asset_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        asset_df = pd.DataFrame(asset_data)
+
+        # Download reserve measures
+        print("\n--- Bank Reserves ---")
+        reserve_data = {}
+        for name, code in reserve_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                reserve_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        reserve_df = pd.DataFrame(reserve_data)
+
+        # Combine all data
+        combined_df = pd.concat([asset_df, reserve_df], axis=1)
+
+        result = {
+            'assets': asset_df,
+            'reserves': reserve_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached Fed balance sheet data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Fed Balance Sheet Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Asset series: {len(asset_df.columns)}")
+        print(f"Reserve series: {len(reserve_df.columns)}")
+
+        print("\nLatest values (Millions/Billions USD):")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                if latest > 1000000:
+                    print(f"  {col}: ${latest/1000000:,.2f}T")
+                elif latest > 1000:
+                    print(f"  {col}: ${latest/1000:,.1f}B")
+                else:
+                    print(f"  {col}: ${latest:,.1f}M")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading Fed balance sheet data: {e}")
+        return None
+
+
+def load_m2_growth_rates(money_supply_data):
+    """
+    Calculate M2 growth rates from money supply data.
+
+    Parameters:
+    -----------
+    money_supply_data : dict
+        Output from load_money_supply_data()
+
+    Returns:
+    --------
+    pd.DataFrame : M2 growth rates (YoY, MoM)
+    """
+    if money_supply_data is None or 'aggregates' not in money_supply_data:
+        print("Money supply data not available")
+        return None
+
+    aggregates = money_supply_data['aggregates']
+    growth = pd.DataFrame(index=aggregates.index)
+
+    print("Calculating M2 growth rates...")
+
+    # Year-over-Year growth
+    if 'M2' in aggregates.columns:
+        growth['M2_YoY'] = aggregates['M2'].pct_change(periods=12) * 100
+        print("  Calculated M2 YoY growth")
+
+    if 'M1' in aggregates.columns:
+        growth['M1_YoY'] = aggregates['M1'].pct_change(periods=12) * 100
+        print("  Calculated M1 YoY growth")
+
+    # Month-over-Month growth (annualized)
+    if 'M2' in aggregates.columns:
+        growth['M2_MoM'] = aggregates['M2'].pct_change() * 100
+        growth['M2_MoM_Annualized'] = aggregates['M2'].pct_change() * 100 * 12
+        print("  Calculated M2 MoM growth")
+
+    if 'M1' in aggregates.columns:
+        growth['M1_MoM'] = aggregates['M1'].pct_change() * 100
+        growth['M1_MoM_Annualized'] = aggregates['M1'].pct_change() * 100 * 12
+        print("  Calculated M1 MoM growth")
+
+    # 3-month and 6-month annualized growth
+    if 'M2' in aggregates.columns:
+        growth['M2_3M_Annualized'] = aggregates['M2'].pct_change(periods=3) * 100 * 4
+        growth['M2_6M_Annualized'] = aggregates['M2'].pct_change(periods=6) * 100 * 2
+        print("  Calculated M2 3M and 6M annualized growth")
+
+    # Print summary
+    print("\n" + "=" * 60)
+    print("=== M2 Growth Rates Summary ===")
+    print("=" * 60)
+    print(f"Date range: {growth.index.min()} to {growth.index.max()}")
+
+    print("\nLatest growth rates:")
+    for col in growth.columns:
+        latest = growth[col].dropna().iloc[-1] if len(growth[col].dropna()) > 0 else 'N/A'
+        if isinstance(latest, float):
+            print(f"  {col}: {latest:.2f}%")
+        else:
+            print(f"  {col}: {latest}")
+
+    return growth
+
+
+def load_comprehensive_m2_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load comprehensive M2 Money Supply dataset from FRED (2000-2025).
+
+    This function aggregates:
+    - Money supply aggregates (M1, M2, Monetary Base)
+    - Money supply components (Currency, Deposits, etc.)
+    - Money velocity (M1V, M2V)
+    - Federal Reserve balance sheet data
+    - Growth rates (YoY, MoM, annualized)
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'money_supply': M1, M2, components
+        - 'velocity': Money velocity measures
+        - 'fed_balance_sheet': Fed assets and reserves
+        - 'growth_rates': M2 growth calculations
+        - 'combined': All M2 measures merged on date
+        - 'summary_stats': Summary statistics for all series
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(
+        cache_path,
+        f'comprehensive_m2_{start_date}_{end_date}.pkl'
+    )
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached comprehensive M2 data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("=" * 60)
+    print("Loading Comprehensive M2 Money Supply Data (2000-2025)")
+    print("=" * 60)
+
+    # Load money supply data
+    print("\n[1/4] Loading money supply aggregates and components...")
+    money_supply_data = load_money_supply_data(start_date, end_date, cache_path)
+
+    # Load velocity data
+    print("\n[2/4] Loading money velocity...")
+    velocity_data = load_money_velocity_data(start_date, end_date, cache_path)
+
+    # Load Fed balance sheet
+    print("\n[3/4] Loading Fed balance sheet...")
+    fed_data = load_fed_balance_sheet_data(start_date, end_date, cache_path)
+
+    # Calculate growth rates
+    print("\n[4/4] Calculating M2 growth rates...")
+    growth_rates = load_m2_growth_rates(money_supply_data)
+
+    # Combine all data
+    combined_dfs = []
+
+    if money_supply_data and 'combined' in money_supply_data:
+        combined_dfs.append(money_supply_data['combined'])
+
+    if velocity_data and 'combined' in velocity_data:
+        combined_dfs.append(velocity_data['combined'])
+
+    if fed_data and 'combined' in fed_data:
+        combined_dfs.append(fed_data['combined'])
+
+    if growth_rates is not None and len(growth_rates) > 0:
+        combined_dfs.append(growth_rates)
+
+    if combined_dfs:
+        combined_df = pd.concat(combined_dfs, axis=1)
+        # Remove duplicate columns if any
+        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+    else:
+        combined_df = pd.DataFrame()
+
+    # Calculate summary statistics
+    summary_stats = {}
+    if len(combined_df) > 0:
+        for col in combined_df.columns:
+            series = combined_df[col].dropna()
+            if len(series) > 0:
+                summary_stats[col] = {
+                    'count': len(series),
+                    'mean': series.mean(),
+                    'std': series.std(),
+                    'min': series.min(),
+                    'max': series.max(),
+                    'latest': series.iloc[-1],
+                    'start_date': series.index.min(),
+                    'end_date': series.index.max()
+                }
+
+    result = {
+        'money_supply': money_supply_data,
+        'velocity': velocity_data,
+        'fed_balance_sheet': fed_data,
+        'growth_rates': growth_rates,
+        'combined': combined_df,
+        'summary_stats': summary_stats
+    }
+
+    pd.to_pickle(result, cache_file)
+    print(f"\nCached comprehensive M2 data to {cache_file}")
+
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("=== Comprehensive M2 Money Supply Summary ===")
+    print("=" * 60)
+    print(f"Total series loaded: {len(combined_df.columns)}")
+    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+    print(f"Total observations: {len(combined_df)}")
+
+    print("\n--- Series Categories ---")
+    if money_supply_data:
+        print(f"Money supply measures: {len(money_supply_data['combined'].columns)}")
+    if velocity_data:
+        print(f"Velocity measures: {len(velocity_data['combined'].columns)}")
+    if fed_data:
+        print(f"Fed balance sheet: {len(fed_data['combined'].columns)}")
+    if growth_rates is not None:
+        print(f"Growth rates: {len(growth_rates.columns)}")
+
+    # Key metrics
+    if money_supply_data and 'aggregates' in money_supply_data:
+        agg_df = money_supply_data['aggregates']
+        if 'M2' in agg_df.columns:
+            latest_m2 = agg_df['M2'].dropna().iloc[-1]
+            print(f"\nLatest M2 Money Stock: ${latest_m2:,.1f}B")
+
+    if growth_rates is not None and 'M2_YoY' in growth_rates.columns:
+        latest_growth = growth_rates['M2_YoY'].dropna().iloc[-1]
+        print(f"Latest M2 YoY Growth: {latest_growth:.2f}%")
+
+    if velocity_data and 'velocity' in velocity_data:
+        vel_df = velocity_data['velocity']
+        if 'M2_Velocity' in vel_df.columns:
+            latest_vel = vel_df['M2_Velocity'].dropna().iloc[-1]
+            print(f"Latest M2 Velocity: {latest_vel:.2f}")
+
+    print("\n" + "=" * 60)
+    print("Citation:")
+    print("Board of Governors of the Federal Reserve System (US)")
+    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    print("https://fred.stlouisfed.org/")
+    print("=" * 60)
+
+    return result
+
+
 def load_additional_macro_data(
     start_date='2000-01-01',
     end_date=None,
@@ -3238,6 +3813,10 @@ def load_data():
         - industrial_production: IP indices, sectors, capacity utilization
         - ip_growth: IP growth rates (YoY, MoM) and diffusion indices
         - comprehensive_ip: All IP measures combined
+        - money_supply: M1, M2, monetary base, components
+        - money_velocity: M1 and M2 velocity
+        - fed_balance_sheet: Fed assets, reserves, balance sheet
+        - comprehensive_m2: All M2 measures with growth rates
     """
     data_dict = {}
 
@@ -3433,6 +4012,54 @@ def load_data():
     except Exception as e:
         print(f"Error loading comprehensive IP data: {e}")
         data_dict['comprehensive_ip'] = None
+
+    # Load money supply data (M1, M2, components)
+    try:
+        data_dict['money_supply'] = load_money_supply_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded money supply data")
+    except Exception as e:
+        print(f"Error loading money supply data: {e}")
+        data_dict['money_supply'] = None
+
+    # Load money velocity data
+    try:
+        data_dict['money_velocity'] = load_money_velocity_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded money velocity data")
+    except Exception as e:
+        print(f"Error loading money velocity data: {e}")
+        data_dict['money_velocity'] = None
+
+    # Load Fed balance sheet data
+    try:
+        data_dict['fed_balance_sheet'] = load_fed_balance_sheet_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded Fed balance sheet data")
+    except Exception as e:
+        print(f"Error loading Fed balance sheet data: {e}")
+        data_dict['fed_balance_sheet'] = None
+
+    # Load comprehensive M2 data (all money supply measures combined)
+    try:
+        data_dict['comprehensive_m2'] = load_comprehensive_m2_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded comprehensive M2 data")
+    except Exception as e:
+        print(f"Error loading comprehensive M2 data: {e}")
+        data_dict['comprehensive_m2'] = None
 
     return data_dict
 
