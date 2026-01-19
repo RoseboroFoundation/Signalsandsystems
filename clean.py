@@ -46,6 +46,13 @@ This module provides functions to:
     * GDP components: C (Personal Consumption), I (Investment),
       G (Government), X-M (Net Exports)
     * GDP by industry (Value Added by sector)
+- Load Employment data from FRED (2000-2025):
+    * Payroll employment (Total Nonfarm, Private, Government, Manufacturing)
+    * Unemployment rates (U3, U6, Natural Rate, Long-term Unemployment)
+    * Labor force metrics (Participation Rate, Employment-Population Ratio)
+    * Jobless claims (Initial Claims, Continuing Claims, Insured Unemployment Rate)
+    * Wages and hours (Average Hourly Earnings, Weekly Hours, ECI, Unit Labor Costs)
+    * JOLTS data (Job Openings, Hires, Quits, Layoffs, Separations)
 """
 
 # =============================================================================
@@ -4086,6 +4093,674 @@ def load_comprehensive_gdp_data(
     return result
 
 
+# =============================================================================
+# EMPLOYMENT DATA
+# =============================================================================
+def load_employment_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load employment data from FRED (2000-2025).
+
+    Provides comprehensive employment measures:
+    - Nonfarm Payrolls
+    - Unemployment rates (U-3, U-6)
+    - Labor force participation
+    - Employment-population ratio
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'payrolls': Nonfarm payroll data
+        - 'unemployment': Unemployment rates
+        - 'labor_force': Labor force measures
+        - 'combined': All employment measures in one DataFrame
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'employment_data_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached employment data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading employment data from FRED...")
+
+    # Nonfarm Payrolls
+    payroll_series = {
+        'Nonfarm_Payrolls': 'PAYEMS',           # Total Nonfarm Payrolls (thousands)
+        'Private_Payrolls': 'USPRIV',           # Private Sector Payrolls
+        'Govt_Payrolls': 'USGOVT',              # Government Payrolls
+        'Manufacturing_Employment': 'MANEMP',   # Manufacturing Employment
+        'Service_Employment': 'SRVPRD',         # Service-Providing Industries
+    }
+
+    # Unemployment rates
+    unemployment_series = {
+        'Unemployment_Rate': 'UNRATE',          # U-3 Unemployment Rate
+        'U6_Rate': 'U6RATE',                    # U-6 Unemployment Rate (broader)
+        'Natural_Unemployment': 'NROU',         # Natural Rate of Unemployment
+        'Long_Term_Unemployment': 'LNS13025703',  # 27+ weeks unemployed (%)
+    }
+
+    # Labor force measures
+    labor_force_series = {
+        'Labor_Force_Participation': 'CIVPART',  # Civilian Labor Force Participation
+        'Employment_Population_Ratio': 'EMRATIO',  # Employment-Population Ratio
+        'Labor_Force_Level': 'CLF16OV',         # Civilian Labor Force Level
+        'Employed_Level': 'CE16OV',             # Civilian Employment Level
+        'Unemployed_Level': 'UNEMPLOY',         # Unemployed Level
+        'Prime_Age_LFPR': 'LNS11300060',        # Prime Age (25-54) LFPR
+    }
+
+    try:
+        # Download payroll data
+        print("\n--- Nonfarm Payrolls ---")
+        payroll_data = {}
+        for name, code in payroll_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                payroll_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        payroll_df = pd.DataFrame(payroll_data)
+
+        # Download unemployment rates
+        print("\n--- Unemployment Rates ---")
+        unemployment_data = {}
+        for name, code in unemployment_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                unemployment_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        unemployment_df = pd.DataFrame(unemployment_data)
+
+        # Download labor force measures
+        print("\n--- Labor Force Measures ---")
+        labor_force_data = {}
+        for name, code in labor_force_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                labor_force_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        labor_force_df = pd.DataFrame(labor_force_data)
+
+        # Combine all data
+        combined_df = pd.concat([payroll_df, unemployment_df, labor_force_df], axis=1)
+
+        result = {
+            'payrolls': payroll_df,
+            'unemployment': unemployment_df,
+            'labor_force': labor_force_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached employment data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Employment Data Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Payroll series: {len(payroll_df.columns)}")
+        print(f"Unemployment series: {len(unemployment_df.columns)}")
+        print(f"Labor force series: {len(labor_force_df.columns)}")
+
+        print("\nLatest values:")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                if 'Rate' in col or 'Ratio' in col or 'Participation' in col:
+                    print(f"  {col}: {latest:.1f}%")
+                elif 'Level' in col or 'Payrolls' in col or 'Employment' in col:
+                    print(f"  {col}: {latest:,.0f}K")
+                else:
+                    print(f"  {col}: {latest:.2f}")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading employment data: {e}")
+        return None
+
+
+def load_jobless_claims_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load unemployment insurance claims data from FRED.
+
+    Provides initial and continuing claims data:
+    - Initial Claims (weekly)
+    - Continuing Claims (weekly)
+    - Insured Unemployment Rate
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'claims': Initial and continuing claims
+        - 'combined': All claims data
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'jobless_claims_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached jobless claims from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading jobless claims data from FRED...")
+
+    claims_series = {
+        'Initial_Claims': 'ICSA',               # Initial Unemployment Claims
+        'Continuing_Claims': 'CCSA',            # Continuing Claims
+        'Initial_Claims_4WMA': 'IC4WSA',        # 4-Week Moving Average
+        'Insured_Unemployment_Rate': 'IURSA',   # Insured Unemployment Rate
+    }
+
+    try:
+        print("\n--- Unemployment Insurance Claims ---")
+        claims_data = {}
+        for name, code in claims_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                claims_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        claims_df = pd.DataFrame(claims_data)
+
+        result = {
+            'claims': claims_df,
+            'combined': claims_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached jobless claims to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Jobless Claims Summary ===")
+        print("=" * 60)
+        print(f"Date range: {claims_df.index.min()} to {claims_df.index.max()}")
+        print(f"Observations: {len(claims_df)}")
+
+        print("\nLatest values:")
+        for col in claims_df.columns:
+            latest = claims_df[col].dropna().iloc[-1] if len(claims_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                if 'Rate' in col:
+                    print(f"  {col}: {latest:.1f}%")
+                else:
+                    print(f"  {col}: {latest:,.0f}")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading jobless claims: {e}")
+        return None
+
+
+def load_wages_hours_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load wages and hours worked data from FRED.
+
+    Provides compensation and hours data:
+    - Average Hourly Earnings
+    - Average Weekly Hours
+    - Unit Labor Costs
+    - Employment Cost Index
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'wages': Wage and earnings data
+        - 'hours': Hours worked data
+        - 'combined': All wages/hours data
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'wages_hours_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached wages/hours data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading wages and hours data from FRED...")
+
+    # Wages and earnings
+    wages_series = {
+        'Avg_Hourly_Earnings': 'CES0500000003',  # Average Hourly Earnings (Private)
+        'Avg_Hourly_Earnings_Production': 'AHETPI',  # Production/Nonsupervisory
+        'Avg_Weekly_Earnings': 'CES0500000011',  # Average Weekly Earnings
+        'Employment_Cost_Index': 'ECIWAG',      # ECI: Wages and Salaries
+        'Unit_Labor_Costs': 'ULCNFB',           # Unit Labor Costs (Nonfarm Business)
+        'Compensation_Per_Hour': 'COMPNFB',     # Compensation Per Hour
+    }
+
+    # Hours worked
+    hours_series = {
+        'Avg_Weekly_Hours': 'AWHAETP',          # Average Weekly Hours (Private)
+        'Avg_Weekly_Hours_Production': 'AWHI',  # Production/Nonsupervisory
+        'Avg_Weekly_Hours_Manufacturing': 'AWHMANU',  # Manufacturing
+        'Aggregate_Weekly_Hours': 'AWHI',       # Aggregate Weekly Hours Index
+    }
+
+    try:
+        # Download wages data
+        print("\n--- Wages and Earnings ---")
+        wages_data = {}
+        for name, code in wages_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                wages_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        wages_df = pd.DataFrame(wages_data)
+
+        # Download hours data
+        print("\n--- Hours Worked ---")
+        hours_data = {}
+        for name, code in hours_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                hours_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        hours_df = pd.DataFrame(hours_data)
+
+        # Combine all data
+        combined_df = pd.concat([wages_df, hours_df], axis=1)
+
+        result = {
+            'wages': wages_df,
+            'hours': hours_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached wages/hours data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Wages and Hours Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Wages series: {len(wages_df.columns)}")
+        print(f"Hours series: {len(hours_df.columns)}")
+
+        print("\nLatest values:")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                if 'Hourly' in col or 'Earnings' in col:
+                    print(f"  {col}: ${latest:.2f}")
+                elif 'Hours' in col:
+                    print(f"  {col}: {latest:.1f} hrs")
+                else:
+                    print(f"  {col}: {latest:.2f}")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading wages/hours data: {e}")
+        return None
+
+
+def load_jolts_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load JOLTS (Job Openings and Labor Turnover Survey) data from FRED.
+
+    Provides job openings, hires, separations data:
+    - Job Openings
+    - Hires
+    - Quits
+    - Layoffs and Discharges
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'openings': Job openings data
+        - 'turnover': Hires, quits, separations
+        - 'combined': All JOLTS data
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'jolts_data_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached JOLTS data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading JOLTS data from FRED...")
+
+    # Job openings
+    openings_series = {
+        'Job_Openings': 'JTSJOL',               # Job Openings Level (thousands)
+        'Job_Openings_Rate': 'JTSJOR',          # Job Openings Rate
+    }
+
+    # Labor turnover
+    turnover_series = {
+        'Hires': 'JTSHIL',                      # Hires Level
+        'Hires_Rate': 'JTSHIR',                 # Hires Rate
+        'Quits': 'JTSQUL',                      # Quits Level
+        'Quits_Rate': 'JTSQUR',                 # Quits Rate
+        'Total_Separations': 'JTSTSL',          # Total Separations Level
+        'Total_Separations_Rate': 'JTSTSR',     # Total Separations Rate
+        'Layoffs_Discharges': 'JTSLDL',         # Layoffs and Discharges Level
+    }
+
+    try:
+        # Download job openings
+        print("\n--- Job Openings ---")
+        openings_data = {}
+        for name, code in openings_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                openings_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        openings_df = pd.DataFrame(openings_data)
+
+        # Download turnover data
+        print("\n--- Labor Turnover ---")
+        turnover_data = {}
+        for name, code in turnover_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                turnover_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        turnover_df = pd.DataFrame(turnover_data)
+
+        # Combine all data
+        combined_df = pd.concat([openings_df, turnover_df], axis=1)
+
+        result = {
+            'openings': openings_df,
+            'turnover': turnover_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached JOLTS data to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== JOLTS Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Openings series: {len(openings_df.columns)}")
+        print(f"Turnover series: {len(turnover_df.columns)}")
+
+        print("\nLatest values:")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                if 'Rate' in col:
+                    print(f"  {col}: {latest:.1f}%")
+                else:
+                    print(f"  {col}: {latest:,.0f}K")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading JOLTS data: {e}")
+        return None
+
+
+def load_comprehensive_employment_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load comprehensive employment dataset from FRED (2000-2025).
+
+    This function aggregates:
+    - Employment levels and payrolls
+    - Unemployment rates (U-3, U-6)
+    - Labor force participation
+    - Jobless claims (initial, continuing)
+    - Wages and hours worked
+    - JOLTS data (job openings, hires, quits)
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'employment': Employment and unemployment data
+        - 'claims': Jobless claims data
+        - 'wages_hours': Wages and hours data
+        - 'jolts': JOLTS data
+        - 'combined': All employment measures merged on date
+        - 'summary_stats': Summary statistics for all series
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(
+        cache_path,
+        f'comprehensive_employment_{start_date}_{end_date}.pkl'
+    )
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached comprehensive employment data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("=" * 60)
+    print("Loading Comprehensive Employment Data (2000-2025)")
+    print("=" * 60)
+
+    # Load employment data
+    print("\n[1/4] Loading employment and unemployment data...")
+    employment_data = load_employment_data(start_date, end_date, cache_path)
+
+    # Load jobless claims
+    print("\n[2/4] Loading jobless claims...")
+    claims_data = load_jobless_claims_data(start_date, end_date, cache_path)
+
+    # Load wages and hours
+    print("\n[3/4] Loading wages and hours...")
+    wages_hours_data = load_wages_hours_data(start_date, end_date, cache_path)
+
+    # Load JOLTS data
+    print("\n[4/4] Loading JOLTS data...")
+    jolts_data = load_jolts_data(start_date, end_date, cache_path)
+
+    # Combine all data
+    combined_dfs = []
+
+    if employment_data and 'combined' in employment_data:
+        combined_dfs.append(employment_data['combined'])
+
+    if claims_data and 'combined' in claims_data:
+        combined_dfs.append(claims_data['combined'])
+
+    if wages_hours_data and 'combined' in wages_hours_data:
+        combined_dfs.append(wages_hours_data['combined'])
+
+    if jolts_data and 'combined' in jolts_data:
+        combined_dfs.append(jolts_data['combined'])
+
+    if combined_dfs:
+        combined_df = pd.concat(combined_dfs, axis=1)
+        # Remove duplicate columns if any
+        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+    else:
+        combined_df = pd.DataFrame()
+
+    # Calculate summary statistics
+    summary_stats = {}
+    if len(combined_df) > 0:
+        for col in combined_df.columns:
+            series = combined_df[col].dropna()
+            if len(series) > 0:
+                summary_stats[col] = {
+                    'count': len(series),
+                    'mean': series.mean(),
+                    'std': series.std(),
+                    'min': series.min(),
+                    'max': series.max(),
+                    'latest': series.iloc[-1],
+                    'start_date': series.index.min(),
+                    'end_date': series.index.max()
+                }
+
+    result = {
+        'employment': employment_data,
+        'claims': claims_data,
+        'wages_hours': wages_hours_data,
+        'jolts': jolts_data,
+        'combined': combined_df,
+        'summary_stats': summary_stats
+    }
+
+    pd.to_pickle(result, cache_file)
+    print(f"\nCached comprehensive employment data to {cache_file}")
+
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("=== Comprehensive Employment Summary ===")
+    print("=" * 60)
+    print(f"Total series loaded: {len(combined_df.columns)}")
+    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+    print(f"Total observations: {len(combined_df)}")
+
+    print("\n--- Series Categories ---")
+    if employment_data:
+        print(f"Employment/Unemployment: {len(employment_data['combined'].columns)} series")
+    if claims_data:
+        print(f"Jobless claims: {len(claims_data['combined'].columns)} series")
+    if wages_hours_data:
+        print(f"Wages/Hours: {len(wages_hours_data['combined'].columns)} series")
+    if jolts_data:
+        print(f"JOLTS: {len(jolts_data['combined'].columns)} series")
+
+    # Key metrics
+    if employment_data and 'unemployment' in employment_data:
+        unemp_df = employment_data['unemployment']
+        if 'Unemployment_Rate' in unemp_df.columns:
+            latest_unemp = unemp_df['Unemployment_Rate'].dropna().iloc[-1]
+            print(f"\nLatest Unemployment Rate: {latest_unemp:.1f}%")
+
+    if employment_data and 'payrolls' in employment_data:
+        payroll_df = employment_data['payrolls']
+        if 'Nonfarm_Payrolls' in payroll_df.columns:
+            latest_payrolls = payroll_df['Nonfarm_Payrolls'].dropna().iloc[-1]
+            print(f"Latest Nonfarm Payrolls: {latest_payrolls:,.0f}K")
+
+    if jolts_data and 'openings' in jolts_data:
+        open_df = jolts_data['openings']
+        if 'Job_Openings' in open_df.columns:
+            latest_openings = open_df['Job_Openings'].dropna().iloc[-1]
+            print(f"Latest Job Openings: {latest_openings:,.0f}K")
+
+    print("\n" + "=" * 60)
+    print("Citation:")
+    print("U.S. Bureau of Labor Statistics (BLS)")
+    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    print("https://fred.stlouisfed.org/")
+    print("=" * 60)
+
+    return result
+
+
 def load_additional_macro_data(
     start_date='2000-01-01',
     end_date=None,
@@ -4388,6 +5063,11 @@ def load_data():
         - gdp_components: Consumption, Investment, Government, Trade
         - gdp_industry: GDP by industry/sector (value added)
         - comprehensive_gdp: All GDP measures combined
+        - employment_data: Payrolls, unemployment rates, labor force
+        - jobless_claims: Initial/continuing claims, insured unemployment
+        - wages_hours: Average earnings, hours worked, labor costs
+        - jolts_data: Job openings, hires, quits, separations
+        - comprehensive_employment: All employment measures combined
     """
     data_dict = {}
 
@@ -4679,6 +5359,66 @@ def load_data():
     except Exception as e:
         print(f"Error loading comprehensive GDP data: {e}")
         data_dict['comprehensive_gdp'] = None
+
+    # Load employment data (payrolls, unemployment, labor force)
+    try:
+        data_dict['employment_data'] = load_employment_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded employment data")
+    except Exception as e:
+        print(f"Error loading employment data: {e}")
+        data_dict['employment_data'] = None
+
+    # Load jobless claims data
+    try:
+        data_dict['jobless_claims'] = load_jobless_claims_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded jobless claims data")
+    except Exception as e:
+        print(f"Error loading jobless claims data: {e}")
+        data_dict['jobless_claims'] = None
+
+    # Load wages and hours data
+    try:
+        data_dict['wages_hours'] = load_wages_hours_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded wages and hours data")
+    except Exception as e:
+        print(f"Error loading wages and hours data: {e}")
+        data_dict['wages_hours'] = None
+
+    # Load JOLTS data (job openings, hires, quits)
+    try:
+        data_dict['jolts_data'] = load_jolts_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded JOLTS data")
+    except Exception as e:
+        print(f"Error loading JOLTS data: {e}")
+        data_dict['jolts_data'] = None
+
+    # Load comprehensive employment data (all employment measures combined)
+    try:
+        data_dict['comprehensive_employment'] = load_comprehensive_employment_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded comprehensive employment data")
+    except Exception as e:
+        print(f"Error loading comprehensive employment data: {e}")
+        data_dict['comprehensive_employment'] = None
 
     return data_dict
 
