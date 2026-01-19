@@ -65,6 +65,7 @@ This module provides functions to:
 # =============================================================================
 import os
 import time
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -443,27 +444,118 @@ class Form4Downloader:
     def __init__(self, output_dir='./sec_form4_data'):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        self.headers = {
-            'User-Agent': 'Ashley Roseboro ashley@roseboroholdings.com',
+        # SEC requires a User-Agent with contact info
+        self.user_agent = 'Ashley Roseboro ashley@roseboroholdings.com'
+
+    def _get_headers(self, url):
+        """Get headers for SEC API requests with correct Host."""
+        if 'data.sec.gov' in url:
+            host = 'data.sec.gov'
+        else:
+            host = 'www.sec.gov'
+        return {
+            'User-Agent': self.user_agent,
             'Accept-Encoding': 'gzip, deflate',
-            'Host': 'www.sec.gov'
+            'Host': host
         }
 
     def get_company_cik(self, ticker: str) -> str:
-        """Get company CIK from ticker symbol."""
-        # Implementation placeholder - would use SEC EDGAR API
-        _ = ticker  # Acknowledge parameter until implementation
+        """
+        Get company CIK from ticker symbol using SEC EDGAR API.
+
+        Parameters:
+        -----------
+        ticker : str
+            Stock ticker symbol
+
+        Returns:
+        --------
+        str : CIK number (zero-padded to 10 digits) or None if not found
+        """
+        # Cache the ticker-to-CIK mapping
+        if not hasattr(self, '_cik_mapping'):
+            self._cik_mapping = self._load_cik_mapping()
+
+        ticker_upper = ticker.upper()
+        if ticker_upper in self._cik_mapping:
+            return self._cik_mapping[ticker_upper]
         return None
+
+    def _load_cik_mapping(self) -> Dict[str, str]:
+        """
+        Load ticker to CIK mapping from SEC.
+
+        Returns:
+        --------
+        Dict[str, str] : Mapping of ticker symbols to CIK numbers
+        """
+        cache_file = os.path.join(self.output_dir, 'ticker_cik_mapping.json')
+
+        # Check for cached mapping (refresh if older than 7 days)
+        if os.path.exists(cache_file):
+            file_age = time.time() - os.path.getmtime(cache_file)
+            if file_age < 7 * 24 * 60 * 60:  # 7 days
+                try:
+                    with open(cache_file, 'r') as f:
+                        print("Loading cached CIK mapping...")
+                        return json.load(f)
+                except Exception:
+                    pass
+
+        print("Downloading ticker-to-CIK mapping from SEC...")
+        try:
+            # SEC provides a JSON file with all company tickers and CIKs
+            url = "https://www.sec.gov/files/company_tickers.json"
+            response = requests.get(url, headers=self._get_headers(url))
+            time.sleep(0.2)
+
+            if response.status_code == 200:
+                data = response.json()
+                mapping = {}
+                for entry in data.values():
+                    ticker = entry.get('ticker', '').upper()
+                    cik = str(entry.get('cik_str', '')).zfill(10)
+                    if ticker and cik:
+                        mapping[ticker] = cik
+
+                # Cache the mapping
+                with open(cache_file, 'w') as f:
+                    json.dump(mapping, f)
+
+                print(f"Loaded {len(mapping)} ticker-to-CIK mappings")
+                return mapping
+            else:
+                print(f"Failed to download CIK mapping: HTTP {response.status_code}")
+                return {}
+        except Exception as e:
+            print(f"Error loading CIK mapping: {e}")
+            return {}
 
     def download_form4_filings(
         self,
         ticker: str,
         cik: str,
         start_date: str = '2000-01-01',
-        end_date: str = '2025-12-31'
+        end_date: str = '2025-12-31',
+        max_filings: int = 500
     ) -> List[Dict]:
         """
         Download all Form 4 filings for a company within date range.
+
+        Uses the SEC EDGAR JSON API for reliable data retrieval.
+
+        Parameters:
+        -----------
+        ticker : str
+            Stock ticker symbol
+        cik : str
+            SEC CIK number
+        start_date : str
+            Start date (YYYY-MM-DD)
+        end_date : str
+            End date (YYYY-MM-DD)
+        max_filings : int
+            Maximum number of filings to retrieve
 
         Returns:
         --------
@@ -472,58 +564,112 @@ class Form4Downloader:
         filings = []
 
         try:
-            cik_no_leading = str(int(cik))
-            url = (
-                f"https://www.sec.gov/cgi-bin/browse-edgar?"
-                f"action=getcompany&CIK={cik_no_leading}&type=4&"
-                f"dateb=&owner=include&count=100&search_text="
-            )
+            # Use the SEC JSON API for submissions
+            cik_padded = cik.zfill(10)
+            url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
 
-            response = requests.get(url, headers=self.headers)
-            time.sleep(0.2)
+            response = requests.get(url, headers=self._get_headers(url))
+            time.sleep(0.15)
 
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                filing_table = soup.find('table', {'class': 'tableFile2'})
+            if response.status_code != 200:
+                print(f"  HTTP {response.status_code} for {ticker}")
+                return []
 
-                if not filing_table:
-                    print(f"  No Form 4 filings table found for {ticker}")
-                    return []
+            data = response.json()
 
-                rows = filing_table.find_all('tr')[1:]
+            # Get recent filings
+            recent_filings = data.get('filings', {}).get('recent', {})
+            forms = recent_filings.get('form', [])
+            dates = recent_filings.get('filingDate', [])
+            accessions = recent_filings.get('accessionNumber', [])
+            primary_docs = recent_filings.get('primaryDocument', [])
 
-                for row in rows:
-                    cols = row.find_all('td')
-                    if len(cols) >= 4:
-                        filing_type = cols[0].text.strip()
+            # Process each filing
+            for i, form in enumerate(forms):
+                if form in ['4', '4/A']:  # Form 4 and amendments
+                    if i >= len(dates):
+                        continue
 
-                        if filing_type == '4':
-                            filing_date = cols[3].text.strip()
+                    filing_date = dates[i]
 
-                            if start_date <= filing_date <= end_date:
-                                doc_link = cols[1].find('a')
-                                if doc_link:
-                                    doc_url = 'https://www.sec.gov' + doc_link.get('href')
-                                    accession = cols[4].text.strip()
+                    # Check date range
+                    if start_date <= filing_date <= end_date:
+                        accession = accessions[i].replace('-', '')
+                        primary_doc = primary_docs[i] if i < len(primary_docs) else ''
+
+                        # Construct the filing URL
+                        doc_url = (
+                            f"https://www.sec.gov/Archives/edgar/data/"
+                            f"{int(cik)}/{accession}/{primary_doc}"
+                        )
+
+                        filing_info = {
+                            'ticker': ticker,
+                            'cik': cik,
+                            'filing_date': filing_date,
+                            'accession_number': accessions[i],
+                            'filing_url': doc_url,
+                            'form_type': form
+                        }
+                        filings.append(filing_info)
+
+                        if len(filings) >= max_filings:
+                            break
+
+            # Also check older filings if available
+            older_files = data.get('filings', {}).get('files', [])
+            for file_info in older_files[:3]:  # Check up to 3 older filing batches
+                if len(filings) >= max_filings:
+                    break
+
+                file_url = f"https://data.sec.gov/submissions/{file_info.get('name', '')}"
+                try:
+                    file_response = requests.get(file_url, headers=self._get_headers(file_url))
+                    time.sleep(0.15)
+
+                    if file_response.status_code == 200:
+                        file_data = file_response.json()
+                        forms = file_data.get('form', [])
+                        dates = file_data.get('filingDate', [])
+                        accessions = file_data.get('accessionNumber', [])
+                        primary_docs = file_data.get('primaryDocument', [])
+
+                        for i, form in enumerate(forms):
+                            if form in ['4', '4/A']:
+                                if i >= len(dates):
+                                    continue
+
+                                filing_date = dates[i]
+                                if start_date <= filing_date <= end_date:
+                                    accession = accessions[i].replace('-', '')
+                                    primary_doc = primary_docs[i] if i < len(primary_docs) else ''
+
+                                    doc_url = (
+                                        f"https://www.sec.gov/Archives/edgar/data/"
+                                        f"{int(cik)}/{accession}/{primary_doc}"
+                                    )
 
                                     filing_info = {
                                         'ticker': ticker,
                                         'cik': cik,
                                         'filing_date': filing_date,
-                                        'accession_number': accession,
-                                        'filing_url': doc_url
+                                        'accession_number': accessions[i],
+                                        'filing_url': doc_url,
+                                        'form_type': form
                                     }
                                     filings.append(filing_info)
 
-                if len(filings) > 0:
-                    print(f"  Found {len(filings)} Form 4 filings for {ticker}")
-                else:
-                    print(f"  No Form 4 filings in date range for {ticker}")
+                                    if len(filings) >= max_filings:
+                                        break
+                except Exception:
+                    continue
 
-                return filings
+            if len(filings) > 0:
+                print(f"  Found {len(filings)} Form 4 filings for {ticker}")
             else:
-                print(f"  HTTP {response.status_code} for {ticker}")
-                return []
+                print(f"  No Form 4 filings in date range for {ticker}")
+
+            return filings
 
         except Exception as e:
             print(f"  Error downloading Form 4 filings for {ticker}: {e}")
@@ -538,7 +684,7 @@ class Form4Downloader:
         List[Dict] : Parsed transaction data
         """
         try:
-            response = requests.get(filing_url, headers=self.headers)
+            response = requests.get(filing_url, headers=self._get_headers(filing_url))
             time.sleep(0.2)
         except Exception as e:
             print(f"Error fetching filing page: {e}")
@@ -566,7 +712,7 @@ class Form4Downloader:
             return []
 
         # Fetch and parse the XML
-        xml_response = requests.get(xml_link, headers=self.headers)
+        xml_response = requests.get(xml_link, headers=self._get_headers(xml_link))
         time.sleep(0.2)
 
         if xml_response.status_code != 200:
