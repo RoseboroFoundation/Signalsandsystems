@@ -53,6 +53,11 @@ This module provides functions to:
     * Jobless claims (Initial Claims, Continuing Claims, Insured Unemployment Rate)
     * Wages and hours (Average Hourly Earnings, Weekly Hours, ECI, Unit Labor Costs)
     * JOLTS data (Job Openings, Hires, Quits, Layoffs, Separations)
+- Load Additional Macro data from FRED (2000-2025):
+    * Consumer Sentiment (University of Michigan)
+    * Housing Starts
+    * Home Price Index (Case-Shiller)
+    * Dollar Index (Trade Weighted)
 """
 
 # =============================================================================
@@ -5068,6 +5073,7 @@ def load_data():
         - wages_hours: Average earnings, hours worked, labor costs
         - jolts_data: Job openings, hires, quits, separations
         - comprehensive_employment: All employment measures combined
+        - additional_macro: Consumer Sentiment, Housing, Dollar Index
     """
     data_dict = {}
 
@@ -5420,7 +5426,210 @@ def load_data():
         print(f"Error loading comprehensive employment data: {e}")
         data_dict['comprehensive_employment'] = None
 
+    # Load additional macro data (Consumer Sentiment, Housing, Dollar Index)
+    try:
+        data_dict['additional_macro'] = load_additional_macro_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded additional macro data")
+    except Exception as e:
+        print(f"Error loading additional macro data: {e}")
+        data_dict['additional_macro'] = None
+
     return data_dict
+
+
+# =============================================================================
+# DATA CLEANING FUNCTIONS
+# =============================================================================
+def clean_dataframe(df, method='ffill', max_gap=5):
+    """
+    Clean a single DataFrame by handling missing values and standardizing format.
+
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame to clean
+    method : str
+        Method for filling missing values: 'ffill', 'bfill', 'interpolate', 'drop'
+    max_gap : int
+        Maximum consecutive NaN values to fill (prevents filling large gaps)
+
+    Returns:
+    --------
+    pd.DataFrame : Cleaned DataFrame
+    """
+    if df is None or (hasattr(df, 'empty') and df.empty):
+        return df
+
+    # Make a copy to avoid modifying the original
+    cleaned = df.copy()
+
+    # Ensure datetime index if applicable
+    if hasattr(cleaned, 'index') and not isinstance(cleaned.index, pd.DatetimeIndex):
+        try:
+            if cleaned.index.dtype == 'object':
+                cleaned.index = pd.to_datetime(cleaned.index, errors='coerce')
+        except Exception:
+            pass
+
+    # Sort by index if datetime
+    if isinstance(cleaned.index, pd.DatetimeIndex):
+        cleaned = cleaned.sort_index()
+
+    # Handle missing values based on method
+    if method == 'ffill':
+        cleaned = cleaned.ffill(limit=max_gap)
+    elif method == 'bfill':
+        cleaned = cleaned.bfill(limit=max_gap)
+    elif method == 'interpolate':
+        cleaned = cleaned.interpolate(method='time', limit=max_gap)
+    elif method == 'drop':
+        cleaned = cleaned.dropna()
+
+    # Remove any remaining rows that are entirely NaN
+    cleaned = cleaned.dropna(how='all')
+
+    return cleaned
+
+
+def clean_all_data(data_dict, verbose=True):
+    """
+    Clean all datasets in the data dictionary.
+
+    Applies appropriate cleaning methods to each dataset type:
+    - Time series data: forward fill with interpolation for small gaps
+    - Stock data: forward fill (markets closed on weekends/holidays)
+    - Cross-sectional data: drop missing values
+
+    Parameters:
+    -----------
+    data_dict : dict
+        Dictionary of datasets from load_data()
+    verbose : bool
+        If True, print cleaning summary
+
+    Returns:
+    --------
+    dict : Dictionary of cleaned datasets
+    """
+    if verbose:
+        print("\n" + "=" * 60)
+        print("=== Cleaning All Datasets ===")
+        print("=" * 60)
+
+    cleaned_dict = {}
+
+    # Define cleaning strategies for each dataset type
+    time_series_keys = [
+        'inflationdata', 'inflation_expectations', 'comprehensive_inflation',
+        'treasury_yields', 'policy_rates', 'credit_spreads', 'comprehensive_rates',
+        'industrial_production', 'ip_growth', 'comprehensive_ip',
+        'money_supply', 'money_velocity', 'fed_balance_sheet', 'comprehensive_m2',
+        'gdp_data', 'gdp_components', 'gdp_industry', 'comprehensive_gdp',
+        'employment_data', 'jobless_claims', 'wages_hours', 'jolts_data',
+        'comprehensive_employment', 'additional_macro', 'vixdata'
+    ]
+
+    for key, data in data_dict.items():
+        if data is None:
+            cleaned_dict[key] = None
+            if verbose:
+                print(f"  {key}: Skipped (None)")
+            continue
+
+        try:
+            if key == 'stockdata':
+                # Stock data is a dict of DataFrames
+                if isinstance(data, dict):
+                    cleaned_stocks = {}
+                    for ticker, stock_df in data.items():
+                        if stock_df is not None and not stock_df.empty:
+                            cleaned_stocks[ticker] = clean_dataframe(stock_df, method='ffill')
+                    cleaned_dict[key] = cleaned_stocks
+                    if verbose:
+                        print(f"  {key}: Cleaned {len(cleaned_stocks)} ticker DataFrames")
+                else:
+                    cleaned_dict[key] = data
+
+            elif key == 'ff_factors':
+                # Fama-French factors is a dict of DataFrames
+                if isinstance(data, dict):
+                    cleaned_ff = {}
+                    for factor_name, factor_df in data.items():
+                        if factor_df is not None and hasattr(factor_df, 'empty') and not factor_df.empty:
+                            cleaned_ff[factor_name] = clean_dataframe(factor_df, method='ffill')
+                        else:
+                            cleaned_ff[factor_name] = factor_df
+                    cleaned_dict[key] = cleaned_ff
+                    if verbose:
+                        print(f"  {key}: Cleaned {len(cleaned_ff)} factor DataFrames")
+                else:
+                    cleaned_dict[key] = data
+
+            elif key in time_series_keys:
+                # Handle dict of DataFrames or single DataFrame
+                if isinstance(data, dict):
+                    cleaned_ts = {}
+                    for sub_key, sub_df in data.items():
+                        if sub_df is not None and hasattr(sub_df, 'empty') and not sub_df.empty:
+                            cleaned_ts[sub_key] = clean_dataframe(sub_df, method='ffill')
+                        else:
+                            cleaned_ts[sub_key] = sub_df
+                    cleaned_dict[key] = cleaned_ts
+                    if verbose:
+                        print(f"  {key}: Cleaned {len(cleaned_ts)} sub-DataFrames")
+                elif isinstance(data, pd.DataFrame):
+                    cleaned_dict[key] = clean_dataframe(data, method='ffill')
+                    if verbose:
+                        orig_nulls = data.isnull().sum().sum()
+                        new_nulls = cleaned_dict[key].isnull().sum().sum() if cleaned_dict[key] is not None else 0
+                        print(f"  {key}: Cleaned (NaN: {orig_nulls} -> {new_nulls})")
+                else:
+                    cleaned_dict[key] = data
+
+            elif key in ['culturewardata', 'newsdata', 'form4data']:
+                # Cross-sectional data - keep as is (already cleaned during load)
+                cleaned_dict[key] = data
+                if verbose:
+                    if isinstance(data, pd.DataFrame):
+                        print(f"  {key}: Kept as-is ({data.shape[0]} rows)")
+                    else:
+                        print(f"  {key}: Kept as-is")
+
+            else:
+                # Unknown data type - keep as is
+                cleaned_dict[key] = data
+                if verbose:
+                    print(f"  {key}: Kept as-is (unknown type)")
+
+        except Exception as e:
+            print(f"  {key}: Error during cleaning - {e}")
+            cleaned_dict[key] = data
+
+    if verbose:
+        print("\n" + "=" * 60)
+        print("Data cleaning complete!")
+        print("=" * 60)
+
+    return cleaned_dict
+
+
+def get_clean_data():
+    """
+    Load all data and apply cleaning.
+
+    This is a convenience function that calls load_data() followed by clean_all_data().
+
+    Returns:
+    --------
+    dict : Dictionary of cleaned datasets
+    """
+    data_dict = load_data()
+    cleaned_dict = clean_all_data(data_dict, verbose=True)
+    return cleaned_dict
 
 
 # =============================================================================
@@ -5549,9 +5758,9 @@ def get_news_for_ticker(data_dict, ticker, days_window=30):
 # =============================================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("Loading all datasets...")
+    print("Loading and cleaning all datasets...")
     print("=" * 60)
-    data_dict = load_data()
+    data_dict = get_clean_data()
 
     # Print summary
     print("\n" + "=" * 60)
