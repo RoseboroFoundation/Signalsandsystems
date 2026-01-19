@@ -8,7 +8,23 @@ This module provides functions to:
 - Download Fama-French factor data
 - Download SEC Form 4 insider trading data
 - Aggregate news from Guardian, NYT, and Reddit
-- Load inflation and macroeconomic data from FRED
+- Load inflation and macroeconomic data from FRED (2000-2025):
+    * Core inflation measures (CPI, Core CPI, PCE, Core PCE, PPI, GDP Deflator)
+    * Breakeven inflation rates (5Y, 10Y, 5Y5Y Forward)
+    * Survey-based expectations (U of Michigan 1Y & 5Y)
+    * Federal Reserve measures (Dallas Trimmed Mean PCE, Atlanta Sticky/Flexible CPI,
+      Cleveland Median CPI, Cleveland 16% Trimmed Mean CPI)
+    * Component-level inflation (Food, Energy, Shelter, Medical, Transportation, etc.)
+    * Import/Export price indices
+- Load interest rates data from FRED (2000-2025):
+    * Treasury yield curve (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 7Y, 10Y, 20Y, 30Y)
+    * TIPS real yields (5Y, 10Y, 20Y, 30Y)
+    * Federal Reserve policy rates (Fed Funds effective/target, Discount Rate)
+    * Money market rates (SOFR, Prime Rate, EFFR, Overnight Bank Funding)
+    * Corporate bond yields (Moody's AAA/BAA, ICE BofA IG/HY indices)
+    * Credit spreads (BAA-10Y, AAA-10Y, IG spread, HY spread, TED spread)
+    * Mortgage rates (30Y, 15Y, 5/1 ARM)
+    * Yield curve metrics (slope, curvature, inversion indicators)
 """
 
 # =============================================================================
@@ -1499,6 +1515,981 @@ def load_inflation_data(
         return None
 
 
+def load_inflation_expectations_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load inflation expectations and breakeven inflation data from FRED.
+
+    Provides forward-looking inflation measures:
+    - Breakeven Inflation: Market-implied inflation from TIPS spreads
+    - University of Michigan Inflation Expectations
+    - Cleveland Fed Inflation Expectations
+    - NY Fed Survey of Consumer Expectations
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'breakeven': Breakeven inflation rates (market-based)
+        - 'survey': Survey-based inflation expectations
+        - 'fed_measures': Federal Reserve inflation measures
+        - 'combined': All expectations in one DataFrame
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(
+        cache_path,
+        f'inflation_expectations_{start_date}_{end_date}.pkl'
+    )
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached inflation expectations from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading inflation expectations data from FRED...")
+
+    # Breakeven inflation rates (TIPS spreads)
+    breakeven_series = {
+        'Breakeven_5Y': 'T5YIE',       # 5-Year Breakeven Inflation Rate
+        'Breakeven_10Y': 'T10YIE',     # 10-Year Breakeven Inflation Rate
+        'Breakeven_5Y5Y': 'T5YIFR',    # 5-Year, 5-Year Forward Inflation Rate
+    }
+
+    # Survey-based expectations
+    survey_series = {
+        'UMich_Inflation_1Y': 'MICH',           # U of Michigan 1-Year Inflation Expectations
+        'UMich_Inflation_5Y': 'UMCSENT5',       # U of Michigan 5-Year Inflation Expectations (if available)
+    }
+
+    # Federal Reserve measures
+    fed_series = {
+        'Trimmed_Mean_PCE': 'PCETRIM12M159SFRBDAL',  # Dallas Fed Trimmed Mean PCE
+        'Sticky_Price_CPI': 'CORESTICKM159SFRBATL',  # Atlanta Fed Sticky Price CPI
+        'Flexible_Price_CPI': 'FLEXCPIM159SFRBATL',  # Atlanta Fed Flexible Price CPI
+        'Median_CPI': 'MEDCPIM158SFRBCLE',           # Cleveland Fed Median CPI
+        'CPI_Trimmed_Mean_16': 'TRMMEANCPIM158SFRBCLE',  # Cleveland Fed 16% Trimmed Mean CPI
+    }
+
+    try:
+        # Download breakeven inflation
+        print("\n--- Breakeven Inflation (Market-Based) ---")
+        breakeven_data = {}
+        for name, code in breakeven_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                breakeven_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        breakeven_df = pd.DataFrame(breakeven_data)
+
+        # Download survey expectations
+        print("\n--- Survey-Based Expectations ---")
+        survey_data = {}
+        for name, code in survey_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                survey_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        survey_df = pd.DataFrame(survey_data)
+
+        # Download Fed measures
+        print("\n--- Federal Reserve Inflation Measures ---")
+        fed_data = {}
+        for name, code in fed_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                fed_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        fed_df = pd.DataFrame(fed_data)
+
+        # Combine all data
+        combined_df = pd.concat([breakeven_df, survey_df, fed_df], axis=1)
+
+        result = {
+            'breakeven': breakeven_df,
+            'survey': survey_df,
+            'fed_measures': fed_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached inflation expectations to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Inflation Expectations Summary ===")
+        print("=" * 60)
+
+        if len(breakeven_df) > 0:
+            print(f"\nBreakeven Inflation (Market-Based):")
+            print(f"  Date range: {breakeven_df.index.min()} to {breakeven_df.index.max()}")
+            print(f"  Series: {list(breakeven_df.columns)}")
+            print(f"  Latest values:")
+            for col in breakeven_df.columns:
+                latest = breakeven_df[col].dropna().iloc[-1] if len(breakeven_df[col].dropna()) > 0 else 'N/A'
+                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+
+        if len(survey_df) > 0:
+            print(f"\nSurvey-Based Expectations:")
+            print(f"  Date range: {survey_df.index.min()} to {survey_df.index.max()}")
+            print(f"  Series: {list(survey_df.columns)}")
+            print(f"  Latest values:")
+            for col in survey_df.columns:
+                latest = survey_df[col].dropna().iloc[-1] if len(survey_df[col].dropna()) > 0 else 'N/A'
+                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+
+        if len(fed_df) > 0:
+            print(f"\nFederal Reserve Measures:")
+            print(f"  Date range: {fed_df.index.min()} to {fed_df.index.max()}")
+            print(f"  Series: {list(fed_df.columns)}")
+            print(f"  Latest values:")
+            for col in fed_df.columns:
+                latest = fed_df[col].dropna().iloc[-1] if len(fed_df[col].dropna()) > 0 else 'N/A'
+                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+
+        print("\n" + "=" * 60)
+        print("Citation:")
+        print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+        print("https://fred.stlouisfed.org/")
+        print("=" * 60)
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading inflation expectations data: {e}")
+        return None
+
+
+def load_comprehensive_inflation_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load comprehensive inflation dataset combining all inflation measures.
+
+    This function aggregates:
+    - Core inflation measures (CPI, PCE, PPI)
+    - Breakeven inflation rates (TIPS-based)
+    - Survey-based inflation expectations
+    - Federal Reserve alternative measures
+    - Component-level inflation data
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'core': Core inflation measures (CPI, PCE, PPI)
+        - 'expectations': Breakeven and survey expectations
+        - 'components': Component-level inflation
+        - 'combined': All measures merged on date
+        - 'summary_stats': Summary statistics for all series
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(
+        cache_path,
+        f'comprehensive_inflation_{start_date}_{end_date}.pkl'
+    )
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached comprehensive inflation data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("=" * 60)
+    print("Loading Comprehensive Inflation Data (2000-2025)")
+    print("=" * 60)
+
+    # Load core inflation data
+    print("\n[1/3] Loading core inflation measures...")
+    core_data = load_inflation_data(start_date, end_date, cache_path)
+
+    # Load expectations data
+    print("\n[2/3] Loading inflation expectations...")
+    expectations_data = load_inflation_expectations_data(start_date, end_date, cache_path)
+
+    # Load component-level inflation
+    print("\n[3/3] Loading component-level inflation...")
+    component_series = {
+        'CPI_Food': 'CPIUFDSL',              # CPI Food
+        'CPI_Energy': 'CPIENGSL',            # CPI Energy
+        'CPI_Shelter': 'CUSR0000SAH1',       # CPI Shelter
+        'CPI_Medical': 'CPIMEDSL',           # CPI Medical Care
+        'CPI_Transportation': 'CPITRNSL',    # CPI Transportation
+        'CPI_Apparel': 'CPIAPPSL',           # CPI Apparel
+        'CPI_Education': 'CUSR0000SAE1',     # CPI Education
+        'CPI_Services': 'CUSR0000SAS',       # CPI Services
+        'CPI_Commodities': 'CUSR0000SAC',    # CPI Commodities less food & energy
+        'Import_Prices': 'IR',               # Import Price Index
+        'Export_Prices': 'IQ',               # Export Price Index
+    }
+
+    component_data = {}
+    for name, code in component_series.items():
+        try:
+            print(f"  Downloading {name} ({code})...")
+            df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+            component_data[name] = df.iloc[:, 0]
+        except Exception as e:
+            print(f"  Warning: Could not download {name}: {e}")
+
+    components_df = pd.DataFrame(component_data)
+
+    # Calculate YoY changes for components
+    components_yoy = components_df.pct_change(periods=12) * 100
+    components_yoy.columns = [f'{col}_YoY' for col in components_yoy.columns]
+
+    # Combine all data
+    combined_dfs = []
+
+    if core_data and 'combined' in core_data:
+        combined_dfs.append(core_data['combined'])
+
+    if expectations_data and 'combined' in expectations_data:
+        combined_dfs.append(expectations_data['combined'])
+
+    if len(components_yoy) > 0:
+        combined_dfs.append(components_yoy)
+
+    if combined_dfs:
+        combined_df = pd.concat(combined_dfs, axis=1)
+        # Remove duplicate columns if any
+        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+    else:
+        combined_df = pd.DataFrame()
+
+    # Calculate summary statistics
+    summary_stats = {}
+    if len(combined_df) > 0:
+        for col in combined_df.columns:
+            series = combined_df[col].dropna()
+            if len(series) > 0:
+                summary_stats[col] = {
+                    'count': len(series),
+                    'mean': series.mean(),
+                    'std': series.std(),
+                    'min': series.min(),
+                    'max': series.max(),
+                    'latest': series.iloc[-1],
+                    'start_date': series.index.min(),
+                    'end_date': series.index.max()
+                }
+
+    result = {
+        'core': core_data,
+        'expectations': expectations_data,
+        'components': {
+            'raw': components_df,
+            'yoy': components_yoy
+        },
+        'combined': combined_df,
+        'summary_stats': summary_stats
+    }
+
+    pd.to_pickle(result, cache_file)
+    print(f"\nCached comprehensive inflation data to {cache_file}")
+
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("=== Comprehensive Inflation Data Summary ===")
+    print("=" * 60)
+    print(f"Total series loaded: {len(combined_df.columns)}")
+    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+    print(f"Total observations: {len(combined_df)}")
+
+    print("\n--- Series Categories ---")
+    print(f"Core inflation measures: {len(core_data['combined'].columns) if core_data else 0}")
+    print(f"Expectations measures: {len(expectations_data['combined'].columns) if expectations_data else 0}")
+    print(f"Component measures: {len(components_yoy.columns)}")
+
+    return result
+
+
+# =============================================================================
+# RATES DATA
+# =============================================================================
+def load_treasury_yields(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load Treasury yield curve data from FRED (2000-2025).
+
+    Provides the complete Treasury yield curve:
+    - Short-term: 1M, 3M, 6M
+    - Medium-term: 1Y, 2Y, 3Y, 5Y, 7Y
+    - Long-term: 10Y, 20Y, 30Y
+    - Inflation-indexed: 5Y TIPS, 10Y TIPS, 20Y TIPS, 30Y TIPS
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'nominal': Nominal Treasury yields
+        - 'real': TIPS (real) yields
+        - 'combined': All yields in one DataFrame
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'treasury_yields_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached Treasury yields from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading Treasury yield data from FRED...")
+
+    # Nominal Treasury yields
+    nominal_series = {
+        'Treasury_1M': 'DGS1MO',    # 1-Month Treasury
+        'Treasury_3M': 'DGS3MO',    # 3-Month Treasury
+        'Treasury_6M': 'DGS6MO',    # 6-Month Treasury
+        'Treasury_1Y': 'DGS1',      # 1-Year Treasury
+        'Treasury_2Y': 'DGS2',      # 2-Year Treasury
+        'Treasury_3Y': 'DGS3',      # 3-Year Treasury
+        'Treasury_5Y': 'DGS5',      # 5-Year Treasury
+        'Treasury_7Y': 'DGS7',      # 7-Year Treasury
+        'Treasury_10Y': 'DGS10',    # 10-Year Treasury
+        'Treasury_20Y': 'DGS20',    # 20-Year Treasury
+        'Treasury_30Y': 'DGS30',    # 30-Year Treasury
+    }
+
+    # TIPS (Treasury Inflation-Protected Securities)
+    tips_series = {
+        'TIPS_5Y': 'DFII5',         # 5-Year TIPS
+        'TIPS_10Y': 'DFII10',       # 10-Year TIPS
+        'TIPS_20Y': 'DFII20',       # 20-Year TIPS
+        'TIPS_30Y': 'DFII30',       # 30-Year TIPS
+    }
+
+    try:
+        # Download nominal yields
+        print("\n--- Nominal Treasury Yields ---")
+        nominal_data = {}
+        for name, code in nominal_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                nominal_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        nominal_df = pd.DataFrame(nominal_data)
+
+        # Download TIPS yields
+        print("\n--- TIPS (Real) Yields ---")
+        tips_data = {}
+        for name, code in tips_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                tips_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        tips_df = pd.DataFrame(tips_data)
+
+        # Combine all yields
+        combined_df = pd.concat([nominal_df, tips_df], axis=1)
+
+        result = {
+            'nominal': nominal_df,
+            'real': tips_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached Treasury yields to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Treasury Yields Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Nominal series: {len(nominal_df.columns)}")
+        print(f"TIPS series: {len(tips_df.columns)}")
+
+        print("\nLatest yields (%):")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            print(f"  {col}: {latest:.2f}%" if isinstance(latest, float) else f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading Treasury yields: {e}")
+        return None
+
+
+def load_policy_rates(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load Federal Reserve policy rates and money market rates from FRED.
+
+    Includes:
+    - Federal Funds Rate (effective and target)
+    - Discount Rate
+    - SOFR (Secured Overnight Financing Rate)
+    - Prime Rate
+    - Reserve Balances
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'fed_funds': Federal Funds rates
+        - 'money_market': Money market rates
+        - 'combined': All policy rates
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'policy_rates_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached policy rates from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading policy rates from FRED...")
+
+    # Federal Funds and discount rates
+    fed_series = {
+        'Fed_Funds_Effective': 'DFF',           # Daily Effective Federal Funds Rate
+        'Fed_Funds_Target_Upper': 'DFEDTARU',   # Fed Funds Target Range Upper
+        'Fed_Funds_Target_Lower': 'DFEDTARL',   # Fed Funds Target Range Lower
+        'Discount_Rate': 'INTDSRUSM193N',       # Discount Rate
+    }
+
+    # Money market rates
+    money_market_series = {
+        'SOFR': 'SOFR',                         # Secured Overnight Financing Rate
+        'Prime_Rate': 'DPRIME',                 # Bank Prime Loan Rate
+        'Overnight_Bank_Funding': 'OBFR',       # Overnight Bank Funding Rate
+        'EFFR': 'EFFR',                         # Effective Federal Funds Rate (daily)
+    }
+
+    try:
+        # Download Fed Funds rates
+        print("\n--- Federal Funds & Discount Rates ---")
+        fed_data = {}
+        for name, code in fed_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                fed_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        fed_df = pd.DataFrame(fed_data)
+
+        # Download money market rates
+        print("\n--- Money Market Rates ---")
+        mm_data = {}
+        for name, code in money_market_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                mm_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        mm_df = pd.DataFrame(mm_data)
+
+        # Combine all rates
+        combined_df = pd.concat([fed_df, mm_df], axis=1)
+
+        result = {
+            'fed_funds': fed_df,
+            'money_market': mm_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached policy rates to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Policy Rates Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+
+        print("\nLatest rates (%):")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            print(f"  {col}: {latest:.2f}%" if isinstance(latest, float) else f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading policy rates: {e}")
+        return None
+
+
+def load_credit_spreads(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load credit spreads and corporate bond yields from FRED.
+
+    Includes:
+    - Investment Grade: AAA, AA, A, BBB corporate yields
+    - High Yield: BB, B, CCC corporate yields
+    - Credit Spreads: Investment grade and high yield spreads
+    - Mortgage rates: 30Y and 15Y fixed
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'corporate': Corporate bond yields
+        - 'spreads': Credit spreads
+        - 'mortgage': Mortgage rates
+        - 'combined': All credit data
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(cache_path, f'credit_spreads_{start_date}_{end_date}.pkl')
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached credit spreads from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("Downloading credit spreads and corporate yields from FRED...")
+
+    # Corporate bond yields
+    corporate_series = {
+        'Moodys_AAA': 'AAA',                    # Moody's AAA Corporate Bond Yield
+        'Moodys_BAA': 'BAA',                    # Moody's BAA Corporate Bond Yield
+        'ICE_BofA_AAA': 'BAMLC0A1CAAAEY',       # ICE BofA AAA Corporate Index Yield
+        'ICE_BofA_AA': 'BAMLC0A2CAAEY',         # ICE BofA AA Corporate Index Yield
+        'ICE_BofA_A': 'BAMLC0A3CAEY',           # ICE BofA A Corporate Index Yield
+        'ICE_BofA_BBB': 'BAMLC0A4CBBBEY',       # ICE BofA BBB Corporate Index Yield
+        'ICE_BofA_HighYield': 'BAMLH0A0HYM2EY', # ICE BofA High Yield Index Yield
+    }
+
+    # Credit spreads
+    spread_series = {
+        'BAA_10Y_Spread': 'BAA10Y',             # BAA - 10Y Treasury Spread
+        'AAA_10Y_Spread': 'AAA10Y',             # AAA - 10Y Treasury Spread
+        'IG_Spread': 'BAMLC0A0CM',              # Investment Grade Corporate Spread
+        'HY_Spread': 'BAMLH0A0HYM2',            # High Yield Corporate Spread
+        'TED_Spread': 'TEDRATE',                # TED Spread (3M LIBOR - 3M T-Bill)
+    }
+
+    # Mortgage rates
+    mortgage_series = {
+        'Mortgage_30Y': 'MORTGAGE30US',         # 30-Year Fixed Mortgage Rate
+        'Mortgage_15Y': 'MORTGAGE15US',         # 15-Year Fixed Mortgage Rate
+        'Mortgage_5Y_ARM': 'MORTGAGE5US',       # 5/1-Year ARM Rate
+    }
+
+    try:
+        # Download corporate yields
+        print("\n--- Corporate Bond Yields ---")
+        corp_data = {}
+        for name, code in corporate_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                corp_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        corp_df = pd.DataFrame(corp_data)
+
+        # Download credit spreads
+        print("\n--- Credit Spreads ---")
+        spread_data = {}
+        for name, code in spread_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                spread_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        spread_df = pd.DataFrame(spread_data)
+
+        # Download mortgage rates
+        print("\n--- Mortgage Rates ---")
+        mortgage_data = {}
+        for name, code in mortgage_series.items():
+            try:
+                print(f"  Downloading {name} ({code})...")
+                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+                mortgage_data[name] = df.iloc[:, 0]
+            except Exception as e:
+                print(f"  Warning: Could not download {name}: {e}")
+
+        mortgage_df = pd.DataFrame(mortgage_data)
+
+        # Combine all data
+        combined_df = pd.concat([corp_df, spread_df, mortgage_df], axis=1)
+
+        result = {
+            'corporate': corp_df,
+            'spreads': spread_df,
+            'mortgage': mortgage_df,
+            'combined': combined_df
+        }
+
+        pd.to_pickle(result, cache_file)
+        print(f"\nCached credit spreads to {cache_file}")
+
+        # Print summary
+        print("\n" + "=" * 60)
+        print("=== Credit Spreads Summary ===")
+        print("=" * 60)
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+        print(f"Observations: {len(combined_df)}")
+        print(f"Corporate yields: {len(corp_df.columns)}")
+        print(f"Credit spreads: {len(spread_df.columns)}")
+        print(f"Mortgage rates: {len(mortgage_df.columns)}")
+
+        print("\nLatest values:")
+        for col in combined_df.columns:
+            latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
+            if isinstance(latest, float):
+                unit = "bps" if "Spread" in col and latest > 10 else "%"
+                print(f"  {col}: {latest:.2f}{unit}")
+            else:
+                print(f"  {col}: {latest}")
+
+        return result
+
+    except Exception as e:
+        print(f"Error downloading credit spreads: {e}")
+        return None
+
+
+def calculate_yield_curve_metrics(treasury_data):
+    """
+    Calculate yield curve metrics from Treasury data.
+
+    Metrics calculated:
+    - Yield curve slope (10Y - 2Y, 10Y - 3M)
+    - Yield curve curvature (butterfly spread)
+    - Inversion indicators
+    - Term premium proxies
+
+    Parameters:
+    -----------
+    treasury_data : dict
+        Output from load_treasury_yields()
+
+    Returns:
+    --------
+    pd.DataFrame : Yield curve metrics
+    """
+    if treasury_data is None or 'nominal' not in treasury_data:
+        print("Treasury data not available")
+        return None
+
+    nominal = treasury_data['nominal']
+    metrics = pd.DataFrame(index=nominal.index)
+
+    print("Calculating yield curve metrics...")
+
+    # Yield curve slopes
+    if 'Treasury_10Y' in nominal.columns and 'Treasury_2Y' in nominal.columns:
+        metrics['Slope_10Y_2Y'] = nominal['Treasury_10Y'] - nominal['Treasury_2Y']
+        print("  Calculated 10Y-2Y slope")
+
+    if 'Treasury_10Y' in nominal.columns and 'Treasury_3M' in nominal.columns:
+        metrics['Slope_10Y_3M'] = nominal['Treasury_10Y'] - nominal['Treasury_3M']
+        print("  Calculated 10Y-3M slope")
+
+    if 'Treasury_30Y' in nominal.columns and 'Treasury_5Y' in nominal.columns:
+        metrics['Slope_30Y_5Y'] = nominal['Treasury_30Y'] - nominal['Treasury_5Y']
+        print("  Calculated 30Y-5Y slope")
+
+    if 'Treasury_2Y' in nominal.columns and 'Treasury_3M' in nominal.columns:
+        metrics['Slope_2Y_3M'] = nominal['Treasury_2Y'] - nominal['Treasury_3M']
+        print("  Calculated 2Y-3M slope")
+
+    # Yield curve curvature (butterfly spread)
+    if all(col in nominal.columns for col in ['Treasury_2Y', 'Treasury_5Y', 'Treasury_10Y']):
+        metrics['Curvature_2_5_10'] = (
+            2 * nominal['Treasury_5Y'] -
+            nominal['Treasury_2Y'] -
+            nominal['Treasury_10Y']
+        )
+        print("  Calculated 2-5-10 curvature (butterfly)")
+
+    if all(col in nominal.columns for col in ['Treasury_3M', 'Treasury_2Y', 'Treasury_10Y']):
+        metrics['Curvature_3M_2Y_10Y'] = (
+            2 * nominal['Treasury_2Y'] -
+            nominal['Treasury_3M'] -
+            nominal['Treasury_10Y']
+        )
+        print("  Calculated 3M-2Y-10Y curvature")
+
+    # Inversion indicators
+    if 'Slope_10Y_2Y' in metrics.columns:
+        metrics['Inverted_10Y_2Y'] = (metrics['Slope_10Y_2Y'] < 0).astype(int)
+        print("  Calculated 10Y-2Y inversion indicator")
+
+    if 'Slope_10Y_3M' in metrics.columns:
+        metrics['Inverted_10Y_3M'] = (metrics['Slope_10Y_3M'] < 0).astype(int)
+        print("  Calculated 10Y-3M inversion indicator")
+
+    # Near-term forward spread (recession predictor)
+    if 'Treasury_3M' in nominal.columns and 'Treasury_1Y' in nominal.columns:
+        # 18-month forward 3-month rate minus current 3-month rate (approximation)
+        metrics['Near_Term_Forward_Spread'] = nominal['Treasury_1Y'] - nominal['Treasury_3M']
+        print("  Calculated near-term forward spread")
+
+    # Level (average of key tenors)
+    if all(col in nominal.columns for col in ['Treasury_2Y', 'Treasury_5Y', 'Treasury_10Y']):
+        metrics['Curve_Level'] = (
+            nominal['Treasury_2Y'] +
+            nominal['Treasury_5Y'] +
+            nominal['Treasury_10Y']
+        ) / 3
+        print("  Calculated curve level")
+
+    # Print summary
+    print("\n" + "=" * 60)
+    print("=== Yield Curve Metrics Summary ===")
+    print("=" * 60)
+    print(f"Metrics calculated: {len(metrics.columns)}")
+    print(f"Date range: {metrics.index.min()} to {metrics.index.max()}")
+
+    print("\nLatest values:")
+    for col in metrics.columns:
+        latest = metrics[col].dropna().iloc[-1] if len(metrics[col].dropna()) > 0 else 'N/A'
+        if isinstance(latest, (int, float)):
+            if 'Inverted' in col:
+                print(f"  {col}: {'Yes' if latest == 1 else 'No'}")
+            else:
+                print(f"  {col}: {latest:.2f}%")
+        else:
+            print(f"  {col}: {latest}")
+
+    # Inversion statistics
+    if 'Inverted_10Y_2Y' in metrics.columns:
+        inversion_pct = metrics['Inverted_10Y_2Y'].mean() * 100
+        print(f"\n10Y-2Y Inversion frequency: {inversion_pct:.1f}% of observations")
+
+    if 'Inverted_10Y_3M' in metrics.columns:
+        inversion_pct = metrics['Inverted_10Y_3M'].mean() * 100
+        print(f"10Y-3M Inversion frequency: {inversion_pct:.1f}% of observations")
+
+    return metrics
+
+
+def load_comprehensive_rates_data(
+    start_date='2000-01-01',
+    end_date=None,
+    cache_path='./data/fred'
+):
+    """
+    Load comprehensive interest rates dataset from FRED (2000-2025).
+
+    This function aggregates:
+    - Treasury yield curve (1M to 30Y)
+    - TIPS (real) yields
+    - Federal Reserve policy rates
+    - Money market rates (SOFR, Prime)
+    - Corporate bond yields (IG and HY)
+    - Credit spreads
+    - Mortgage rates
+    - Yield curve metrics (slope, curvature, inversion)
+
+    Parameters:
+    -----------
+    start_date : str
+        Start date in 'YYYY-MM-DD' format
+    end_date : str
+        End date in 'YYYY-MM-DD' format (defaults to today)
+    cache_path : str
+        Directory to cache downloaded data
+
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'treasury': Treasury yields (nominal and TIPS)
+        - 'policy': Fed Funds and money market rates
+        - 'credit': Corporate yields, spreads, mortgages
+        - 'curve_metrics': Yield curve slope, curvature, inversion
+        - 'combined': All rates merged on date
+        - 'summary_stats': Summary statistics for all series
+    """
+    if end_date is None:
+        end_date = datetime.today().strftime('%Y-%m-%d')
+
+    os.makedirs(cache_path, exist_ok=True)
+    cache_file = os.path.join(
+        cache_path,
+        f'comprehensive_rates_{start_date}_{end_date}.pkl'
+    )
+
+    if os.path.exists(cache_file):
+        print(f"Loading cached comprehensive rates data from {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print("=" * 60)
+    print("Loading Comprehensive Rates Data (2000-2025)")
+    print("=" * 60)
+
+    # Load Treasury yields
+    print("\n[1/4] Loading Treasury yields...")
+    treasury_data = load_treasury_yields(start_date, end_date, cache_path)
+
+    # Load policy rates
+    print("\n[2/4] Loading policy rates...")
+    policy_data = load_policy_rates(start_date, end_date, cache_path)
+
+    # Load credit spreads
+    print("\n[3/4] Loading credit spreads...")
+    credit_data = load_credit_spreads(start_date, end_date, cache_path)
+
+    # Calculate yield curve metrics
+    print("\n[4/4] Calculating yield curve metrics...")
+    curve_metrics = calculate_yield_curve_metrics(treasury_data)
+
+    # Combine all data
+    combined_dfs = []
+
+    if treasury_data and 'combined' in treasury_data:
+        combined_dfs.append(treasury_data['combined'])
+
+    if policy_data and 'combined' in policy_data:
+        combined_dfs.append(policy_data['combined'])
+
+    if credit_data and 'combined' in credit_data:
+        combined_dfs.append(credit_data['combined'])
+
+    if curve_metrics is not None and len(curve_metrics) > 0:
+        combined_dfs.append(curve_metrics)
+
+    if combined_dfs:
+        combined_df = pd.concat(combined_dfs, axis=1)
+        # Remove duplicate columns if any
+        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+    else:
+        combined_df = pd.DataFrame()
+
+    # Calculate summary statistics
+    summary_stats = {}
+    if len(combined_df) > 0:
+        for col in combined_df.columns:
+            series = combined_df[col].dropna()
+            if len(series) > 0:
+                summary_stats[col] = {
+                    'count': len(series),
+                    'mean': series.mean(),
+                    'std': series.std(),
+                    'min': series.min(),
+                    'max': series.max(),
+                    'latest': series.iloc[-1],
+                    'start_date': series.index.min(),
+                    'end_date': series.index.max()
+                }
+
+    result = {
+        'treasury': treasury_data,
+        'policy': policy_data,
+        'credit': credit_data,
+        'curve_metrics': curve_metrics,
+        'combined': combined_df,
+        'summary_stats': summary_stats
+    }
+
+    pd.to_pickle(result, cache_file)
+    print(f"\nCached comprehensive rates data to {cache_file}")
+
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("=== Comprehensive Rates Data Summary ===")
+    print("=" * 60)
+    print(f"Total series loaded: {len(combined_df.columns)}")
+    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
+    print(f"Total observations: {len(combined_df)}")
+
+    print("\n--- Series Categories ---")
+    print(f"Treasury yields: {len(treasury_data['combined'].columns) if treasury_data else 0}")
+    print(f"Policy rates: {len(policy_data['combined'].columns) if policy_data else 0}")
+    print(f"Credit/Mortgage: {len(credit_data['combined'].columns) if credit_data else 0}")
+    print(f"Curve metrics: {len(curve_metrics.columns) if curve_metrics is not None else 0}")
+
+    print("\n" + "=" * 60)
+    print("Citation:")
+    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    print("https://fred.stlouisfed.org/")
+    print("=" * 60)
+
+    return result
+
+
 def load_additional_macro_data(
     start_date='2000-01-01',
     end_date=None,
@@ -1784,6 +2775,12 @@ def load_data():
         - form4data: SEC Form 4 insider trading
         - newsdata: News articles from Guardian, NYT, Reddit
         - inflationdata: Inflation measures from FRED
+        - inflation_expectations: Breakeven inflation & survey expectations
+        - comprehensive_inflation: All inflation measures combined
+        - treasury_yields: Treasury yield curve (1M to 30Y, TIPS)
+        - policy_rates: Fed Funds, SOFR, Prime, discount rates
+        - credit_spreads: Corporate yields, credit spreads, mortgages
+        - comprehensive_rates: All rates with yield curve metrics
     """
     data_dict = {}
 
@@ -1860,7 +2857,7 @@ def load_data():
         print(f"Error loading news data: {e}")
         data_dict['newsdata'] = None
 
-    # Load inflation data
+    # Load inflation data (core measures)
     try:
         data_dict['inflationdata'] = load_inflation_data(
             start_date='2000-01-01',
@@ -1871,6 +2868,78 @@ def load_data():
     except Exception as e:
         print(f"Error loading inflation data: {e}")
         data_dict['inflationdata'] = None
+
+    # Load inflation expectations (breakeven, surveys, Fed measures)
+    try:
+        data_dict['inflation_expectations'] = load_inflation_expectations_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded inflation expectations data")
+    except Exception as e:
+        print(f"Error loading inflation expectations data: {e}")
+        data_dict['inflation_expectations'] = None
+
+    # Load comprehensive inflation data (all measures combined)
+    try:
+        data_dict['comprehensive_inflation'] = load_comprehensive_inflation_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded comprehensive inflation data")
+    except Exception as e:
+        print(f"Error loading comprehensive inflation data: {e}")
+        data_dict['comprehensive_inflation'] = None
+
+    # Load Treasury yields
+    try:
+        data_dict['treasury_yields'] = load_treasury_yields(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded Treasury yields data")
+    except Exception as e:
+        print(f"Error loading Treasury yields data: {e}")
+        data_dict['treasury_yields'] = None
+
+    # Load policy rates (Fed Funds, SOFR, Prime)
+    try:
+        data_dict['policy_rates'] = load_policy_rates(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded policy rates data")
+    except Exception as e:
+        print(f"Error loading policy rates data: {e}")
+        data_dict['policy_rates'] = None
+
+    # Load credit spreads and mortgage rates
+    try:
+        data_dict['credit_spreads'] = load_credit_spreads(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded credit spreads data")
+    except Exception as e:
+        print(f"Error loading credit spreads data: {e}")
+        data_dict['credit_spreads'] = None
+
+    # Load comprehensive rates data (all rates combined with curve metrics)
+    try:
+        data_dict['comprehensive_rates'] = load_comprehensive_rates_data(
+            start_date='2000-01-01',
+            end_date='2025-12-31',
+            cache_path='./data/fred'
+        )
+        print("Loaded comprehensive rates data")
+    except Exception as e:
+        print(f"Error loading comprehensive rates data: {e}")
+        data_dict['comprehensive_rates'] = None
 
     return data_dict
 
