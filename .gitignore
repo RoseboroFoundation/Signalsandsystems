@@ -1,2 +1,24 @@
+# Environment and secrets
 .env
+
+# Python
 __pycache__/
+*.pyc
+.venv/
+
+# Generated data files
+*.pkl
+*.png
+*.log
+data/
+fama_french_data/
+news_data/
+sec_form4_data/
+analysis_data/
+
+# Generated CSVs (keep Culture_War input data)
+vix_data_*.csv
+full_macro_data_*.csv
+
+# OS files
+.DS_Store

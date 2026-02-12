@@ -108,6 +108,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _validate_fred_api_key():
+    """Raise ValueError if FRED API key is not configured."""
+    if not API_KEY:
+        raise ValueError(
+            "FRED API key not found. Set FRED_API_KEY in .env. "
+            "Get a free key at: https://fred.stlouisfed.org/docs/api/api_key.html"
+        )
+
+
 # =============================================================================
 # CULTURE WAR COMPANIES DATA
 # =============================================================================
@@ -162,7 +171,7 @@ def get_stock_data(tickers, start_date='2000-01-01', end_date='2025-12-31'):
 
     for ticker in tickers:
         try:
-            print(f"Downloading data for {ticker}...")
+            logger.info("Downloading data for %s...", ticker)
             data = yf.download(
                 ticker,
                 start=start_date,
@@ -189,7 +198,7 @@ def get_stock_data(tickers, start_date='2000-01-01', end_date='2025-12-31'):
 
         except Exception as e:
             failed_tickers.append(ticker)
-            print(f"  Error downloading {ticker}: {e}")
+            logger.error("Error downloading %s: %s", ticker, e)
 
     if failed_tickers:
         print(f"\nFailed to download data for: {failed_tickers}")
@@ -217,7 +226,7 @@ def download_vix_data():
         print("Connecting to FRED...")
         fred = Fred(api_key=API_KEY)
 
-        print(f"Downloading VIX data from {START_DATE} to {END_DATE}...")
+        logger.info("Downloading VIX data from %s to %s...", START_DATE, END_DATE)
         vix_series = fred.get_series(
             'VIXCLS',
             observation_start=START_DATE,
@@ -275,7 +284,7 @@ def download_vix_data():
         return vix_df
 
     except Exception as e:
-        print(f"\nError: {str(e)}")
+        logger.error("\nError: %s", e)
         print("\nTroubleshooting:")
         print("1. Verify your API key is correct in the .env file")
         print("2. Check your internet connection")
@@ -289,7 +298,7 @@ def download_fama_french_factors(
     start_date='1926-07-01',
     end_date=None,
     frequency='daily',
-    save_path=None
+    output_dir=None
 ):
     """
     Download Fama-French factor data from Kenneth French's data library.
@@ -302,8 +311,8 @@ def download_fama_french_factors(
         End date in 'YYYY-MM-DD' format (defaults to today)
     frequency : str, default 'daily'
         'daily', 'monthly', or 'annual'
-    save_path : str, optional
-        Path to save CSV file
+    output_dir : str, optional
+        Directory to save CSV files
 
     Returns:
     --------
@@ -322,7 +331,7 @@ def download_fama_french_factors(
 
     try:
         # Download 3-Factor Model
-        print("Downloading Fama-French 3-Factor Model...")
+        logger.info("Downloading Fama-French 3-Factor Model...")
         ff3 = pdr.DataReader(
             freq_map[frequency],
             'famafrench',
@@ -332,7 +341,7 @@ def download_fama_french_factors(
         results['FF3'] = ff3
 
         # Download 5-Factor Model
-        print("Downloading Fama-French 5-Factor Model...")
+        logger.info("Downloading Fama-French 5-Factor Model...")
         ff5_name = (
             'F-F_Research_Data_5_Factors_2x3_daily'
             if frequency == 'daily'
@@ -347,7 +356,7 @@ def download_fama_french_factors(
         results['FF5'] = ff5
 
         # Download Momentum Factor
-        print("Downloading Momentum Factor...")
+        logger.info("Downloading Momentum Factor...")
         mom_name = (
             'F-F_Momentum_Factor_daily'
             if frequency == 'daily'
@@ -362,12 +371,12 @@ def download_fama_french_factors(
         results['MOM'] = mom
 
         # Save to CSV if path provided
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
             for name, df in results.items():
                 filename = f"{name}_{frequency}_{start_date}_to_{end_date}.csv"
-                filepath = os.path.join(save_path, filename)
+                filepath = os.path.join(output_dir, filename)
                 df.to_csv(filepath)
                 print(f"Saved {name} to {filepath}")
 
@@ -375,7 +384,7 @@ def download_fama_french_factors(
         return results
 
     except Exception as e:
-        print(f"Error downloading data: {e}")
+        logger.error("downloading data: %s", e)
         return None
 
 
@@ -384,7 +393,7 @@ def download_industry_portfolios(
     start_date='1926-07-01',
     end_date=None,
     frequency='daily',
-    save_path=None
+    output_dir=None
 ):
     """
     Download Fama-French industry portfolio returns.
@@ -399,8 +408,8 @@ def download_industry_portfolios(
         End date (defaults to today)
     frequency : str
         'daily' or 'monthly'
-    save_path : str, optional
-        Path to save CSV file
+    output_dir : str, optional
+        Directory to save CSV files
 
     Returns:
     --------
@@ -413,7 +422,7 @@ def download_industry_portfolios(
     dataset_name = f'{num_industries}_Industry_Portfolios{freq_suffix}'
 
     try:
-        print(f"Downloading {num_industries} Industry Portfolios...")
+        logger.info("Downloading %s Industry Portfolios...", num_industries)
         ind_portfolios = pdr.DataReader(
             dataset_name,
             'famafrench',
@@ -421,17 +430,17 @@ def download_industry_portfolios(
             end=end_date
         )[0]
 
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
             filename = f"Industry_{num_industries}_{frequency}_{start_date}_to_{end_date}.csv"
-            filepath = os.path.join(save_path, filename)
+            filepath = os.path.join(output_dir, filename)
             ind_portfolios.to_csv(filepath)
             print(f"Saved to {filepath}")
 
         return ind_portfolios
 
     except Exception as e:
-        print(f"Error downloading industry portfolios: {e}")
+        logger.error("downloading industry portfolios: %s", e)
         return None
 
 
@@ -445,7 +454,13 @@ class Form4Downloader:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         # SEC requires a User-Agent with contact info
-        self.user_agent = 'Ashley Roseboro ashley@roseboroholdings.com'
+        self.user_agent = os.getenv('SEC_USER_AGENT')
+        if not self.user_agent:
+            logger.warning(
+                "SEC_USER_AGENT not set. SEC requires contact info. "
+                "Set SEC_USER_AGENT='Name email' in .env"
+            )
+            self.user_agent = 'SignalsAndSystems/1.0'
 
     def _get_headers(self, url):
         """Get headers for SEC API requests with correct Host."""
@@ -499,10 +514,10 @@ class Form4Downloader:
                     with open(cache_file, 'r') as f:
                         print("Loading cached CIK mapping...")
                         return json.load(f)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read CIK cache: %s", e)
 
-        print("Downloading ticker-to-CIK mapping from SEC...")
+        logger.info("Downloading ticker-to-CIK mapping from SEC...")
         try:
             # SEC provides a JSON file with all company tickers and CIKs
             url = "https://www.sec.gov/files/company_tickers.json"
@@ -528,7 +543,7 @@ class Form4Downloader:
                 print(f"Failed to download CIK mapping: HTTP {response.status_code}")
                 return {}
         except Exception as e:
-            print(f"Error loading CIK mapping: {e}")
+            logger.error("loading CIK mapping: %s", e)
             return {}
 
     def download_form4_filings(
@@ -562,6 +577,8 @@ class Form4Downloader:
         List[Dict] : List of filing metadata
         """
         filings = []
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
 
         try:
             # Use the SEC JSON API for submissions
@@ -593,7 +610,8 @@ class Form4Downloader:
                     filing_date = dates[i]
 
                     # Check date range
-                    if start_date <= filing_date <= end_date:
+                    filing_dt = datetime.strptime(filing_date, '%Y-%m-%d')
+                    if start_dt <= filing_dt <= end_dt:
                         accession = accessions[i].replace('-', '')
                         primary_doc = primary_docs[i] if i < len(primary_docs) else ''
 
@@ -640,7 +658,8 @@ class Form4Downloader:
                                     continue
 
                                 filing_date = dates[i]
-                                if start_date <= filing_date <= end_date:
+                                filing_dt = datetime.strptime(filing_date, '%Y-%m-%d')
+                                if start_dt <= filing_dt <= end_dt:
                                     accession = accessions[i].replace('-', '')
                                     primary_doc = primary_docs[i] if i < len(primary_docs) else ''
 
@@ -661,7 +680,8 @@ class Form4Downloader:
 
                                     if len(filings) >= max_filings:
                                         break
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to fetch older filing batch: %s", e)
                     continue
 
             if len(filings) > 0:
@@ -672,7 +692,7 @@ class Form4Downloader:
             return filings
 
         except Exception as e:
-            print(f"  Error downloading Form 4 filings for {ticker}: {e}")
+            logger.error("Error downloading Form 4 filings for %s: %s", ticker, e)
             return []
 
     def parse_form4_xml(self, filing_url: str) -> List[Dict]:
@@ -687,7 +707,7 @@ class Form4Downloader:
             response = requests.get(filing_url, headers=self._get_headers(filing_url))
             time.sleep(0.2)
         except Exception as e:
-            print(f"Error fetching filing page: {e}")
+            logger.error("fetching filing page: %s", e)
             return []
 
         if response.status_code != 200:
@@ -772,7 +792,8 @@ class Form4Downloader:
                     )
                 }
                 transactions.append(transaction)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse Form 4 transaction: %s", e)
                 continue
 
         return transactions
@@ -1632,10 +1653,11 @@ def load_inflation_data(
     cache_file = os.path.join(cache_path, f'inflation_data_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached inflation data from {cache_file}")
+        logger.info("Loading cached inflation data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading inflation data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading inflation data from FRED...")
 
     series = {
         'CPI': 'CPIAUCSL',
@@ -1649,7 +1671,7 @@ def load_inflation_data(
     try:
         raw_data = {}
         for name, code in series.items():
-            print(f"  Downloading {name} ({code})...")
+            logger.debug("Downloading %s (%s)...", name, code)
             df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
             raw_data[name] = df
 
@@ -1679,7 +1701,7 @@ def load_inflation_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"Cached inflation data to {cache_file}")
+        logger.info("Cached inflation data to %s", cache_file)
 
         print("\n=== Inflation Data Summary ===")
         print(f"Date range: {inflation_raw.index.min()} to {inflation_raw.index.max()}")
@@ -1690,7 +1712,7 @@ def load_inflation_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading inflation data: {e}")
+        logger.error("downloading inflation data: %s", e)
         return None
 
 
@@ -1735,10 +1757,11 @@ def load_inflation_expectations_data(
     )
 
     if os.path.exists(cache_file):
-        print(f"Loading cached inflation expectations from {cache_file}")
+        logger.info("Loading cached inflation expectations from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading inflation expectations data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading inflation expectations data from FRED...")
 
     # Breakeven inflation rates (TIPS spreads)
     breakeven_series = {
@@ -1768,11 +1791,11 @@ def load_inflation_expectations_data(
         breakeven_data = {}
         for name, code in breakeven_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 breakeven_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         breakeven_df = pd.DataFrame(breakeven_data)
 
@@ -1781,11 +1804,11 @@ def load_inflation_expectations_data(
         survey_data = {}
         for name, code in survey_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 survey_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         survey_df = pd.DataFrame(survey_data)
 
@@ -1794,11 +1817,11 @@ def load_inflation_expectations_data(
         fed_data = {}
         for name, code in fed_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 fed_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         fed_df = pd.DataFrame(fed_data)
 
@@ -1813,7 +1836,7 @@ def load_inflation_expectations_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached inflation expectations to {cache_file}")
+        logger.info("\nCached inflation expectations to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -1856,14 +1879,15 @@ def load_inflation_expectations_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading inflation expectations data: {e}")
+        logger.error("downloading inflation expectations data: %s", e)
         return None
 
 
 def load_comprehensive_inflation_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive inflation dataset combining all inflation measures.
@@ -1902,10 +1926,15 @@ def load_comprehensive_inflation_data(
         f'comprehensive_inflation_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive inflation data from {cache_file}")
+        logger.info("Loading cached comprehensive inflation data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive Inflation Data (2000-2025)")
     print("=" * 60)
@@ -1937,11 +1966,11 @@ def load_comprehensive_inflation_data(
     component_data = {}
     for name, code in component_series.items():
         try:
-            print(f"  Downloading {name} ({code})...")
+            logger.debug("Downloading %s (%s)...", name, code)
             df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
             component_data[name] = df.iloc[:, 0]
         except Exception as e:
-            print(f"  Warning: Could not download {name}: {e}")
+            logger.warning("Could not download %s: %s", name, e)
 
     components_df = pd.DataFrame(component_data)
 
@@ -1997,7 +2026,7 @@ def load_comprehensive_inflation_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive inflation data to {cache_file}")
+    logger.info("\nCached comprehensive inflation data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -2055,10 +2084,11 @@ def load_treasury_yields(
     cache_file = os.path.join(cache_path, f'treasury_yields_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached Treasury yields from {cache_file}")
+        logger.info("Loading cached Treasury yields from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading Treasury yield data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading Treasury yield data from FRED...")
 
     # Nominal Treasury yields
     nominal_series = {
@@ -2089,11 +2119,11 @@ def load_treasury_yields(
         nominal_data = {}
         for name, code in nominal_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 nominal_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         nominal_df = pd.DataFrame(nominal_data)
 
@@ -2102,11 +2132,11 @@ def load_treasury_yields(
         tips_data = {}
         for name, code in tips_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 tips_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         tips_df = pd.DataFrame(tips_data)
 
@@ -2120,7 +2150,7 @@ def load_treasury_yields(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached Treasury yields to {cache_file}")
+        logger.info("\nCached Treasury yields to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -2139,7 +2169,7 @@ def load_treasury_yields(
         return result
 
     except Exception as e:
-        print(f"Error downloading Treasury yields: {e}")
+        logger.error("downloading Treasury yields: %s", e)
         return None
 
 
@@ -2181,10 +2211,11 @@ def load_policy_rates(
     cache_file = os.path.join(cache_path, f'policy_rates_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached policy rates from {cache_file}")
+        logger.info("Loading cached policy rates from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading policy rates from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading policy rates from FRED...")
 
     # Federal Funds and discount rates
     fed_series = {
@@ -2208,11 +2239,11 @@ def load_policy_rates(
         fed_data = {}
         for name, code in fed_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 fed_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         fed_df = pd.DataFrame(fed_data)
 
@@ -2221,11 +2252,11 @@ def load_policy_rates(
         mm_data = {}
         for name, code in money_market_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 mm_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         mm_df = pd.DataFrame(mm_data)
 
@@ -2239,7 +2270,7 @@ def load_policy_rates(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached policy rates to {cache_file}")
+        logger.info("\nCached policy rates to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -2256,7 +2287,7 @@ def load_policy_rates(
         return result
 
     except Exception as e:
-        print(f"Error downloading policy rates: {e}")
+        logger.error("downloading policy rates: %s", e)
         return None
 
 
@@ -2298,10 +2329,11 @@ def load_credit_spreads(
     cache_file = os.path.join(cache_path, f'credit_spreads_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached credit spreads from {cache_file}")
+        logger.info("Loading cached credit spreads from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading credit spreads and corporate yields from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading credit spreads and corporate yields from FRED...")
 
     # Corporate bond yields
     corporate_series = {
@@ -2336,11 +2368,11 @@ def load_credit_spreads(
         corp_data = {}
         for name, code in corporate_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 corp_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         corp_df = pd.DataFrame(corp_data)
 
@@ -2349,11 +2381,11 @@ def load_credit_spreads(
         spread_data = {}
         for name, code in spread_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 spread_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         spread_df = pd.DataFrame(spread_data)
 
@@ -2362,11 +2394,11 @@ def load_credit_spreads(
         mortgage_data = {}
         for name, code in mortgage_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 mortgage_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         mortgage_df = pd.DataFrame(mortgage_data)
 
@@ -2381,7 +2413,7 @@ def load_credit_spreads(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached credit spreads to {cache_file}")
+        logger.info("\nCached credit spreads to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -2405,7 +2437,7 @@ def load_credit_spreads(
         return result
 
     except Exception as e:
-        print(f"Error downloading credit spreads: {e}")
+        logger.error("downloading credit spreads: %s", e)
         return None
 
 
@@ -2528,7 +2560,8 @@ def calculate_yield_curve_metrics(treasury_data):
 def load_comprehensive_rates_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive interest rates dataset from FRED (2000-2025).
@@ -2571,10 +2604,15 @@ def load_comprehensive_rates_data(
         f'comprehensive_rates_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive rates data from {cache_file}")
+        logger.info("Loading cached comprehensive rates data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive Rates Data (2000-2025)")
     print("=" * 60)
@@ -2644,7 +2682,7 @@ def load_comprehensive_rates_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive rates data to {cache_file}")
+    logger.info("\nCached comprehensive rates data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -2711,10 +2749,11 @@ def load_industrial_production_data(
     cache_file = os.path.join(cache_path, f'industrial_production_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached industrial production data from {cache_file}")
+        logger.info("Loading cached industrial production data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading Industrial Production data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading Industrial Production data from FRED...")
 
     # Total Industrial Production
     total_series = {
@@ -2759,11 +2798,11 @@ def load_industrial_production_data(
         total_data = {}
         for name, code in total_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 total_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         total_df = pd.DataFrame(total_data)
 
@@ -2772,11 +2811,11 @@ def load_industrial_production_data(
         sector_data = {}
         for name, code in sector_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 sector_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         sector_df = pd.DataFrame(sector_data)
 
@@ -2785,11 +2824,11 @@ def load_industrial_production_data(
         capacity_data = {}
         for name, code in capacity_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 capacity_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         capacity_df = pd.DataFrame(capacity_data)
 
@@ -2804,7 +2843,7 @@ def load_industrial_production_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached industrial production data to {cache_file}")
+        logger.info("\nCached industrial production data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -2830,7 +2869,7 @@ def load_industrial_production_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading industrial production data: {e}")
+        logger.error("downloading industrial production data: %s", e)
         return None
 
 
@@ -2869,10 +2908,11 @@ def load_ip_growth_rates(
     cache_file = os.path.join(cache_path, f'ip_growth_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached IP growth data from {cache_file}")
+        logger.info("Loading cached IP growth data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading IP growth rates from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading IP growth rates from FRED...")
 
     # Pre-calculated growth rates from FRED
     growth_series = {
@@ -2894,11 +2934,11 @@ def load_ip_growth_rates(
         for name, code in growth_series.items():
             try:
                 base_name = name.replace('_YoY_Change', '').replace('_YoY', '')
-                print(f"  Downloading {base_name} ({code})...")
+                logger.debug("Downloading %s (%s)...", base_name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 ip_data[base_name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         ip_df = pd.DataFrame(ip_data)
 
@@ -2917,11 +2957,11 @@ def load_ip_growth_rates(
         diffusion_data = {}
         for name, code in diffusion_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 diffusion_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         diffusion_df = pd.DataFrame(diffusion_data)
 
@@ -2937,7 +2977,7 @@ def load_ip_growth_rates(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached IP growth data to {cache_file}")
+        logger.info("\nCached IP growth data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -2966,14 +3006,15 @@ def load_ip_growth_rates(
         return result
 
     except Exception as e:
-        print(f"Error downloading IP growth data: {e}")
+        logger.error("downloading IP growth data: %s", e)
         return None
 
 
 def load_comprehensive_ip_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive Industrial Production dataset from FRED (2000-2025).
@@ -3012,10 +3053,15 @@ def load_comprehensive_ip_data(
         f'comprehensive_ip_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive IP data from {cache_file}")
+        logger.info("Loading cached comprehensive IP data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive Industrial Production Data (2000-2025)")
     print("=" * 60)
@@ -3069,7 +3115,7 @@ def load_comprehensive_ip_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive IP data to {cache_file}")
+    logger.info("\nCached comprehensive IP data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -3156,10 +3202,11 @@ def load_money_supply_data(
     cache_file = os.path.join(cache_path, f'money_supply_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached money supply data from {cache_file}")
+        logger.info("Loading cached money supply data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading Money Supply data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading Money Supply data from FRED...")
 
     # Money supply aggregates
     aggregate_series = {
@@ -3186,11 +3233,11 @@ def load_money_supply_data(
         aggregate_data = {}
         for name, code in aggregate_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 aggregate_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         aggregate_df = pd.DataFrame(aggregate_data)
 
@@ -3199,11 +3246,11 @@ def load_money_supply_data(
         component_data = {}
         for name, code in component_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 component_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         component_df = pd.DataFrame(component_data)
 
@@ -3217,7 +3264,7 @@ def load_money_supply_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached money supply data to {cache_file}")
+        logger.info("\nCached money supply data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -3239,7 +3286,7 @@ def load_money_supply_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading money supply data: {e}")
+        logger.error("downloading money supply data: %s", e)
         return None
 
 
@@ -3276,10 +3323,11 @@ def load_money_velocity_data(
     cache_file = os.path.join(cache_path, f'money_velocity_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached money velocity data from {cache_file}")
+        logger.info("Loading cached money velocity data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading Money Velocity data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading Money Velocity data from FRED...")
 
     velocity_series = {
         'M1_Velocity': 'M1V',                   # Velocity of M1 Money Stock
@@ -3291,11 +3339,11 @@ def load_money_velocity_data(
         velocity_data = {}
         for name, code in velocity_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 velocity_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         velocity_df = pd.DataFrame(velocity_data)
 
@@ -3305,7 +3353,7 @@ def load_money_velocity_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached money velocity data to {cache_file}")
+        logger.info("\nCached money velocity data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -3325,7 +3373,7 @@ def load_money_velocity_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading money velocity data: {e}")
+        logger.error("downloading money velocity data: %s", e)
         return None
 
 
@@ -3367,10 +3415,11 @@ def load_fed_balance_sheet_data(
     cache_file = os.path.join(cache_path, f'fed_balance_sheet_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached Fed balance sheet data from {cache_file}")
+        logger.info("Loading cached Fed balance sheet data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading Federal Reserve Balance Sheet data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading Federal Reserve Balance Sheet data from FRED...")
 
     # Fed assets
     asset_series = {
@@ -3394,11 +3443,11 @@ def load_fed_balance_sheet_data(
         asset_data = {}
         for name, code in asset_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 asset_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         asset_df = pd.DataFrame(asset_data)
 
@@ -3407,11 +3456,11 @@ def load_fed_balance_sheet_data(
         reserve_data = {}
         for name, code in reserve_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 reserve_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         reserve_df = pd.DataFrame(reserve_data)
 
@@ -3425,7 +3474,7 @@ def load_fed_balance_sheet_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached Fed balance sheet data to {cache_file}")
+        logger.info("\nCached Fed balance sheet data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -3452,7 +3501,7 @@ def load_fed_balance_sheet_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading Fed balance sheet data: {e}")
+        logger.error("downloading Fed balance sheet data: %s", e)
         return None
 
 
@@ -3524,7 +3573,8 @@ def load_m2_growth_rates(money_supply_data):
 def load_comprehensive_m2_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive M2 Money Supply dataset from FRED (2000-2025).
@@ -3564,10 +3614,15 @@ def load_comprehensive_m2_data(
         f'comprehensive_m2_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive M2 data from {cache_file}")
+        logger.info("Loading cached comprehensive M2 data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive M2 Money Supply Data (2000-2025)")
     print("=" * 60)
@@ -3637,7 +3692,7 @@ def load_comprehensive_m2_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive M2 data to {cache_file}")
+    logger.info("\nCached comprehensive M2 data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -3725,10 +3780,11 @@ def load_gdp_data(
     cache_file = os.path.join(cache_path, f'gdp_data_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached GDP data from {cache_file}")
+        logger.info("Loading cached GDP data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading GDP data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading GDP data from FRED...")
 
     # Headline GDP measures
     headline_series = {
@@ -3756,11 +3812,11 @@ def load_gdp_data(
         headline_data = {}
         for name, code in headline_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 headline_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         headline_df = pd.DataFrame(headline_data)
 
@@ -3769,11 +3825,11 @@ def load_gdp_data(
         growth_data = {}
         for name, code in growth_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 growth_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         growth_df = pd.DataFrame(growth_data)
 
@@ -3782,11 +3838,11 @@ def load_gdp_data(
         per_capita_data = {}
         for name, code in per_capita_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 per_capita_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         per_capita_df = pd.DataFrame(per_capita_data)
 
@@ -3801,7 +3857,7 @@ def load_gdp_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP data to {cache_file}")
+        logger.info("\nCached GDP data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -3829,7 +3885,7 @@ def load_gdp_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP data: {e}")
+        logger.error("downloading GDP data: %s", e)
         return None
 
 
@@ -3872,10 +3928,11 @@ def load_gdp_components_data(
     cache_file = os.path.join(cache_path, f'gdp_components_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached GDP components from {cache_file}")
+        logger.info("Loading cached GDP components from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading GDP components from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading GDP components from FRED...")
 
     # Personal Consumption Expenditures (C)
     consumption_series = {
@@ -3922,11 +3979,11 @@ def load_gdp_components_data(
         consumption_data = {}
         for name, code in consumption_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 consumption_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         consumption_df = pd.DataFrame(consumption_data)
 
@@ -3935,11 +3992,11 @@ def load_gdp_components_data(
         investment_data = {}
         for name, code in investment_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 investment_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         investment_df = pd.DataFrame(investment_data)
 
@@ -3948,11 +4005,11 @@ def load_gdp_components_data(
         government_data = {}
         for name, code in government_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 government_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         government_df = pd.DataFrame(government_data)
 
@@ -3961,11 +4018,11 @@ def load_gdp_components_data(
         trade_data = {}
         for name, code in trade_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 trade_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         trade_df = pd.DataFrame(trade_data)
 
@@ -3981,7 +4038,7 @@ def load_gdp_components_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP components to {cache_file}")
+        logger.info("\nCached GDP components to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -3997,7 +4054,7 @@ def load_gdp_components_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP components: {e}")
+        logger.error("downloading GDP components: %s", e)
         return None
 
 
@@ -4033,10 +4090,11 @@ def load_gdp_by_industry_data(
     cache_file = os.path.join(cache_path, f'gdp_industry_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached GDP by industry from {cache_file}")
+        logger.info("Loading cached GDP by industry from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading GDP by industry from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading GDP by industry from FRED...")
 
     # GDP by industry (Value Added)
     industry_series = {
@@ -4065,11 +4123,11 @@ def load_gdp_by_industry_data(
         industry_data = {}
         for name, code in industry_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 industry_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         industry_df = pd.DataFrame(industry_data)
 
@@ -4079,7 +4137,7 @@ def load_gdp_by_industry_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP by industry to {cache_file}")
+        logger.info("\nCached GDP by industry to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -4092,14 +4150,15 @@ def load_gdp_by_industry_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP by industry: {e}")
+        logger.error("downloading GDP by industry: %s", e)
         return None
 
 
 def load_comprehensive_gdp_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive GDP dataset from FRED (2000-2025).
@@ -4138,10 +4197,15 @@ def load_comprehensive_gdp_data(
         f'comprehensive_gdp_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive GDP data from {cache_file}")
+        logger.info("Loading cached comprehensive GDP data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive GDP Data (2000-2025)")
     print("=" * 60)
@@ -4203,7 +4267,7 @@ def load_comprehensive_gdp_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive GDP data to {cache_file}")
+    logger.info("\nCached comprehensive GDP data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -4285,10 +4349,11 @@ def load_employment_data(
     cache_file = os.path.join(cache_path, f'employment_data_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached employment data from {cache_file}")
+        logger.info("Loading cached employment data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading employment data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading employment data from FRED...")
 
     # Nonfarm Payrolls
     payroll_series = {
@@ -4323,11 +4388,11 @@ def load_employment_data(
         payroll_data = {}
         for name, code in payroll_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 payroll_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         payroll_df = pd.DataFrame(payroll_data)
 
@@ -4336,11 +4401,11 @@ def load_employment_data(
         unemployment_data = {}
         for name, code in unemployment_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 unemployment_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         unemployment_df = pd.DataFrame(unemployment_data)
 
@@ -4349,11 +4414,11 @@ def load_employment_data(
         labor_force_data = {}
         for name, code in labor_force_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 labor_force_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         labor_force_df = pd.DataFrame(labor_force_data)
 
@@ -4368,7 +4433,7 @@ def load_employment_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached employment data to {cache_file}")
+        logger.info("\nCached employment data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -4396,7 +4461,7 @@ def load_employment_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading employment data: {e}")
+        logger.error("downloading employment data: %s", e)
         return None
 
 
@@ -4435,10 +4500,11 @@ def load_jobless_claims_data(
     cache_file = os.path.join(cache_path, f'jobless_claims_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached jobless claims from {cache_file}")
+        logger.info("Loading cached jobless claims from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading jobless claims data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading jobless claims data from FRED...")
 
     claims_series = {
         'Initial_Claims': 'ICSA',               # Initial Unemployment Claims
@@ -4452,11 +4518,11 @@ def load_jobless_claims_data(
         claims_data = {}
         for name, code in claims_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 claims_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         claims_df = pd.DataFrame(claims_data)
 
@@ -4466,7 +4532,7 @@ def load_jobless_claims_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached jobless claims to {cache_file}")
+        logger.info("\nCached jobless claims to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -4489,7 +4555,7 @@ def load_jobless_claims_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading jobless claims: {e}")
+        logger.error("downloading jobless claims: %s", e)
         return None
 
 
@@ -4530,10 +4596,11 @@ def load_wages_hours_data(
     cache_file = os.path.join(cache_path, f'wages_hours_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached wages/hours data from {cache_file}")
+        logger.info("Loading cached wages/hours data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading wages and hours data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading wages and hours data from FRED...")
 
     # Wages and earnings
     wages_series = {
@@ -4559,11 +4626,11 @@ def load_wages_hours_data(
         wages_data = {}
         for name, code in wages_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 wages_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         wages_df = pd.DataFrame(wages_data)
 
@@ -4572,11 +4639,11 @@ def load_wages_hours_data(
         hours_data = {}
         for name, code in hours_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 hours_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         hours_df = pd.DataFrame(hours_data)
 
@@ -4590,7 +4657,7 @@ def load_wages_hours_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached wages/hours data to {cache_file}")
+        logger.info("\nCached wages/hours data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -4617,7 +4684,7 @@ def load_wages_hours_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading wages/hours data: {e}")
+        logger.error("downloading wages/hours data: %s", e)
         return None
 
 
@@ -4658,10 +4725,11 @@ def load_jolts_data(
     cache_file = os.path.join(cache_path, f'jolts_data_{start_date}_{end_date}.pkl')
 
     if os.path.exists(cache_file):
-        print(f"Loading cached JOLTS data from {cache_file}")
+        logger.info("Loading cached JOLTS data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading JOLTS data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading JOLTS data from FRED...")
 
     # Job openings
     openings_series = {
@@ -4686,11 +4754,11 @@ def load_jolts_data(
         openings_data = {}
         for name, code in openings_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 openings_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         openings_df = pd.DataFrame(openings_data)
 
@@ -4699,11 +4767,11 @@ def load_jolts_data(
         turnover_data = {}
         for name, code in turnover_series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 turnover_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         turnover_df = pd.DataFrame(turnover_data)
 
@@ -4717,7 +4785,7 @@ def load_jolts_data(
         }
 
         pd.to_pickle(result, cache_file)
-        print(f"\nCached JOLTS data to {cache_file}")
+        logger.info("\nCached JOLTS data to %s", cache_file)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -4742,14 +4810,15 @@ def load_jolts_data(
         return result
 
     except Exception as e:
-        print(f"Error downloading JOLTS data: {e}")
+        logger.error("downloading JOLTS data: %s", e)
         return None
 
 
 def load_comprehensive_employment_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive employment dataset from FRED (2000-2025).
@@ -4790,10 +4859,15 @@ def load_comprehensive_employment_data(
         f'comprehensive_employment_{start_date}_{end_date}.pkl'
     )
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive employment data from {cache_file}")
+        logger.info("Loading cached comprehensive employment data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
+    _validate_fred_api_key()
     print("=" * 60)
     print("Loading Comprehensive Employment Data (2000-2025)")
     print("=" * 60)
@@ -4863,7 +4937,7 @@ def load_comprehensive_employment_data(
     }
 
     pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive employment data to {cache_file}")
+    logger.info("\nCached comprehensive employment data to %s", cache_file)
 
     # Print final summary
     print("\n" + "=" * 60)
@@ -4915,7 +4989,8 @@ def load_comprehensive_employment_data(
 def load_additional_macro_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load additional macroeconomic indicators from FRED.
@@ -4928,11 +5003,16 @@ def load_additional_macro_data(
     os.makedirs(cache_path, exist_ok=True)
     cache_file = os.path.join(cache_path, f'macro_data_{start_date}_{end_date}.pkl')
 
+    if force_refresh and os.path.exists(cache_file):
+        os.remove(cache_file)
+        logger.info("Force refresh: removed %s", cache_file)
+
     if os.path.exists(cache_file):
-        print(f"Loading cached macro data from {cache_file}")
+        logger.info("Loading cached macro data from %s", cache_file)
         return pd.read_pickle(cache_file)
 
-    print("Downloading macro data from FRED...")
+    _validate_fred_api_key()
+    logger.info("Downloading macro data from FRED...")
 
     series = {
         'Unemployment_Rate': 'UNRATE',
@@ -4954,16 +5034,16 @@ def load_additional_macro_data(
         macro_data = {}
         for name, code in series.items():
             try:
-                print(f"  Downloading {name} ({code})...")
+                logger.debug("Downloading %s (%s)...", name, code)
                 df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
                 macro_data[name] = df.iloc[:, 0]
             except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+                logger.warning("Could not download %s: %s", name, e)
 
         macro_df = pd.DataFrame(macro_data)
 
         pd.to_pickle(macro_df, cache_file)
-        print(f"Cached macro data to {cache_file}")
+        logger.info("Cached macro data to %s", cache_file)
 
         print("\n=== Macro Data Summary ===")
         print(f"Date range: {macro_df.index.min()} to {macro_df.index.max()}")
@@ -4974,7 +5054,7 @@ def load_additional_macro_data(
         return macro_df
 
     except Exception as e:
-        print(f"Error downloading macro data: {e}")
+        logger.error("downloading macro data: %s", e)
         return None
 
 
@@ -5030,7 +5110,7 @@ def load_news_data(
         sources = ['guardian', 'nyt', 'reddit']
 
     if os.path.exists(cache_file) and not refresh:
-        print(f"Loading cached news data from {cache_file}")
+        logger.info("Loading cached news data from %s", cache_file)
         news_df = pd.read_csv(cache_file)
         news_df['published_date'] = pd.to_datetime(news_df['published_date'])
 
@@ -5230,7 +5310,7 @@ def load_data():
         )
         print("Loaded culture war data")
     except Exception as e:
-        print(f"Error loading culture war data: {e}")
+        logger.error("loading culture war data: %s", e)
         data_dict['culturewardata'] = None
 
     # Load stock data
@@ -5244,7 +5324,7 @@ def load_data():
         else:
             data_dict['stockdata'] = None
     except Exception as e:
-        print(f"Error loading stock data: {e}")
+        logger.error("loading stock data: %s", e)
         data_dict['stockdata'] = None
 
     # Load VIX data
@@ -5252,7 +5332,7 @@ def load_data():
         data_dict['vixdata'] = download_vix_data()
         print("Loaded VIX data")
     except Exception as e:
-        print(f"Error loading VIX data: {e}")
+        logger.error("loading VIX data: %s", e)
         data_dict['vixdata'] = None
 
     # Load Fama-French factors
@@ -5260,11 +5340,11 @@ def load_data():
         data_dict['ff_factors'] = download_fama_french_factors(
             start_date='2000-01-01',
             frequency='daily',
-            save_path='./fama_french_data'
+            output_dir='./fama_french_data'
         )
         print("Loaded Fama-French factors")
     except Exception as e:
-        print(f"Error loading Fama-French factors: {e}")
+        logger.error("loading Fama-French factors: %s", e)
         data_dict['ff_factors'] = None
 
     # Load Form 4 insider trading data
@@ -5282,7 +5362,7 @@ def load_data():
         else:
             data_dict['form4data'] = None
     except Exception as e:
-        print(f"Error loading Form 4 data: {e}")
+        logger.error("loading Form 4 data: %s", e)
         data_dict['form4data'] = None
 
     # Load news data
@@ -5293,7 +5373,7 @@ def load_data():
         )
         print("Loaded news data")
     except Exception as e:
-        print(f"Error loading news data: {e}")
+        logger.error("loading news data: %s", e)
         data_dict['newsdata'] = None
 
     # Load inflation data (core measures)
@@ -5305,7 +5385,7 @@ def load_data():
         )
         print("Loaded inflation data")
     except Exception as e:
-        print(f"Error loading inflation data: {e}")
+        logger.error("loading inflation data: %s", e)
         data_dict['inflationdata'] = None
 
     # Load inflation expectations (breakeven, surveys, Fed measures)
@@ -5317,7 +5397,7 @@ def load_data():
         )
         print("Loaded inflation expectations data")
     except Exception as e:
-        print(f"Error loading inflation expectations data: {e}")
+        logger.error("loading inflation expectations data: %s", e)
         data_dict['inflation_expectations'] = None
 
     # Load comprehensive inflation data (all measures combined)
@@ -5329,7 +5409,7 @@ def load_data():
         )
         print("Loaded comprehensive inflation data")
     except Exception as e:
-        print(f"Error loading comprehensive inflation data: {e}")
+        logger.error("loading comprehensive inflation data: %s", e)
         data_dict['comprehensive_inflation'] = None
 
     # Load Treasury yields
@@ -5341,7 +5421,7 @@ def load_data():
         )
         print("Loaded Treasury yields data")
     except Exception as e:
-        print(f"Error loading Treasury yields data: {e}")
+        logger.error("loading Treasury yields data: %s", e)
         data_dict['treasury_yields'] = None
 
     # Load policy rates (Fed Funds, SOFR, Prime)
@@ -5353,7 +5433,7 @@ def load_data():
         )
         print("Loaded policy rates data")
     except Exception as e:
-        print(f"Error loading policy rates data: {e}")
+        logger.error("loading policy rates data: %s", e)
         data_dict['policy_rates'] = None
 
     # Load credit spreads and mortgage rates
@@ -5365,7 +5445,7 @@ def load_data():
         )
         print("Loaded credit spreads data")
     except Exception as e:
-        print(f"Error loading credit spreads data: {e}")
+        logger.error("loading credit spreads data: %s", e)
         data_dict['credit_spreads'] = None
 
     # Load comprehensive rates data (all rates combined with curve metrics)
@@ -5377,7 +5457,7 @@ def load_data():
         )
         print("Loaded comprehensive rates data")
     except Exception as e:
-        print(f"Error loading comprehensive rates data: {e}")
+        logger.error("loading comprehensive rates data: %s", e)
         data_dict['comprehensive_rates'] = None
 
     # Load industrial production data
@@ -5389,7 +5469,7 @@ def load_data():
         )
         print("Loaded industrial production data")
     except Exception as e:
-        print(f"Error loading industrial production data: {e}")
+        logger.error("loading industrial production data: %s", e)
         data_dict['industrial_production'] = None
 
     # Load IP growth rates and diffusion indices
@@ -5401,7 +5481,7 @@ def load_data():
         )
         print("Loaded IP growth rates data")
     except Exception as e:
-        print(f"Error loading IP growth rates data: {e}")
+        logger.error("loading IP growth rates data: %s", e)
         data_dict['ip_growth'] = None
 
     # Load comprehensive IP data (all IP measures combined)
@@ -5413,7 +5493,7 @@ def load_data():
         )
         print("Loaded comprehensive IP data")
     except Exception as e:
-        print(f"Error loading comprehensive IP data: {e}")
+        logger.error("loading comprehensive IP data: %s", e)
         data_dict['comprehensive_ip'] = None
 
     # Load money supply data (M1, M2, components)
@@ -5425,7 +5505,7 @@ def load_data():
         )
         print("Loaded money supply data")
     except Exception as e:
-        print(f"Error loading money supply data: {e}")
+        logger.error("loading money supply data: %s", e)
         data_dict['money_supply'] = None
 
     # Load money velocity data
@@ -5437,7 +5517,7 @@ def load_data():
         )
         print("Loaded money velocity data")
     except Exception as e:
-        print(f"Error loading money velocity data: {e}")
+        logger.error("loading money velocity data: %s", e)
         data_dict['money_velocity'] = None
 
     # Load Fed balance sheet data
@@ -5449,7 +5529,7 @@ def load_data():
         )
         print("Loaded Fed balance sheet data")
     except Exception as e:
-        print(f"Error loading Fed balance sheet data: {e}")
+        logger.error("loading Fed balance sheet data: %s", e)
         data_dict['fed_balance_sheet'] = None
 
     # Load comprehensive M2 data (all money supply measures combined)
@@ -5461,7 +5541,7 @@ def load_data():
         )
         print("Loaded comprehensive M2 data")
     except Exception as e:
-        print(f"Error loading comprehensive M2 data: {e}")
+        logger.error("loading comprehensive M2 data: %s", e)
         data_dict['comprehensive_m2'] = None
 
     # Load GDP headline data
@@ -5473,7 +5553,7 @@ def load_data():
         )
         print("Loaded GDP data")
     except Exception as e:
-        print(f"Error loading GDP data: {e}")
+        logger.error("loading GDP data: %s", e)
         data_dict['gdp_data'] = None
 
     # Load GDP components (C + I + G + NX)
@@ -5485,7 +5565,7 @@ def load_data():
         )
         print("Loaded GDP components data")
     except Exception as e:
-        print(f"Error loading GDP components data: {e}")
+        logger.error("loading GDP components data: %s", e)
         data_dict['gdp_components'] = None
 
     # Load GDP by industry
@@ -5497,7 +5577,7 @@ def load_data():
         )
         print("Loaded GDP by industry data")
     except Exception as e:
-        print(f"Error loading GDP by industry data: {e}")
+        logger.error("loading GDP by industry data: %s", e)
         data_dict['gdp_industry'] = None
 
     # Load comprehensive GDP data (all GDP measures combined)
@@ -5509,7 +5589,7 @@ def load_data():
         )
         print("Loaded comprehensive GDP data")
     except Exception as e:
-        print(f"Error loading comprehensive GDP data: {e}")
+        logger.error("loading comprehensive GDP data: %s", e)
         data_dict['comprehensive_gdp'] = None
 
     # Load employment data (payrolls, unemployment, labor force)
@@ -5521,7 +5601,7 @@ def load_data():
         )
         print("Loaded employment data")
     except Exception as e:
-        print(f"Error loading employment data: {e}")
+        logger.error("loading employment data: %s", e)
         data_dict['employment_data'] = None
 
     # Load jobless claims data
@@ -5533,7 +5613,7 @@ def load_data():
         )
         print("Loaded jobless claims data")
     except Exception as e:
-        print(f"Error loading jobless claims data: {e}")
+        logger.error("loading jobless claims data: %s", e)
         data_dict['jobless_claims'] = None
 
     # Load wages and hours data
@@ -5545,7 +5625,7 @@ def load_data():
         )
         print("Loaded wages and hours data")
     except Exception as e:
-        print(f"Error loading wages and hours data: {e}")
+        logger.error("loading wages and hours data: %s", e)
         data_dict['wages_hours'] = None
 
     # Load JOLTS data (job openings, hires, quits)
@@ -5557,7 +5637,7 @@ def load_data():
         )
         print("Loaded JOLTS data")
     except Exception as e:
-        print(f"Error loading JOLTS data: {e}")
+        logger.error("loading JOLTS data: %s", e)
         data_dict['jolts_data'] = None
 
     # Load comprehensive employment data (all employment measures combined)
@@ -5569,7 +5649,7 @@ def load_data():
         )
         print("Loaded comprehensive employment data")
     except Exception as e:
-        print(f"Error loading comprehensive employment data: {e}")
+        logger.error("loading comprehensive employment data: %s", e)
         data_dict['comprehensive_employment'] = None
 
     # Load additional macro data (Consumer Sentiment, Housing, Dollar Index)
@@ -5581,7 +5661,7 @@ def load_data():
         )
         print("Loaded additional macro data")
     except Exception as e:
-        print(f"Error loading additional macro data: {e}")
+        logger.error("loading additional macro data: %s", e)
         data_dict['additional_macro'] = None
 
     return data_dict
@@ -5618,8 +5698,8 @@ def clean_dataframe(df, method='ffill', max_gap=5):
         try:
             if cleaned.index.dtype == 'object':
                 cleaned.index = pd.to_datetime(cleaned.index, errors='coerce')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to convert index to datetime: %s", e)
 
     # Sort by index if datetime
     if isinstance(cleaned.index, pd.DatetimeIndex):
@@ -5752,7 +5832,7 @@ def clean_all_data(data_dict, verbose=True):
                     print(f"  {key}: Kept as-is (unknown type)")
 
         except Exception as e:
-            print(f"  {key}: Error during cleaning - {e}")
+            logger.error("%s: error during cleaning - %s", key, e)
             cleaned_dict[key] = data
 
     if verbose:
