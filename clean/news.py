@@ -764,8 +764,8 @@ def load_news_data(
 
         return news_df
     else:
-        print(f"News data not found at {cache_file}")
-        print("Run scrape_culture_war_news() to generate this data")
+        logger.warning("News data not found at %s", cache_file)
+        logger.warning("Run scrape_culture_war_news() to generate this data")
         return None
 
 
@@ -814,9 +814,9 @@ def scrape_culture_war_news(
         sources = ['guardian', 'nyt', 'reddit']
 
     # Load culture war data
-    print("Loading culture war companies data...")
+    logger.info("Loading culture war companies data...")
     culture_war_df = import_culture_war_data(culture_war_csv)
-    print(f"Loaded {len(culture_war_df)} culture war events")
+    logger.info("Loaded %d culture war events", len(culture_war_df))
 
     # Create output directory if needed
     output_dir = os.path.dirname(output_file)
@@ -824,7 +824,7 @@ def scrape_culture_war_news(
         os.makedirs(output_dir, exist_ok=True)
 
     # Initialize news aggregator
-    print("\nInitializing news aggregator...")
+    logger.info("Initializing news aggregator...")
     aggregator = CompanyNewsAggregator(
         guardian_api_key=os.getenv('GUARDIAN_API_KEY'),
         nyt_api_key=os.getenv('NYT_API_KEY'),
@@ -837,40 +837,40 @@ def scrape_culture_war_news(
     available_sources = []
     if aggregator.guardian_api_key:
         available_sources.append('guardian')
-        print("  Guardian API: Available")
+        logger.info("  Guardian API: Available")
     else:
-        print("  Guardian API: Not configured (set GUARDIAN_API_KEY)")
+        logger.info("  Guardian API: Not configured (set GUARDIAN_API_KEY)")
 
     if aggregator.nyt_api_key:
         available_sources.append('nyt')
-        print("  NYT API: Available")
+        logger.info("  NYT API: Available")
     else:
-        print("  NYT API: Not configured (set NYT_API_KEY)")
+        logger.info("  NYT API: Not configured (set NYT_API_KEY)")
 
     if aggregator.reddit:
         available_sources.append('reddit')
-        print("  Reddit API: Available")
+        logger.info("  Reddit API: Available")
     else:
-        print("  Reddit API: Not configured (set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)")
+        logger.info("  Reddit API: Not configured (set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)")
 
     # Filter sources to only available ones
     sources = [s for s in sources if s in available_sources]
 
     if not sources:
-        print("\nERROR: No API keys configured. Please set at least one of:")
-        print("  - GUARDIAN_API_KEY")
-        print("  - NYT_API_KEY")
-        print("  - REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET")
+        logger.error("No API keys configured. Please set at least one of:")
+        logger.error("  - GUARDIAN_API_KEY")
+        logger.error("  - NYT_API_KEY")
+        logger.error("  - REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET")
         return pd.DataFrame()
 
-    print(f"\nUsing sources: {sources}")
-    print(f"Date range: {start_date} to {end_date}")
-    print(f"Max results per source: {max_results_per_source}")
+    logger.info("Using sources: %s", sources)
+    logger.info("Date range: %s to %s", start_date, end_date)
+    logger.info("Max results per source: %d", max_results_per_source)
 
     # Run the aggregation
-    print("\n" + "=" * 60)
-    print("Starting news scraping...")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Starting news scraping...")
+    logger.info("=" * 60)
 
     news_df = aggregator.aggregate_culture_war_news(
         culture_war_df=culture_war_df,
@@ -885,6 +885,6 @@ def scrape_culture_war_news(
     if len(news_df) > 0:
         aggregator.save_news(news_df, output_file)
     else:
-        print("\nNo articles found. Check API keys and try again.")
+        logger.warning("No articles found. Check API keys and try again.")
 
     return news_df

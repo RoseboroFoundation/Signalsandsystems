@@ -801,53 +801,51 @@ def get_news_for_ticker(data_dict, ticker, days_window=30):
 # MAIN ENTRY POINT
 # =============================================================================
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Loading and cleaning all datasets...")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Loading and cleaning all datasets...")
+    logger.info("=" * 60)
     data_dict = get_clean_data()
 
     # Print summary
-    print("\n" + "=" * 60)
-    print("=== Data Dictionary Summary ===")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("=== Data Dictionary Summary ===")
+    logger.info("=" * 60)
     for key, value in data_dict.items():
-        print(f"\n{key}:")
         if isinstance(value, dict):
+            logger.info("%s:", key)
             for subkey, df in value.items():
                 if df is not None:
-                    print(f"  {subkey}: {df.shape if hasattr(df, 'shape') else 'N/A'}")
+                    logger.info("  %s: %s", subkey, df.shape if hasattr(df, 'shape') else 'N/A')
                 else:
-                    print(f"  {subkey}: Not loaded")
+                    logger.info("  %s: Not loaded", subkey)
         elif value is not None:
             if hasattr(value, 'shape'):
-                print(f"  Shape: {value.shape}")
+                logger.info("%s: Shape: %s", key, value.shape)
             else:
-                print("  Status: Loaded")
+                logger.info("%s: Loaded", key)
         else:
-            print("  Status: Not loaded")
+            logger.info("%s: Not loaded", key)
 
     # Show culture war data structure
     if data_dict['culturewardata'] is not None:
-        print("\n" + "=" * 60)
-        print("=== Culture War Data Structure ===")
-        print("=" * 60)
-        print("Columns:", data_dict['culturewardata'].columns.tolist())
-        print("\nFirst few rows:")
-        print(data_dict['culturewardata'].head())
+        logger.info("=" * 60)
+        logger.info("=== Culture War Data Structure ===")
+        logger.info("=" * 60)
+        logger.info("Columns: %s", data_dict['culturewardata'].columns.tolist())
+        logger.info("First few rows:\n%s", data_dict['culturewardata'].head())
 
     # Show inflation data summary
     if data_dict['inflationdata'] is not None:
-        print("\n" + "=" * 60)
-        print("=== Inflation Data Summary ===")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("=== Inflation Data Summary ===")
+        logger.info("=" * 60)
         inflation = data_dict['inflationdata']
 
-        print("\nRaw indices shape:", inflation['raw'].shape)
-        print("Year-over-year changes shape:", inflation['yoy'].shape)
-        print("Month-over-month changes shape:", inflation['mom'].shape)
+        logger.info("Raw indices shape: %s", inflation['raw'].shape)
+        logger.info("Year-over-year changes shape: %s", inflation['yoy'].shape)
+        logger.info("Month-over-month changes shape: %s", inflation['mom'].shape)
 
-        print("\nLatest inflation readings (YoY %):")
-        print(inflation['yoy'].iloc[-1])
+        logger.info("Latest inflation readings (YoY %%):\n%s", inflation['yoy'].iloc[-1])
 
         core_pce_yoy = inflation['yoy']['Core_PCE_YoY']
         latest_inflation = core_pce_yoy.iloc[-1]
@@ -859,14 +857,14 @@ if __name__ == "__main__":
         else:
             regime = "High Inflation"
 
-        print(f"\nCurrent inflation regime (based on Core PCE): {regime}")
-        print(f"  Core PCE YoY: {latest_inflation:.2f}%")
+        logger.info("Current inflation regime (based on Core PCE): %s", regime)
+        logger.info("  Core PCE YoY: %.2f%%", latest_inflation)
 
     # Run news analysis if available
     if data_dict['newsdata'] is not None and len(data_dict['newsdata']) > 0:
-        print("\n" + "=" * 60)
-        print("=== News Data Analysis ===")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("=== News Data Analysis ===")
+        logger.info("=" * 60)
 
         event_news = analyze_news_sentiment_around_events(data_dict)
 
@@ -898,12 +896,12 @@ if __name__ == "__main__":
 
         os.makedirs('./analysis_data', exist_ok=True)
         event_news_df.to_csv('./analysis_data/event_news_merged.csv', index=False)
-        print(f"\nSaved merged event-news dataset: {len(event_news_df):,} records")
+        logger.info("Saved merged event-news dataset: %s records", f"{len(event_news_df):,}")
     else:
-        print("\n" + "=" * 60)
-        print("=== News Data ===")
-        print("=" * 60)
-        print("No news data available yet. Run news aggregator to collect data.")
+        logger.info("=" * 60)
+        logger.info("=== News Data ===")
+        logger.info("=" * 60)
+        logger.info("No news data available yet. Run news aggregator to collect data.")
 
     # Save inflation plot
     if data_dict['inflationdata'] is not None:
@@ -941,19 +939,19 @@ if __name__ == "__main__":
 
             plt.tight_layout()
             plt.savefig('inflation_analysis.png', dpi=300, bbox_inches='tight')
-            print("\nSaved plot to inflation_analysis.png")
+            logger.info("Saved plot to inflation_analysis.png")
         except ImportError:
-            print("\nMatplotlib not available - skipping plot generation")
+            logger.info("Matplotlib not available - skipping plot generation")
 
     # Final summary
-    print("\n" + "=" * 60)
-    print("=== Complete Dataset Summary ===")
-    print("=" * 60)
-    print("\nDatasets loaded:")
+    logger.info("=" * 60)
+    logger.info("=== Complete Dataset Summary ===")
+    logger.info("=" * 60)
+    logger.info("Datasets loaded:")
     for key, value in data_dict.items():
         status = "Loaded" if value is not None else "Not loaded"
-        print(f"  {key}: {status}")
+        logger.info("  %s: %s", key, status)
 
-    print("\n" + "=" * 60)
-    print("Data loading complete!")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Data loading complete!")
+    logger.info("=" * 60)
