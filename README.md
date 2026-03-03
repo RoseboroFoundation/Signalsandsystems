@@ -91,7 +91,7 @@ uv run python clean.py
 
 ## Caching
 
-Downloaded data is cached as `.pkl` files in `./data/fred/` and `./fama_french_data/`. Subsequent calls load from cache unless:
+Downloaded data is cached as `.parquet` files in `./data/fred/` and `./fama_french_data/`. Subsequent calls load from cache unless:
 
 - The cache file doesn't exist
 - `force_refresh=True` is passed (available on comprehensive loader functions)
