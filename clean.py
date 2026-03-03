@@ -64,7 +64,9 @@ This module provides functions to:
 # IMPORTS
 # =============================================================================
 import os
+import shutil
 import time
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -105,6 +107,114 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _validate_fred_api_key():
+    """Raise ValueError if FRED API key is not configured."""
+    if not API_KEY:
+        raise ValueError(
+            "FRED API key not found. Set FRED_API_KEY in .env. "
+            "Get a free key at: https://fred.stlouisfed.org/docs/api/api_key.html"
+        )
+
+
+def _download_fred_series(series_dict, start_date, end_date):
+    """Download multiple FRED series into a DataFrame."""
+    _validate_fred_api_key()
+    data = {}
+    for name, code in series_dict.items():
+        try:
+            logger.debug("Downloading %s (%s)...", name, code)
+            df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
+            data[name] = df.iloc[:, 0]
+        except Exception as e:
+            logger.warning("Could not download %s (%s): %s", name, code, e)
+    return pd.DataFrame(data)
+
+
+def _make_json_serializable(obj):
+    """Convert Timestamps/numpy types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    if hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    return obj
+
+
+def _restore_summary_stats(data):
+    """Restore Timestamps from ISO strings in loaded summary_stats."""
+    if not isinstance(data, dict):
+        return data
+    for key, value in data.items():
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k in ('start_date', 'end_date') and isinstance(v, str):
+                    try:
+                        value[k] = pd.Timestamp(v)
+                    except Exception:
+                        pass
+    return data
+
+
+def _save_cache(result, cache_dir):
+    """Serialize DataFrame or dict-of-DataFrames to parquet-based cache."""
+    os.makedirs(cache_dir, exist_ok=True)
+    manifest = {'type': None, 'keys': []}
+
+    if isinstance(result, pd.DataFrame):
+        result.to_parquet(os.path.join(cache_dir, '_data.parquet'))
+        manifest['type'] = 'dataframe'
+    elif isinstance(result, dict):
+        manifest['type'] = 'dict'
+        for key, value in result.items():
+            if isinstance(value, pd.DataFrame):
+                value.to_parquet(os.path.join(cache_dir, f'{key}.parquet'))
+                manifest['keys'].append({'name': key, 'kind': 'dataframe'})
+            elif key == 'summary_stats' and isinstance(value, dict):
+                with open(os.path.join(cache_dir, '_summary_stats.json'), 'w') as f:
+                    json.dump(_make_json_serializable(value), f)
+                manifest['keys'].append({'name': key, 'kind': 'json'})
+            elif isinstance(value, dict):
+                _save_cache(value, os.path.join(cache_dir, key))
+                manifest['keys'].append({'name': key, 'kind': 'subdir'})
+            elif value is None:
+                manifest['keys'].append({'name': key, 'kind': 'none'})
+
+    with open(os.path.join(cache_dir, '_manifest.json'), 'w') as f:
+        json.dump(manifest, f)
+
+
+def _load_cache(cache_dir):
+    """Load cached data from parquet-based cache directory."""
+    manifest_path = os.path.join(cache_dir, '_manifest.json')
+    if not os.path.exists(manifest_path):
+        return None
+
+    with open(manifest_path, 'r') as f:
+        manifest = json.load(f)
+
+    if manifest['type'] == 'dataframe':
+        return pd.read_parquet(os.path.join(cache_dir, '_data.parquet'))
+    elif manifest['type'] == 'dict':
+        result = {}
+        for entry in manifest['keys']:
+            name = entry['name']
+            kind = entry['kind']
+            if kind == 'dataframe':
+                result[name] = pd.read_parquet(
+                    os.path.join(cache_dir, f'{name}.parquet')
+                )
+            elif kind == 'json':
+                with open(os.path.join(cache_dir, '_summary_stats.json'), 'r') as f:
+                    result[name] = _restore_summary_stats(json.load(f))
+            elif kind == 'subdir':
+                result[name] = _load_cache(os.path.join(cache_dir, name))
+            elif kind == 'none':
+                result[name] = None
+        return result
+    return None
 
 
 # =============================================================================
@@ -161,7 +271,7 @@ def get_stock_data(tickers, start_date='2000-01-01', end_date='2025-12-31'):
 
     for ticker in tickers:
         try:
-            print(f"Downloading data for {ticker}...")
+            logger.info("Downloading data for %s...", ticker)
             data = yf.download(
                 ticker,
                 start=start_date,
@@ -181,17 +291,17 @@ def get_stock_data(tickers, start_date='2000-01-01', end_date='2025-12-31'):
                 data = data[column_order]
 
                 stock_data[ticker] = data
-                print(f"  Successfully downloaded {len(data)} rows for {ticker}")
+                logger.info("  Successfully downloaded %d rows for %s", len(data), ticker)
             else:
                 failed_tickers.append(ticker)
-                print(f"  No data found for {ticker}")
+                logger.info("  No data found for %s", ticker)
 
         except Exception as e:
             failed_tickers.append(ticker)
-            print(f"  Error downloading {ticker}: {e}")
+            logger.error("Error downloading %s: %s", ticker, e)
 
     if failed_tickers:
-        print(f"\nFailed to download data for: {failed_tickers}")
+        logger.error("Failed to download data for: %s", failed_tickers)
 
     return stock_data
 
@@ -203,20 +313,20 @@ def download_vix_data():
     """Download VIX data from FRED and save to CSV."""
 
     if not API_KEY:
-        print("\nERROR: FRED API key not found or not set!")
-        print("\nPlease follow these steps:")
-        print("1. Create a file named '.env' in the same directory as this script")
-        print("2. Add this line to the .env file:")
-        print("   FRED_API_KEY=your_actual_api_key_here")
-        print("\n3. Get your free API key at:")
-        print("   https://fred.stlouisfed.org/docs/api/api_key.html")
+        logger.error("ERROR: FRED API key not found or not set!")
+        logger.error("Please follow these steps:")
+        logger.error("1. Create a file named '.env' in the same directory as this script")
+        logger.error("2. Add this line to the .env file:")
+        logger.error("   FRED_API_KEY=your_actual_api_key_here")
+        logger.error("3. Get your free API key at:")
+        logger.error("   https://fred.stlouisfed.org/docs/api/api_key.html")
         return None
 
     try:
-        print("Connecting to FRED...")
+        logger.info("Connecting to FRED...")
         fred = Fred(api_key=API_KEY)
 
-        print(f"Downloading VIX data from {START_DATE} to {END_DATE}...")
+        logger.info("Downloading VIX data from %s to %s...", START_DATE, END_DATE)
         vix_series = fred.get_series(
             'VIXCLS',
             observation_start=START_DATE,
@@ -231,53 +341,57 @@ def download_vix_data():
         vix_df = vix_df.dropna()
         vix_df.to_csv(VIX_OUTPUT_FILE, index=False)
 
-        # Print summary
-        print("\n" + "=" * 60)
-        print("DOWNLOAD COMPLETE!")
-        print("=" * 60)
-        print(f"File saved: {VIX_OUTPUT_FILE}")
-        print(f"Date range: {vix_df['date'].min().date()} to {vix_df['date'].max().date()}")
-        print(f"Total observations: {len(vix_df):,}")
+        # Log summary
+        logger.info("=" * 60)
+        logger.info("DOWNLOAD COMPLETE!")
+        logger.info("=" * 60)
+        logger.info("File saved: %s", VIX_OUTPUT_FILE)
+        logger.info("Date range: %s to %s", vix_df['date'].min().date(), vix_df['date'].max().date())
+        logger.info("Total observations: %s", f"{len(vix_df):,}")
 
-        print("\nVIX Summary Statistics:")
-        print("-" * 60)
+        logger.info("VIX Summary Statistics:")
+        logger.info("-" * 60)
         stats = vix_df['vix'].describe()
-        print(f"Count:  {stats['count']:,.0f}")
-        print(f"Mean:   {stats['mean']:.2f}")
-        print(f"Std:    {stats['std']:.2f}")
-        print(f"Min:    {stats['min']:.2f}")
-        print(f"25%:    {stats['25%']:.2f}")
-        print(f"50%:    {stats['50%']:.2f}")
-        print(f"75%:    {stats['75%']:.2f}")
-        print(f"Max:    {stats['max']:.2f}")
+        logger.info("Count:  %.0f", stats['count'])
+        logger.info("Mean:   %.2f", stats['mean'])
+        logger.info("Std:    %.2f", stats['std'])
+        logger.info("Min:    %.2f", stats['min'])
+        logger.info("25%%:    %.2f", stats['25%'])
+        logger.info("50%%:    %.2f", stats['50%'])
+        logger.info("75%%:    %.2f", stats['75%'])
+        logger.info("Max:    %.2f", stats['max'])
 
         # Find extremes
         max_idx = vix_df['vix'].idxmax()
         min_idx = vix_df['vix'].idxmin()
 
-        print("\nHighest VIX:")
-        print(f"   {vix_df.loc[max_idx, 'vix']:.2f} on {vix_df.loc[max_idx, 'date'].date()}")
+        logger.info("Highest VIX:")
+        logger.info("   %.2f on %s", vix_df.loc[max_idx, 'vix'], vix_df.loc[max_idx, 'date'].date())
 
-        print("Lowest VIX:")
-        print(f"   {vix_df.loc[min_idx, 'vix']:.2f} on {vix_df.loc[min_idx, 'date'].date()}")
+        logger.info("Lowest VIX:")
+        logger.info("   %.2f on %s", vix_df.loc[min_idx, 'vix'], vix_df.loc[min_idx, 'date'].date())
 
-        print("\nQuick Analysis:")
-        print(f"Days with VIX > 30: {(vix_df['vix'] > 30).sum():,} ({(vix_df['vix'] > 30).sum()/len(vix_df)*100:.1f}%)")
-        print(f"Days with VIX > 40: {(vix_df['vix'] > 40).sum():,} ({(vix_df['vix'] > 40).sum()/len(vix_df)*100:.1f}%)")
-        print(f"Days with VIX > 50: {(vix_df['vix'] > 50).sum():,} ({(vix_df['vix'] > 50).sum()/len(vix_df)*100:.1f}%)")
+        vix_gt_30 = (vix_df['vix'] > 30).sum()
+        vix_gt_40 = (vix_df['vix'] > 40).sum()
+        vix_gt_50 = (vix_df['vix'] > 50).sum()
+        total = len(vix_df)
+        logger.info("Quick Analysis:")
+        logger.info("Days with VIX > 30: %s (%.1f%%)", f"{vix_gt_30:,}", vix_gt_30 / total * 100)
+        logger.info("Days with VIX > 40: %s (%.1f%%)", f"{vix_gt_40:,}", vix_gt_40 / total * 100)
+        logger.info("Days with VIX > 50: %s (%.1f%%)", f"{vix_gt_50:,}", vix_gt_50 / total * 100)
 
-        print("\nCitation:")
-        print("Chicago Board Options Exchange, CBOE Volatility Index: VIX [VIXCLS],")
-        print("retrieved from FRED, Federal Reserve Bank of St. Louis;")
-        print("https://fred.stlouisfed.org/series/VIXCLS")
+        logger.info("Citation:")
+        logger.info("Chicago Board Options Exchange, CBOE Volatility Index: VIX [VIXCLS],")
+        logger.info("retrieved from FRED, Federal Reserve Bank of St. Louis;")
+        logger.info("https://fred.stlouisfed.org/series/VIXCLS")
 
         return vix_df
 
     except Exception as e:
-        print(f"\nError: {str(e)}")
-        print("\nTroubleshooting:")
-        print("1. Verify your API key is correct in the .env file")
-        print("2. Check your internet connection")
+        logger.error("Error: %s", e)
+        logger.error("Troubleshooting:")
+        logger.error("1. Verify your API key is correct in the .env file")
+        logger.error("2. Check your internet connection")
         return None
 
 
@@ -288,7 +402,7 @@ def download_fama_french_factors(
     start_date='1926-07-01',
     end_date=None,
     frequency='daily',
-    save_path=None
+    output_dir=None
 ):
     """
     Download Fama-French factor data from Kenneth French's data library.
@@ -301,8 +415,8 @@ def download_fama_french_factors(
         End date in 'YYYY-MM-DD' format (defaults to today)
     frequency : str, default 'daily'
         'daily', 'monthly', or 'annual'
-    save_path : str, optional
-        Path to save CSV file
+    output_dir : str, optional
+        Directory to save CSV files
 
     Returns:
     --------
@@ -321,7 +435,7 @@ def download_fama_french_factors(
 
     try:
         # Download 3-Factor Model
-        print("Downloading Fama-French 3-Factor Model...")
+        logger.info("Downloading Fama-French 3-Factor Model...")
         ff3 = pdr.DataReader(
             freq_map[frequency],
             'famafrench',
@@ -331,7 +445,7 @@ def download_fama_french_factors(
         results['FF3'] = ff3
 
         # Download 5-Factor Model
-        print("Downloading Fama-French 5-Factor Model...")
+        logger.info("Downloading Fama-French 5-Factor Model...")
         ff5_name = (
             'F-F_Research_Data_5_Factors_2x3_daily'
             if frequency == 'daily'
@@ -346,7 +460,7 @@ def download_fama_french_factors(
         results['FF5'] = ff5
 
         # Download Momentum Factor
-        print("Downloading Momentum Factor...")
+        logger.info("Downloading Momentum Factor...")
         mom_name = (
             'F-F_Momentum_Factor_daily'
             if frequency == 'daily'
@@ -361,20 +475,20 @@ def download_fama_french_factors(
         results['MOM'] = mom
 
         # Save to CSV if path provided
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
             for name, df in results.items():
                 filename = f"{name}_{frequency}_{start_date}_to_{end_date}.csv"
-                filepath = os.path.join(save_path, filename)
+                filepath = os.path.join(output_dir, filename)
                 df.to_csv(filepath)
-                print(f"Saved {name} to {filepath}")
+                logger.info("Saved %s to %s", name, filepath)
 
-        print(f"\nDownload complete! Date range: {ff3.index[0]} to {ff3.index[-1]}")
+        logger.info("Download complete! Date range: %s to %s", ff3.index[0], ff3.index[-1])
         return results
 
     except Exception as e:
-        print(f"Error downloading data: {e}")
+        logger.error("downloading data: %s", e)
         return None
 
 
@@ -383,7 +497,7 @@ def download_industry_portfolios(
     start_date='1926-07-01',
     end_date=None,
     frequency='daily',
-    save_path=None
+    output_dir=None
 ):
     """
     Download Fama-French industry portfolio returns.
@@ -398,8 +512,8 @@ def download_industry_portfolios(
         End date (defaults to today)
     frequency : str
         'daily' or 'monthly'
-    save_path : str, optional
-        Path to save CSV file
+    output_dir : str, optional
+        Directory to save CSV files
 
     Returns:
     --------
@@ -412,7 +526,7 @@ def download_industry_portfolios(
     dataset_name = f'{num_industries}_Industry_Portfolios{freq_suffix}'
 
     try:
-        print(f"Downloading {num_industries} Industry Portfolios...")
+        logger.info("Downloading %s Industry Portfolios...", num_industries)
         ind_portfolios = pdr.DataReader(
             dataset_name,
             'famafrench',
@@ -420,17 +534,17 @@ def download_industry_portfolios(
             end=end_date
         )[0]
 
-        if save_path:
-            os.makedirs(save_path, exist_ok=True)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
             filename = f"Industry_{num_industries}_{frequency}_{start_date}_to_{end_date}.csv"
-            filepath = os.path.join(save_path, filename)
+            filepath = os.path.join(output_dir, filename)
             ind_portfolios.to_csv(filepath)
-            print(f"Saved to {filepath}")
+            logger.info("Saved to %s", filepath)
 
         return ind_portfolios
 
     except Exception as e:
-        print(f"Error downloading industry portfolios: {e}")
+        logger.error("downloading industry portfolios: %s", e)
         return None
 
 
@@ -443,90 +557,246 @@ class Form4Downloader:
     def __init__(self, output_dir='./sec_form4_data'):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        self.headers = {
-            'User-Agent': 'Ashley Roseboro ashley@roseboroholdings.com',
+        # SEC requires a User-Agent with contact info
+        self.user_agent = os.getenv('SEC_USER_AGENT')
+        if not self.user_agent:
+            logger.warning(
+                "SEC_USER_AGENT not set. SEC requires contact info. "
+                "Set SEC_USER_AGENT='Name email' in .env"
+            )
+            self.user_agent = 'SignalsAndSystems/1.0'
+
+    def _get_headers(self, url):
+        """Get headers for SEC API requests with correct Host."""
+        if 'data.sec.gov' in url:
+            host = 'data.sec.gov'
+        else:
+            host = 'www.sec.gov'
+        return {
+            'User-Agent': self.user_agent,
             'Accept-Encoding': 'gzip, deflate',
-            'Host': 'www.sec.gov'
+            'Host': host
         }
 
     def get_company_cik(self, ticker: str) -> str:
-        """Get company CIK from ticker symbol."""
-        # Implementation placeholder - would use SEC EDGAR API
-        _ = ticker  # Acknowledge parameter until implementation
+        """
+        Get company CIK from ticker symbol using SEC EDGAR API.
+
+        Parameters:
+        -----------
+        ticker : str
+            Stock ticker symbol
+
+        Returns:
+        --------
+        str : CIK number (zero-padded to 10 digits) or None if not found
+        """
+        # Cache the ticker-to-CIK mapping
+        if not hasattr(self, '_cik_mapping'):
+            self._cik_mapping = self._load_cik_mapping()
+
+        ticker_upper = ticker.upper()
+        if ticker_upper in self._cik_mapping:
+            return self._cik_mapping[ticker_upper]
         return None
+
+    def _load_cik_mapping(self) -> Dict[str, str]:
+        """
+        Load ticker to CIK mapping from SEC.
+
+        Returns:
+        --------
+        Dict[str, str] : Mapping of ticker symbols to CIK numbers
+        """
+        cache_file = os.path.join(self.output_dir, 'ticker_cik_mapping.json')
+
+        # Check for cached mapping (refresh if older than 7 days)
+        if os.path.exists(cache_file):
+            file_age = time.time() - os.path.getmtime(cache_file)
+            if file_age < 7 * 24 * 60 * 60:  # 7 days
+                try:
+                    with open(cache_file, 'r') as f:
+                        logger.info("Loading cached CIK mapping...")
+                        return json.load(f)
+                except Exception as e:
+                    logger.debug("Failed to read CIK cache: %s", e)
+
+        logger.info("Downloading ticker-to-CIK mapping from SEC...")
+        try:
+            # SEC provides a JSON file with all company tickers and CIKs
+            url = "https://www.sec.gov/files/company_tickers.json"
+            response = requests.get(url, headers=self._get_headers(url))
+            time.sleep(0.2)
+
+            if response.status_code == 200:
+                data = response.json()
+                mapping = {}
+                for entry in data.values():
+                    ticker = entry.get('ticker', '').upper()
+                    cik = str(entry.get('cik_str', '')).zfill(10)
+                    if ticker and cik:
+                        mapping[ticker] = cik
+
+                # Cache the mapping
+                with open(cache_file, 'w') as f:
+                    json.dump(mapping, f)
+
+                logger.info("Loaded %d ticker-to-CIK mappings", len(mapping))
+                return mapping
+            else:
+                logger.error("Failed to download CIK mapping: HTTP %s", response.status_code)
+                return {}
+        except Exception as e:
+            logger.error("loading CIK mapping: %s", e)
+            return {}
 
     def download_form4_filings(
         self,
         ticker: str,
         cik: str,
         start_date: str = '2000-01-01',
-        end_date: str = '2025-12-31'
+        end_date: str = '2025-12-31',
+        max_filings: int = 500
     ) -> List[Dict]:
         """
         Download all Form 4 filings for a company within date range.
+
+        Uses the SEC EDGAR JSON API for reliable data retrieval.
+
+        Parameters:
+        -----------
+        ticker : str
+            Stock ticker symbol
+        cik : str
+            SEC CIK number
+        start_date : str
+            Start date (YYYY-MM-DD)
+        end_date : str
+            End date (YYYY-MM-DD)
+        max_filings : int
+            Maximum number of filings to retrieve
 
         Returns:
         --------
         List[Dict] : List of filing metadata
         """
         filings = []
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
 
         try:
-            cik_no_leading = str(int(cik))
-            url = (
-                f"https://www.sec.gov/cgi-bin/browse-edgar?"
-                f"action=getcompany&CIK={cik_no_leading}&type=4&"
-                f"dateb=&owner=include&count=100&search_text="
-            )
+            # Use the SEC JSON API for submissions
+            cik_padded = cik.zfill(10)
+            url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
 
-            response = requests.get(url, headers=self.headers)
-            time.sleep(0.2)
+            response = requests.get(url, headers=self._get_headers(url))
+            time.sleep(0.15)
 
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                filing_table = soup.find('table', {'class': 'tableFile2'})
+            if response.status_code != 200:
+                logger.error("  HTTP %s for %s", response.status_code, ticker)
+                return []
 
-                if not filing_table:
-                    print(f"  No Form 4 filings table found for {ticker}")
-                    return []
+            data = response.json()
 
-                rows = filing_table.find_all('tr')[1:]
+            # Get recent filings
+            recent_filings = data.get('filings', {}).get('recent', {})
+            forms = recent_filings.get('form', [])
+            dates = recent_filings.get('filingDate', [])
+            accessions = recent_filings.get('accessionNumber', [])
+            primary_docs = recent_filings.get('primaryDocument', [])
 
-                for row in rows:
-                    cols = row.find_all('td')
-                    if len(cols) >= 4:
-                        filing_type = cols[0].text.strip()
+            # Process each filing
+            for i, form in enumerate(forms):
+                if form in ['4', '4/A']:  # Form 4 and amendments
+                    if i >= len(dates):
+                        continue
 
-                        if filing_type == '4':
-                            filing_date = cols[3].text.strip()
+                    filing_date = dates[i]
 
-                            if start_date <= filing_date <= end_date:
-                                doc_link = cols[1].find('a')
-                                if doc_link:
-                                    doc_url = 'https://www.sec.gov' + doc_link.get('href')
-                                    accession = cols[4].text.strip()
+                    # Check date range
+                    filing_dt = datetime.strptime(filing_date, '%Y-%m-%d')
+                    if start_dt <= filing_dt <= end_dt:
+                        accession = accessions[i].replace('-', '')
+                        primary_doc = primary_docs[i] if i < len(primary_docs) else ''
+
+                        # Construct the filing URL
+                        doc_url = (
+                            f"https://www.sec.gov/Archives/edgar/data/"
+                            f"{int(cik)}/{accession}/{primary_doc}"
+                        )
+
+                        filing_info = {
+                            'ticker': ticker,
+                            'cik': cik,
+                            'filing_date': filing_date,
+                            'accession_number': accessions[i],
+                            'filing_url': doc_url,
+                            'form_type': form
+                        }
+                        filings.append(filing_info)
+
+                        if len(filings) >= max_filings:
+                            break
+
+            # Also check older filings if available
+            older_files = data.get('filings', {}).get('files', [])
+            for file_info in older_files[:3]:  # Check up to 3 older filing batches
+                if len(filings) >= max_filings:
+                    break
+
+                file_url = f"https://data.sec.gov/submissions/{file_info.get('name', '')}"
+                try:
+                    file_response = requests.get(file_url, headers=self._get_headers(file_url))
+                    time.sleep(0.15)
+
+                    if file_response.status_code == 200:
+                        file_data = file_response.json()
+                        forms = file_data.get('form', [])
+                        dates = file_data.get('filingDate', [])
+                        accessions = file_data.get('accessionNumber', [])
+                        primary_docs = file_data.get('primaryDocument', [])
+
+                        for i, form in enumerate(forms):
+                            if form in ['4', '4/A']:
+                                if i >= len(dates):
+                                    continue
+
+                                filing_date = dates[i]
+                                filing_dt = datetime.strptime(filing_date, '%Y-%m-%d')
+                                if start_dt <= filing_dt <= end_dt:
+                                    accession = accessions[i].replace('-', '')
+                                    primary_doc = primary_docs[i] if i < len(primary_docs) else ''
+
+                                    doc_url = (
+                                        f"https://www.sec.gov/Archives/edgar/data/"
+                                        f"{int(cik)}/{accession}/{primary_doc}"
+                                    )
 
                                     filing_info = {
                                         'ticker': ticker,
                                         'cik': cik,
                                         'filing_date': filing_date,
-                                        'accession_number': accession,
-                                        'filing_url': doc_url
+                                        'accession_number': accessions[i],
+                                        'filing_url': doc_url,
+                                        'form_type': form
                                     }
                                     filings.append(filing_info)
 
-                if len(filings) > 0:
-                    print(f"  Found {len(filings)} Form 4 filings for {ticker}")
-                else:
-                    print(f"  No Form 4 filings in date range for {ticker}")
+                                    if len(filings) >= max_filings:
+                                        break
+                except Exception as e:
+                    logger.warning("Failed to fetch older filing batch: %s", e)
+                    continue
 
-                return filings
+            if len(filings) > 0:
+                logger.info("  Found %d Form 4 filings for %s", len(filings), ticker)
             else:
-                print(f"  HTTP {response.status_code} for {ticker}")
-                return []
+                logger.info("  No Form 4 filings in date range for %s", ticker)
+
+            return filings
 
         except Exception as e:
-            print(f"  Error downloading Form 4 filings for {ticker}: {e}")
+            logger.error("Error downloading Form 4 filings for %s: %s", ticker, e)
             return []
 
     def parse_form4_xml(self, filing_url: str) -> List[Dict]:
@@ -538,10 +808,10 @@ class Form4Downloader:
         List[Dict] : Parsed transaction data
         """
         try:
-            response = requests.get(filing_url, headers=self.headers)
+            response = requests.get(filing_url, headers=self._get_headers(filing_url))
             time.sleep(0.2)
         except Exception as e:
-            print(f"Error fetching filing page: {e}")
+            logger.error("fetching filing page: %s", e)
             return []
 
         if response.status_code != 200:
@@ -562,11 +832,11 @@ class Form4Downloader:
                 break
 
         if not xml_link:
-            print("    No XML document found")
+            logger.info("    No XML document found")
             return []
 
         # Fetch and parse the XML
-        xml_response = requests.get(xml_link, headers=self.headers)
+        xml_response = requests.get(xml_link, headers=self._get_headers(xml_link))
         time.sleep(0.2)
 
         if xml_response.status_code != 200:
@@ -626,7 +896,8 @@ class Form4Downloader:
                     )
                 }
                 transactions.append(transaction)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse Form 4 transaction: %s", e)
                 continue
 
         return transactions
@@ -659,7 +930,7 @@ class Form4Downloader:
         all_transactions = []
 
         for ticker in culture_war_companies:
-            print(f"\nProcessing {ticker}...")
+            logger.info("Processing %s...", ticker)
 
             cik = self.get_company_cik(ticker)
             if not cik:
@@ -694,7 +965,7 @@ class Form4Downloader:
                     f'form4_transactions_{start_date}_to_{end_date}.csv'
                 )
                 df.to_csv(output_file, index=False)
-                print(f"\nSaved {len(df)} transactions to {output_file}")
+                logger.info("Saved %d transactions to %s", len(df), output_file)
 
         return df
 
@@ -733,11 +1004,11 @@ def load_culture_war_companies(culture_war_data: pd.DataFrame) -> List[str]:
     for col in possible_company_cols:
         if col in culture_war_data.columns:
             companies = culture_war_data[col].unique().tolist()
-            print("Warning: Found company names but not tickers. "
-                  "You'll need to map company names to tickers.")
+            logger.info("Warning: Found company names but not tickers. "
+                       "You'll need to map company names to tickers.")
             return [c for c in companies if pd.notna(c)]
 
-    print(f"Available columns: {culture_war_data.columns.tolist()}")
+    logger.error("Available columns: %s", culture_war_data.columns.tolist())
     raise ValueError("Cannot find ticker or company column in culture war data")
 
 
@@ -796,7 +1067,7 @@ class CompanyNewsAggregator:
                 )
                 logger.info("Reddit client initialized successfully")
             except Exception as e:
-                logger.warning(f"Failed to initialize Reddit client: {e}")
+                logger.warning("Failed to initialize Reddit client: %s", e)
 
         self.last_nyt_request = None
         self.nyt_requests_this_minute = 0
@@ -904,8 +1175,8 @@ class CompanyNewsAggregator:
         # Build search queries
         search_queries = self._build_search_queries(company_name, culture_war_event)
 
-        logger.info(f"  Guardian: Searching for {ticker} with {len(search_queries)} queries")
-        logger.info(f"    Date range: {start_date.date()} to {end_date.date()}")
+        logger.info("  Guardian: Searching for %s with %d queries", ticker, len(search_queries))
+        logger.info("    Date range: %s to %s", start_date.date(), end_date.date())
 
         try:
             for query in search_queries:
@@ -963,24 +1234,24 @@ class CompanyNewsAggregator:
                                     query_articles += 1
 
                                 except Exception as e:
-                                    logger.debug(f"Error parsing Guardian article: {e}")
+                                    logger.debug("Error parsing Guardian article: %s", e)
                                     continue
 
                         page += 1
                         time.sleep(0.2)
 
                     except requests.exceptions.RequestException as e:
-                        logger.warning(f"Error fetching Guardian page {page}: {e}")
+                        logger.warning("Error fetching Guardian page %d: %s", page, e)
                         time.sleep(2)
                         break
 
-                logger.info(f"    Query '{query[:40]}...': {query_articles} articles")
+                logger.info("    Query '%.40s...': %d articles", query, query_articles)
                 time.sleep(0.3)
 
         except Exception as e:
-            logger.error(f"Error in Guardian search for {ticker}: {e}")
+            logger.error("Error in Guardian search for %s: %s", ticker, e)
 
-        logger.info(f"  Guardian total: {len(articles)} articles")
+        logger.info("  Guardian total: %d articles", len(articles))
         return articles
 
     def search_nyt(
@@ -1025,8 +1296,8 @@ class CompanyNewsAggregator:
         # Build search queries
         search_queries = self._build_search_queries(company_name, culture_war_event)
 
-        logger.info(f"  NYT: Searching for {ticker} with {len(search_queries)} queries")
-        logger.info(f"    Date range: {start_date.date()} to {end_date.date()}")
+        logger.info("  NYT: Searching for %s with %d queries", ticker, len(search_queries))
+        logger.info("    Date range: %s to %s", start_date.date(), end_date.date())
 
         try:
             for query in search_queries:
@@ -1094,23 +1365,23 @@ class CompanyNewsAggregator:
                                     query_articles += 1
 
                                 except Exception as e:
-                                    logger.debug(f"Error parsing NYT article: {e}")
+                                    logger.debug("Error parsing NYT article: %s", e)
                                     continue
 
                         page += 1
 
                     except requests.exceptions.RequestException as e:
-                        logger.warning(f"Error fetching NYT page {page}: {e}")
+                        logger.warning("Error fetching NYT page %d: %s", page, e)
                         time.sleep(5)
                         break
 
-                logger.info(f"    Query '{query[:40]}...': {query_articles} articles")
+                logger.info("    Query '%.40s...': %d articles", query, query_articles)
                 time.sleep(1)
 
         except Exception as e:
-            logger.error(f"Error in NYT search for {ticker}: {e}")
+            logger.error("Error in NYT search for %s: %s", ticker, e)
 
-        logger.info(f"  NYT total: {len(articles)} articles")
+        logger.info("  NYT total: %d articles", len(articles))
         return articles
 
     def _nyt_rate_limit(self):
@@ -1123,7 +1394,7 @@ class CompanyNewsAggregator:
             if time_diff < 60:
                 if self.nyt_requests_this_minute >= 5:
                     sleep_time = 60 - time_diff + 1
-                    logger.info(f"NYT rate limit: sleeping {sleep_time:.1f}s")
+                    logger.info("NYT rate limit: sleeping %.1fs", sleep_time)
                     time.sleep(sleep_time)
                     self.nyt_requests_this_minute = 0
             else:
@@ -1182,8 +1453,8 @@ class CompanyNewsAggregator:
         # Build search queries using the helper method
         search_queries = self._build_search_queries(company_name, culture_war_event)
 
-        logger.info(f"  Reddit: Searching for {ticker} with {len(search_queries)} queries")
-        logger.info(f"    Date range: {start_date.date()} to {end_date.date()}")
+        logger.info("  Reddit: Searching for %s with %d queries", ticker, len(search_queries))
+        logger.info("    Date range: %s to %s", start_date.date(), end_date.date())
 
         try:
             for subreddit_name in subreddits:
@@ -1237,13 +1508,13 @@ class CompanyNewsAggregator:
                     time.sleep(1)
 
                 except Exception as e:
-                    logger.debug(f"Error accessing r/{subreddit_name}: {e}")
+                    logger.debug("Error accessing r/%s: %s", subreddit_name, e)
                     continue
 
         except Exception as e:
-            logger.error(f"Error in Reddit search for {ticker}: {e}")
+            logger.error("Error in Reddit search for %s: %s", ticker, e)
 
-        logger.info(f"  Reddit total: {len(articles)} posts")
+        logger.info("  Reddit total: %d posts", len(articles))
         return articles
 
     def aggregate_culture_war_news(
@@ -1300,10 +1571,10 @@ class CompanyNewsAggregator:
                     if ticker and event_date:
                         processed_events.add(f"{ticker}_{event_date}")
 
-                logger.info(f"Loaded checkpoint with {len(checkpoint_df)} articles")
-                logger.info(f"Processed events: {len(processed_events)}")
+                logger.info("Loaded checkpoint with %d articles", len(checkpoint_df))
+                logger.info("Processed events: %d", len(processed_events))
             except Exception as e:
-                logger.warning(f"Error loading checkpoint: {e}")
+                logger.warning("Error loading checkpoint: %s", e)
 
         total_events = len(culture_war_df)
 
@@ -1316,7 +1587,7 @@ class CompanyNewsAggregator:
 
             # Skip if no ticker
             if not ticker or pd.isna(ticker) or ticker in ['Private', 'N/A']:
-                logger.info(f"Skipping {company_name} - no valid ticker")
+                logger.info("Skipping %s - no valid ticker", company_name)
                 continue
 
             # Parse event date
@@ -1325,20 +1596,20 @@ class CompanyNewsAggregator:
                 try:
                     event_date = pd.to_datetime(event_date_raw)
                 except Exception:
-                    logger.warning(f"Could not parse event date: {event_date_raw}")
+                    logger.warning("Could not parse event date: %s", event_date_raw)
 
             # Check if already processed
             event_key = f"{ticker}_{event_date}"
             if event_key in processed_events:
-                logger.info(f"Skipping {ticker} - already processed")
+                logger.info("Skipping %s - already processed", ticker)
                 continue
 
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"[{idx+1}/{total_events}] {company_name} ({ticker})")
-            logger.info(f"Event: {culture_war_event[:80]}...")
+            logger.info("=" * 60)
+            logger.info("[%d/%d] %s (%s)", idx + 1, total_events, company_name, ticker)
+            logger.info("Event: %.80s...", culture_war_event)
             if event_date:
-                logger.info(f"Event Date: {event_date.date()}")
-            logger.info(f"{'=' * 60}")
+                logger.info("Event Date: %s", event_date.date())
+            logger.info("=" * 60)
 
             event_articles = []
 
@@ -1393,7 +1664,7 @@ class CompanyNewsAggregator:
                 all_articles.extend([vars(a) for a in event_articles])
                 checkpoint_df = pd.DataFrame(all_articles)
                 checkpoint_df.to_csv(checkpoint_path, index=False)
-                logger.info(f"Checkpoint saved: {len(all_articles)} total articles")
+                logger.info("Checkpoint saved: %d total articles", len(all_articles))
 
             processed_events.add(event_key)
             time.sleep(2)
@@ -1403,7 +1674,7 @@ class CompanyNewsAggregator:
 
             original_len = len(df)
             df = df.drop_duplicates(subset=['url'], keep='first')
-            logger.info(f"\nRemoved {original_len - len(df)} duplicate articles")
+            logger.info("Removed %d duplicate articles", original_len - len(df))
 
             df['published_date'] = pd.to_datetime(df['published_date'])
             df = df.sort_values('published_date', ascending=False)
@@ -1416,30 +1687,31 @@ class CompanyNewsAggregator:
         """Save news articles to CSV with summary statistics."""
         if len(news_df) > 0:
             news_df.to_csv(output_path, index=False)
-            logger.info(f"\n{'=' * 60}")
-            logger.info(f"SAVED: {len(news_df)} articles to {output_path}")
-            logger.info(f"{'=' * 60}")
+            logger.info("=" * 60)
+            logger.info("SAVED: %d articles to %s", len(news_df), output_path)
+            logger.info("=" * 60)
 
-            logger.info("\n=== SUMMARY STATISTICS ===")
-            logger.info(f"Total articles: {len(news_df):,}")
+            logger.info("=== SUMMARY STATISTICS ===")
+            logger.info("Total articles: %d", len(news_df))
             logger.info(
-                f"Date range: {news_df['published_date'].min().date()} "
-                f"to {news_df['published_date'].max().date()}"
+                "Date range: %s to %s",
+                news_df['published_date'].min().date(),
+                news_df['published_date'].max().date()
             )
-            logger.info(f"Unique companies: {news_df['ticker'].nunique()}")
+            logger.info("Unique companies: %d", news_df['ticker'].nunique())
 
-            logger.info("\n--- Articles by Source ---")
+            logger.info("--- Articles by Source ---")
             for source, count in news_df['source'].value_counts().items():
-                logger.info(f"  {source}: {count:,}")
+                logger.info("  %s: %d", source, count)
 
-            logger.info("\n--- Top 10 Companies by Article Count ---")
+            logger.info("--- Top 10 Companies by Article Count ---")
             for ticker, count in news_df['ticker'].value_counts().head(10).items():
-                logger.info(f"  {ticker}: {count:,}")
+                logger.info("  %s: %d", ticker, count)
 
-            logger.info("\n--- Articles by Year ---")
+            logger.info("--- Articles by Year ---")
             yearly = news_df['published_date'].dt.year.value_counts().sort_index()
             for year, count in yearly.items():
-                logger.info(f"  {year}: {count:,}")
+                logger.info("  %s: %d", year, count)
         else:
             logger.warning("No articles to save")
 
@@ -1483,13 +1755,13 @@ def load_inflation_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'inflation_data_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'inflation_data_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached inflation data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached inflation data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading inflation data from FRED...")
+    logger.info("Downloading inflation data from FRED...")
 
     series = {
         'CPI': 'CPIAUCSL',
@@ -1501,21 +1773,13 @@ def load_inflation_data(
     }
 
     try:
-        raw_data = {}
-        for name, code in series.items():
-            print(f"  Downloading {name} ({code})...")
-            df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-            raw_data[name] = df
+        inflation_raw = _download_fred_series(series, start_date, end_date)
 
-        inflation_raw = pd.DataFrame({
-            name: df.iloc[:, 0] for name, df in raw_data.items()
-        })
-
-        print("Calculating year-over-year changes...")
+        logger.info("Calculating year-over-year changes...")
         inflation_yoy = inflation_raw.pct_change(periods=12) * 100
         inflation_yoy.columns = [f'{col}_YoY' for col in inflation_yoy.columns]
 
-        print("Calculating month-over-month changes...")
+        logger.info("Calculating month-over-month changes...")
         inflation_mom = inflation_raw.pct_change() * 100 * 12
         inflation_mom.columns = [f'{col}_MoM' for col in inflation_mom.columns]
 
@@ -1532,19 +1796,18 @@ def load_inflation_data(
             'combined': inflation_combined
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"Cached inflation data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached inflation data to %s", cache_dir)
 
-        print("\n=== Inflation Data Summary ===")
-        print(f"Date range: {inflation_raw.index.min()} to {inflation_raw.index.max()}")
-        print(f"Observations: {len(inflation_raw)}")
-        print("\nLatest values (Year-over-Year %):")
-        print(inflation_yoy.iloc[-1])
+        logger.info("=== Inflation Data Summary ===")
+        logger.info("Date range: %s to %s", inflation_raw.index.min(), inflation_raw.index.max())
+        logger.info("Observations: %d", len(inflation_raw))
+        logger.info("Latest values (Year-over-Year %%):\n%s", inflation_yoy.iloc[-1])
 
         return result
 
     except Exception as e:
-        print(f"Error downloading inflation data: {e}")
+        logger.error("downloading inflation data: %s", e)
         return None
 
 
@@ -1583,16 +1846,16 @@ def load_inflation_expectations_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'inflation_expectations_{start_date}_{end_date}.pkl'
+        f'inflation_expectations_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached inflation expectations from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached inflation expectations from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading inflation expectations data from FRED...")
+    logger.info("Downloading inflation expectations data from FRED...")
 
     # Breakeven inflation rates (TIPS spreads)
     breakeven_series = {
@@ -1618,43 +1881,16 @@ def load_inflation_expectations_data(
 
     try:
         # Download breakeven inflation
-        print("\n--- Breakeven Inflation (Market-Based) ---")
-        breakeven_data = {}
-        for name, code in breakeven_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                breakeven_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        breakeven_df = pd.DataFrame(breakeven_data)
+        logger.info("--- Breakeven Inflation (Market-Based) ---")
+        breakeven_df = _download_fred_series(breakeven_series, start_date, end_date)
 
         # Download survey expectations
-        print("\n--- Survey-Based Expectations ---")
-        survey_data = {}
-        for name, code in survey_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                survey_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        survey_df = pd.DataFrame(survey_data)
+        logger.info("--- Survey-Based Expectations ---")
+        survey_df = _download_fred_series(survey_series, start_date, end_date)
 
         # Download Fed measures
-        print("\n--- Federal Reserve Inflation Measures ---")
-        fed_data = {}
-        for name, code in fed_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                fed_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        fed_df = pd.DataFrame(fed_data)
+        logger.info("--- Federal Reserve Inflation Measures ---")
+        fed_df = _download_fred_series(fed_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([breakeven_df, survey_df, fed_df], axis=1)
@@ -1666,58 +1902,68 @@ def load_inflation_expectations_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached inflation expectations to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached inflation expectations to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Inflation Expectations Summary ===")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("=== Inflation Expectations Summary ===")
+        logger.info("=" * 60)
 
         if len(breakeven_df) > 0:
-            print(f"\nBreakeven Inflation (Market-Based):")
-            print(f"  Date range: {breakeven_df.index.min()} to {breakeven_df.index.max()}")
-            print(f"  Series: {list(breakeven_df.columns)}")
-            print(f"  Latest values:")
+            logger.info("Breakeven Inflation (Market-Based):")
+            logger.info("  Date range: %s to %s", breakeven_df.index.min(), breakeven_df.index.max())
+            logger.info("  Series: %s", list(breakeven_df.columns))
+            logger.info("  Latest values:")
             for col in breakeven_df.columns:
                 latest = breakeven_df[col].dropna().iloc[-1] if len(breakeven_df[col].dropna()) > 0 else 'N/A'
-                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+                if isinstance(latest, float):
+                    logger.info("    %s: %.2f%%", col, latest)
+                else:
+                    logger.info("    %s: %s", col, latest)
 
         if len(survey_df) > 0:
-            print(f"\nSurvey-Based Expectations:")
-            print(f"  Date range: {survey_df.index.min()} to {survey_df.index.max()}")
-            print(f"  Series: {list(survey_df.columns)}")
-            print(f"  Latest values:")
+            logger.info("Survey-Based Expectations:")
+            logger.info("  Date range: %s to %s", survey_df.index.min(), survey_df.index.max())
+            logger.info("  Series: %s", list(survey_df.columns))
+            logger.info("  Latest values:")
             for col in survey_df.columns:
                 latest = survey_df[col].dropna().iloc[-1] if len(survey_df[col].dropna()) > 0 else 'N/A'
-                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+                if isinstance(latest, float):
+                    logger.info("    %s: %.2f%%", col, latest)
+                else:
+                    logger.info("    %s: %s", col, latest)
 
         if len(fed_df) > 0:
-            print(f"\nFederal Reserve Measures:")
-            print(f"  Date range: {fed_df.index.min()} to {fed_df.index.max()}")
-            print(f"  Series: {list(fed_df.columns)}")
-            print(f"  Latest values:")
+            logger.info("Federal Reserve Measures:")
+            logger.info("  Date range: %s to %s", fed_df.index.min(), fed_df.index.max())
+            logger.info("  Series: %s", list(fed_df.columns))
+            logger.info("  Latest values:")
             for col in fed_df.columns:
                 latest = fed_df[col].dropna().iloc[-1] if len(fed_df[col].dropna()) > 0 else 'N/A'
-                print(f"    {col}: {latest:.2f}%" if isinstance(latest, float) else f"    {col}: {latest}")
+                if isinstance(latest, float):
+                    logger.info("    %s: %.2f%%", col, latest)
+                else:
+                    logger.info("    %s: %s", col, latest)
 
-        print("\n" + "=" * 60)
-        print("Citation:")
-        print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-        print("https://fred.stlouisfed.org/")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("Citation:")
+        logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+        logger.info("https://fred.stlouisfed.org/")
+        logger.info("=" * 60)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading inflation expectations data: {e}")
+        logger.error("downloading inflation expectations data: %s", e)
         return None
 
 
 def load_comprehensive_inflation_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive inflation dataset combining all inflation measures.
@@ -1751,29 +1997,32 @@ def load_comprehensive_inflation_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_inflation_{start_date}_{end_date}.pkl'
+        f'comprehensive_inflation_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive inflation data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive Inflation Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive inflation data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive Inflation Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load core inflation data
-    print("\n[1/3] Loading core inflation measures...")
+    logger.info("[1/3] Loading core inflation measures...")
     core_data = load_inflation_data(start_date, end_date, cache_path)
 
     # Load expectations data
-    print("\n[2/3] Loading inflation expectations...")
+    logger.info("[2/3] Loading inflation expectations...")
     expectations_data = load_inflation_expectations_data(start_date, end_date, cache_path)
 
     # Load component-level inflation
-    print("\n[3/3] Loading component-level inflation...")
+    logger.info("[3/3] Loading component-level inflation...")
     component_series = {
         'CPI_Food': 'CPIUFDSL',              # CPI Food
         'CPI_Energy': 'CPIENGSL',            # CPI Energy
@@ -1788,16 +2037,7 @@ def load_comprehensive_inflation_data(
         'Export_Prices': 'IQ',               # Export Price Index
     }
 
-    component_data = {}
-    for name, code in component_series.items():
-        try:
-            print(f"  Downloading {name} ({code})...")
-            df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-            component_data[name] = df.iloc[:, 0]
-        except Exception as e:
-            print(f"  Warning: Could not download {name}: {e}")
-
-    components_df = pd.DataFrame(component_data)
+    components_df = _download_fred_series(component_series, start_date, end_date)
 
     # Calculate YoY changes for components
     components_yoy = components_df.pct_change(periods=12) * 100
@@ -1850,21 +2090,21 @@ def load_comprehensive_inflation_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive inflation data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive inflation data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive Inflation Data Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive Inflation Data Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
-    print(f"Core inflation measures: {len(core_data['combined'].columns) if core_data else 0}")
-    print(f"Expectations measures: {len(expectations_data['combined'].columns) if expectations_data else 0}")
-    print(f"Component measures: {len(components_yoy.columns)}")
+    logger.info("--- Series Categories ---")
+    logger.info("Core inflation measures: %d", len(core_data['combined'].columns) if core_data else 0)
+    logger.info("Expectations measures: %d", len(expectations_data['combined'].columns) if expectations_data else 0)
+    logger.info("Component measures: %d", len(components_yoy.columns))
 
     return result
 
@@ -1906,13 +2146,13 @@ def load_treasury_yields(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'treasury_yields_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'treasury_yields_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached Treasury yields from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached Treasury yields from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading Treasury yield data from FRED...")
+    logger.info("Downloading Treasury yield data from FRED...")
 
     # Nominal Treasury yields
     nominal_series = {
@@ -1939,30 +2179,12 @@ def load_treasury_yields(
 
     try:
         # Download nominal yields
-        print("\n--- Nominal Treasury Yields ---")
-        nominal_data = {}
-        for name, code in nominal_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                nominal_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        nominal_df = pd.DataFrame(nominal_data)
+        logger.info("--- Nominal Treasury Yields ---")
+        nominal_df = _download_fred_series(nominal_series, start_date, end_date)
 
         # Download TIPS yields
-        print("\n--- TIPS (Real) Yields ---")
-        tips_data = {}
-        for name, code in tips_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                tips_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        tips_df = pd.DataFrame(tips_data)
+        logger.info("--- TIPS (Real) Yields ---")
+        tips_df = _download_fred_series(tips_series, start_date, end_date)
 
         # Combine all yields
         combined_df = pd.concat([nominal_df, tips_df], axis=1)
@@ -1973,27 +2195,30 @@ def load_treasury_yields(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached Treasury yields to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached Treasury yields to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Treasury Yields Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Nominal series: {len(nominal_df.columns)}")
-        print(f"TIPS series: {len(tips_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Treasury Yields Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Nominal series: %d", len(nominal_df.columns))
+        logger.info("TIPS series: %d", len(tips_df.columns))
 
-        print("\nLatest yields (%):")
+        logger.info("Latest yields (%%):")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
-            print(f"  {col}: {latest:.2f}%" if isinstance(latest, float) else f"  {col}: {latest}")
+            if isinstance(latest, float):
+                logger.info("  %s: %.2f%%", col, latest)
+            else:
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading Treasury yields: {e}")
+        logger.error("downloading Treasury yields: %s", e)
         return None
 
 
@@ -2032,13 +2257,13 @@ def load_policy_rates(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'policy_rates_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'policy_rates_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached policy rates from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached policy rates from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading policy rates from FRED...")
+    logger.info("Downloading policy rates from FRED...")
 
     # Federal Funds and discount rates
     fed_series = {
@@ -2058,30 +2283,12 @@ def load_policy_rates(
 
     try:
         # Download Fed Funds rates
-        print("\n--- Federal Funds & Discount Rates ---")
-        fed_data = {}
-        for name, code in fed_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                fed_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        fed_df = pd.DataFrame(fed_data)
+        logger.info("--- Federal Funds & Discount Rates ---")
+        fed_df = _download_fred_series(fed_series, start_date, end_date)
 
         # Download money market rates
-        print("\n--- Money Market Rates ---")
-        mm_data = {}
-        for name, code in money_market_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                mm_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        mm_df = pd.DataFrame(mm_data)
+        logger.info("--- Money Market Rates ---")
+        mm_df = _download_fred_series(money_market_series, start_date, end_date)
 
         # Combine all rates
         combined_df = pd.concat([fed_df, mm_df], axis=1)
@@ -2092,25 +2299,28 @@ def load_policy_rates(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached policy rates to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached policy rates to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Policy Rates Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
+        logger.info("=" * 60)
+        logger.info("=== Policy Rates Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
 
-        print("\nLatest rates (%):")
+        logger.info("Latest rates (%%):")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
-            print(f"  {col}: {latest:.2f}%" if isinstance(latest, float) else f"  {col}: {latest}")
+            if isinstance(latest, float):
+                logger.info("  %s: %.2f%%", col, latest)
+            else:
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading policy rates: {e}")
+        logger.error("downloading policy rates: %s", e)
         return None
 
 
@@ -2149,13 +2359,13 @@ def load_credit_spreads(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'credit_spreads_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'credit_spreads_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached credit spreads from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached credit spreads from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading credit spreads and corporate yields from FRED...")
+    logger.info("Downloading credit spreads and corporate yields from FRED...")
 
     # Corporate bond yields
     corporate_series = {
@@ -2186,43 +2396,16 @@ def load_credit_spreads(
 
     try:
         # Download corporate yields
-        print("\n--- Corporate Bond Yields ---")
-        corp_data = {}
-        for name, code in corporate_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                corp_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        corp_df = pd.DataFrame(corp_data)
+        logger.info("--- Corporate Bond Yields ---")
+        corp_df = _download_fred_series(corporate_series, start_date, end_date)
 
         # Download credit spreads
-        print("\n--- Credit Spreads ---")
-        spread_data = {}
-        for name, code in spread_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                spread_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        spread_df = pd.DataFrame(spread_data)
+        logger.info("--- Credit Spreads ---")
+        spread_df = _download_fred_series(spread_series, start_date, end_date)
 
         # Download mortgage rates
-        print("\n--- Mortgage Rates ---")
-        mortgage_data = {}
-        for name, code in mortgage_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                mortgage_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        mortgage_df = pd.DataFrame(mortgage_data)
+        logger.info("--- Mortgage Rates ---")
+        mortgage_df = _download_fred_series(mortgage_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([corp_df, spread_df, mortgage_df], axis=1)
@@ -2234,32 +2417,32 @@ def load_credit_spreads(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached credit spreads to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached credit spreads to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Credit Spreads Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Corporate yields: {len(corp_df.columns)}")
-        print(f"Credit spreads: {len(spread_df.columns)}")
-        print(f"Mortgage rates: {len(mortgage_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Credit Spreads Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Corporate yields: %d", len(corp_df.columns))
+        logger.info("Credit spreads: %d", len(spread_df.columns))
+        logger.info("Mortgage rates: %d", len(mortgage_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 unit = "bps" if "Spread" in col and latest > 10 else "%"
-                print(f"  {col}: {latest:.2f}{unit}")
+                logger.info("  %s: %.2f%s", col, latest, unit)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading credit spreads: {e}")
+        logger.error("downloading credit spreads: %s", e)
         return None
 
 
@@ -2283,30 +2466,30 @@ def calculate_yield_curve_metrics(treasury_data):
     pd.DataFrame : Yield curve metrics
     """
     if treasury_data is None or 'nominal' not in treasury_data:
-        print("Treasury data not available")
+        logger.info("Treasury data not available")
         return None
 
     nominal = treasury_data['nominal']
     metrics = pd.DataFrame(index=nominal.index)
 
-    print("Calculating yield curve metrics...")
+    logger.info("Calculating yield curve metrics...")
 
     # Yield curve slopes
     if 'Treasury_10Y' in nominal.columns and 'Treasury_2Y' in nominal.columns:
         metrics['Slope_10Y_2Y'] = nominal['Treasury_10Y'] - nominal['Treasury_2Y']
-        print("  Calculated 10Y-2Y slope")
+        logger.info("  Calculated 10Y-2Y slope")
 
     if 'Treasury_10Y' in nominal.columns and 'Treasury_3M' in nominal.columns:
         metrics['Slope_10Y_3M'] = nominal['Treasury_10Y'] - nominal['Treasury_3M']
-        print("  Calculated 10Y-3M slope")
+        logger.info("  Calculated 10Y-3M slope")
 
     if 'Treasury_30Y' in nominal.columns and 'Treasury_5Y' in nominal.columns:
         metrics['Slope_30Y_5Y'] = nominal['Treasury_30Y'] - nominal['Treasury_5Y']
-        print("  Calculated 30Y-5Y slope")
+        logger.info("  Calculated 30Y-5Y slope")
 
     if 'Treasury_2Y' in nominal.columns and 'Treasury_3M' in nominal.columns:
         metrics['Slope_2Y_3M'] = nominal['Treasury_2Y'] - nominal['Treasury_3M']
-        print("  Calculated 2Y-3M slope")
+        logger.info("  Calculated 2Y-3M slope")
 
     # Yield curve curvature (butterfly spread)
     if all(col in nominal.columns for col in ['Treasury_2Y', 'Treasury_5Y', 'Treasury_10Y']):
@@ -2315,7 +2498,7 @@ def calculate_yield_curve_metrics(treasury_data):
             nominal['Treasury_2Y'] -
             nominal['Treasury_10Y']
         )
-        print("  Calculated 2-5-10 curvature (butterfly)")
+        logger.info("  Calculated 2-5-10 curvature (butterfly)")
 
     if all(col in nominal.columns for col in ['Treasury_3M', 'Treasury_2Y', 'Treasury_10Y']):
         metrics['Curvature_3M_2Y_10Y'] = (
@@ -2323,22 +2506,22 @@ def calculate_yield_curve_metrics(treasury_data):
             nominal['Treasury_3M'] -
             nominal['Treasury_10Y']
         )
-        print("  Calculated 3M-2Y-10Y curvature")
+        logger.info("  Calculated 3M-2Y-10Y curvature")
 
     # Inversion indicators
     if 'Slope_10Y_2Y' in metrics.columns:
         metrics['Inverted_10Y_2Y'] = (metrics['Slope_10Y_2Y'] < 0).astype(int)
-        print("  Calculated 10Y-2Y inversion indicator")
+        logger.info("  Calculated 10Y-2Y inversion indicator")
 
     if 'Slope_10Y_3M' in metrics.columns:
         metrics['Inverted_10Y_3M'] = (metrics['Slope_10Y_3M'] < 0).astype(int)
-        print("  Calculated 10Y-3M inversion indicator")
+        logger.info("  Calculated 10Y-3M inversion indicator")
 
     # Near-term forward spread (recession predictor)
     if 'Treasury_3M' in nominal.columns and 'Treasury_1Y' in nominal.columns:
         # 18-month forward 3-month rate minus current 3-month rate (approximation)
         metrics['Near_Term_Forward_Spread'] = nominal['Treasury_1Y'] - nominal['Treasury_3M']
-        print("  Calculated near-term forward spread")
+        logger.info("  Calculated near-term forward spread")
 
     # Level (average of key tenors)
     if all(col in nominal.columns for col in ['Treasury_2Y', 'Treasury_5Y', 'Treasury_10Y']):
@@ -2347,34 +2530,34 @@ def calculate_yield_curve_metrics(treasury_data):
             nominal['Treasury_5Y'] +
             nominal['Treasury_10Y']
         ) / 3
-        print("  Calculated curve level")
+        logger.info("  Calculated curve level")
 
     # Print summary
-    print("\n" + "=" * 60)
-    print("=== Yield Curve Metrics Summary ===")
-    print("=" * 60)
-    print(f"Metrics calculated: {len(metrics.columns)}")
-    print(f"Date range: {metrics.index.min()} to {metrics.index.max()}")
+    logger.info("=" * 60)
+    logger.info("=== Yield Curve Metrics Summary ===")
+    logger.info("=" * 60)
+    logger.info("Metrics calculated: %d", len(metrics.columns))
+    logger.info("Date range: %s to %s", metrics.index.min(), metrics.index.max())
 
-    print("\nLatest values:")
+    logger.info("Latest values:")
     for col in metrics.columns:
         latest = metrics[col].dropna().iloc[-1] if len(metrics[col].dropna()) > 0 else 'N/A'
         if isinstance(latest, (int, float)):
             if 'Inverted' in col:
-                print(f"  {col}: {'Yes' if latest == 1 else 'No'}")
+                logger.info("  %s: %s", col, 'Yes' if latest == 1 else 'No')
             else:
-                print(f"  {col}: {latest:.2f}%")
+                logger.info("  %s: %.2f%%", col, latest)
         else:
-            print(f"  {col}: {latest}")
+            logger.info("  %s: %s", col, latest)
 
     # Inversion statistics
     if 'Inverted_10Y_2Y' in metrics.columns:
         inversion_pct = metrics['Inverted_10Y_2Y'].mean() * 100
-        print(f"\n10Y-2Y Inversion frequency: {inversion_pct:.1f}% of observations")
+        logger.info("10Y-2Y Inversion frequency: %.1f%% of observations", inversion_pct)
 
     if 'Inverted_10Y_3M' in metrics.columns:
         inversion_pct = metrics['Inverted_10Y_3M'].mean() * 100
-        print(f"10Y-3M Inversion frequency: {inversion_pct:.1f}% of observations")
+        logger.info("10Y-3M Inversion frequency: %.1f%% of observations", inversion_pct)
 
     return metrics
 
@@ -2382,7 +2565,8 @@ def calculate_yield_curve_metrics(treasury_data):
 def load_comprehensive_rates_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive interest rates dataset from FRED (2000-2025).
@@ -2420,33 +2604,36 @@ def load_comprehensive_rates_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_rates_{start_date}_{end_date}.pkl'
+        f'comprehensive_rates_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive rates data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive Rates Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive rates data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive Rates Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load Treasury yields
-    print("\n[1/4] Loading Treasury yields...")
+    logger.info("[1/4] Loading Treasury yields...")
     treasury_data = load_treasury_yields(start_date, end_date, cache_path)
 
     # Load policy rates
-    print("\n[2/4] Loading policy rates...")
+    logger.info("[2/4] Loading policy rates...")
     policy_data = load_policy_rates(start_date, end_date, cache_path)
 
     # Load credit spreads
-    print("\n[3/4] Loading credit spreads...")
+    logger.info("[3/4] Loading credit spreads...")
     credit_data = load_credit_spreads(start_date, end_date, cache_path)
 
     # Calculate yield curve metrics
-    print("\n[4/4] Calculating yield curve metrics...")
+    logger.info("[4/4] Calculating yield curve metrics...")
     curve_metrics = calculate_yield_curve_metrics(treasury_data)
 
     # Combine all data
@@ -2497,28 +2684,28 @@ def load_comprehensive_rates_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive rates data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive rates data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive Rates Data Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive Rates Data Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
-    print(f"Treasury yields: {len(treasury_data['combined'].columns) if treasury_data else 0}")
-    print(f"Policy rates: {len(policy_data['combined'].columns) if policy_data else 0}")
-    print(f"Credit/Mortgage: {len(credit_data['combined'].columns) if credit_data else 0}")
-    print(f"Curve metrics: {len(curve_metrics.columns) if curve_metrics is not None else 0}")
+    logger.info("--- Series Categories ---")
+    logger.info("Treasury yields: %d", len(treasury_data['combined'].columns) if treasury_data else 0)
+    logger.info("Policy rates: %d", len(policy_data['combined'].columns) if policy_data else 0)
+    logger.info("Credit/Mortgage: %d", len(credit_data['combined'].columns) if credit_data else 0)
+    logger.info("Curve metrics: %d", len(curve_metrics.columns) if curve_metrics is not None else 0)
 
-    print("\n" + "=" * 60)
-    print("Citation:")
-    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-    print("https://fred.stlouisfed.org/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Citation:")
+    logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    logger.info("https://fred.stlouisfed.org/")
+    logger.info("=" * 60)
 
     return result
 
@@ -2562,13 +2749,13 @@ def load_industrial_production_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'industrial_production_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'industrial_production_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached industrial production data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached industrial production data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading Industrial Production data from FRED...")
+    logger.info("Downloading Industrial Production data from FRED...")
 
     # Total Industrial Production
     total_series = {
@@ -2609,43 +2796,16 @@ def load_industrial_production_data(
 
     try:
         # Download total IP
-        print("\n--- Total Industrial Production ---")
-        total_data = {}
-        for name, code in total_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                total_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        total_df = pd.DataFrame(total_data)
+        logger.info("--- Total Industrial Production ---")
+        total_df = _download_fred_series(total_series, start_date, end_date)
 
         # Download sector production
-        print("\n--- Sector-Level Production ---")
-        sector_data = {}
-        for name, code in sector_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                sector_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        sector_df = pd.DataFrame(sector_data)
+        logger.info("--- Sector-Level Production ---")
+        sector_df = _download_fred_series(sector_series, start_date, end_date)
 
         # Download capacity utilization
-        print("\n--- Capacity Utilization ---")
-        capacity_data = {}
-        for name, code in capacity_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                capacity_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        capacity_df = pd.DataFrame(capacity_data)
+        logger.info("--- Capacity Utilization ---")
+        capacity_df = _download_fred_series(capacity_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([total_df, sector_df, capacity_df], axis=1)
@@ -2657,34 +2817,34 @@ def load_industrial_production_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached industrial production data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached industrial production data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Industrial Production Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Total IP series: {len(total_df.columns)}")
-        print(f"Sector series: {len(sector_df.columns)}")
-        print(f"Capacity utilization series: {len(capacity_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Industrial Production Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Total IP series: %d", len(total_df.columns))
+        logger.info("Sector series: %d", len(sector_df.columns))
+        logger.info("Capacity utilization series: %d", len(capacity_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'CapUtil' in col:
-                    print(f"  {col}: {latest:.1f}%")
+                    logger.info("  %s: %.1f%%", col, latest)
                 else:
-                    print(f"  {col}: {latest:.2f}")
+                    logger.info("  %s: %.2f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading industrial production data: {e}")
+        logger.error("downloading industrial production data: %s", e)
         return None
 
 
@@ -2720,18 +2880,18 @@ def load_ip_growth_rates(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'ip_growth_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'ip_growth_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached IP growth data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached IP growth data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading IP growth rates from FRED...")
+    logger.info("Downloading IP growth rates from FRED...")
 
-    # Pre-calculated growth rates from FRED
+    # Base IP series for growth calculation (names are final column names)
     growth_series = {
-        'IP_YoY_Change': 'INDPRO',              # Will calculate YoY
-        'IP_Manufacturing_YoY': 'IPMAN',        # Will calculate YoY
+        'IP': 'INDPRO',
+        'IP_Manufacturing': 'IPMAN',
     }
 
     # Diffusion indices (percent of industries expanding)
@@ -2743,41 +2903,22 @@ def load_ip_growth_rates(
 
     try:
         # Download base IP series for growth calculation
-        print("\n--- Industrial Production Indices ---")
-        ip_data = {}
-        for name, code in growth_series.items():
-            try:
-                base_name = name.replace('_YoY_Change', '').replace('_YoY', '')
-                print(f"  Downloading {base_name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                ip_data[base_name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        ip_df = pd.DataFrame(ip_data)
+        logger.info("--- Industrial Production Indices ---")
+        ip_df = _download_fred_series(growth_series, start_date, end_date)
 
         # Calculate YoY growth rates
-        print("\nCalculating year-over-year growth rates...")
+        logger.info("Calculating year-over-year growth rates...")
         yoy_df = ip_df.pct_change(periods=12) * 100
         yoy_df.columns = [f'{col}_YoY' for col in yoy_df.columns]
 
         # Calculate MoM growth rates
-        print("Calculating month-over-month growth rates...")
+        logger.info("Calculating month-over-month growth rates...")
         mom_df = ip_df.pct_change() * 100
         mom_df.columns = [f'{col}_MoM' for col in mom_df.columns]
 
         # Download diffusion indices
-        print("\n--- Diffusion Indices ---")
-        diffusion_data = {}
-        for name, code in diffusion_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                diffusion_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        diffusion_df = pd.DataFrame(diffusion_data)
+        logger.info("--- Diffusion Indices ---")
+        diffusion_df = _download_fred_series(diffusion_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([yoy_df, mom_df, diffusion_df], axis=1)
@@ -2790,44 +2931,45 @@ def load_ip_growth_rates(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached IP growth data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached IP growth data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== IP Growth Rates Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
+        logger.info("=" * 60)
+        logger.info("=== IP Growth Rates Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
 
-        print("\nLatest growth rates:")
+        logger.info("Latest growth rates:")
         for col in yoy_df.columns:
             latest = yoy_df[col].dropna().iloc[-1] if len(yoy_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
-                print(f"  {col}: {latest:.2f}%")
+                logger.info("  %s: %.2f%%", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         if len(diffusion_df) > 0:
-            print("\nLatest diffusion indices:")
+            logger.info("Latest diffusion indices:")
             for col in diffusion_df.columns:
                 latest = diffusion_df[col].dropna().iloc[-1] if len(diffusion_df[col].dropna()) > 0 else 'N/A'
                 if isinstance(latest, float):
-                    print(f"  {col}: {latest:.1f}")
+                    logger.info("  %s: %.1f", col, latest)
                 else:
-                    print(f"  {col}: {latest}")
+                    logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading IP growth data: {e}")
+        logger.error("downloading IP growth data: %s", e)
         return None
 
 
 def load_comprehensive_ip_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive Industrial Production dataset from FRED (2000-2025).
@@ -2861,25 +3003,28 @@ def load_comprehensive_ip_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_ip_{start_date}_{end_date}.pkl'
+        f'comprehensive_ip_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive IP data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive Industrial Production Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive IP data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive Industrial Production Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load production data
-    print("\n[1/2] Loading industrial production indices...")
+    logger.info("[1/2] Loading industrial production indices...")
     production_data = load_industrial_production_data(start_date, end_date, cache_path)
 
     # Load growth rates
-    print("\n[2/2] Loading growth rates and diffusion indices...")
+    logger.info("[2/2] Loading growth rates and diffusion indices...")
     growth_data = load_ip_growth_rates(start_date, end_date, cache_path)
 
     # Combine all data
@@ -2922,35 +3067,35 @@ def load_comprehensive_ip_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive IP data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive IP data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive Industrial Production Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive Industrial Production Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
+    logger.info("--- Series Categories ---")
     if production_data:
-        print(f"Production indices: {len(production_data['combined'].columns)}")
+        logger.info("Production indices: %d", len(production_data['combined'].columns))
     if growth_data:
-        print(f"Growth rates & diffusion: {len(growth_data['combined'].columns)}")
+        logger.info("Growth rates & diffusion: %d", len(growth_data['combined'].columns))
 
     # Key metrics
     if production_data and 'total' in production_data:
         total_df = production_data['total']
         if 'IP_Total' in total_df.columns:
             latest_ip = total_df['IP_Total'].dropna().iloc[-1]
-            print(f"\nLatest Total IP Index: {latest_ip:.2f}")
+            logger.info("Latest Total IP Index: %.2f", latest_ip)
 
     if production_data and 'capacity' in production_data:
         cap_df = production_data['capacity']
         if 'CapUtil_Total' in cap_df.columns:
             latest_cap = cap_df['CapUtil_Total'].dropna().iloc[-1]
-            print(f"Latest Capacity Utilization: {latest_cap:.1f}%")
+            logger.info("Latest Capacity Utilization: %.1f%%", latest_cap)
 
     if growth_data and 'yoy' in growth_data:
         yoy_df = growth_data['yoy']
@@ -2958,14 +3103,14 @@ def load_comprehensive_ip_data(
             col = 'IP_Total_YoY' if 'IP_Total_YoY' in yoy_df.columns else 'IP_YoY'
             latest_growth = yoy_df[col].dropna().iloc[-1] if len(yoy_df[col].dropna()) > 0 else None
             if latest_growth is not None:
-                print(f"Latest IP YoY Growth: {latest_growth:.2f}%")
+                logger.info("Latest IP YoY Growth: %.2f%%", latest_growth)
 
-    print("\n" + "=" * 60)
-    print("Citation:")
-    print("Board of Governors of the Federal Reserve System (US)")
-    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-    print("https://fred.stlouisfed.org/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Citation:")
+    logger.info("Board of Governors of the Federal Reserve System (US)")
+    logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    logger.info("https://fred.stlouisfed.org/")
+    logger.info("=" * 60)
 
     return result
 
@@ -3007,13 +3152,13 @@ def load_money_supply_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'money_supply_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'money_supply_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached money supply data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached money supply data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading Money Supply data from FRED...")
+    logger.info("Downloading Money Supply data from FRED...")
 
     # Money supply aggregates
     aggregate_series = {
@@ -3036,30 +3181,12 @@ def load_money_supply_data(
 
     try:
         # Download money supply aggregates
-        print("\n--- Money Supply Aggregates ---")
-        aggregate_data = {}
-        for name, code in aggregate_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                aggregate_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        aggregate_df = pd.DataFrame(aggregate_data)
+        logger.info("--- Money Supply Aggregates ---")
+        aggregate_df = _download_fred_series(aggregate_series, start_date, end_date)
 
         # Download money supply components
-        print("\n--- Money Supply Components ---")
-        component_data = {}
-        for name, code in component_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                component_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        component_df = pd.DataFrame(component_data)
+        logger.info("--- Money Supply Components ---")
+        component_df = _download_fred_series(component_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([aggregate_df, component_df], axis=1)
@@ -3070,30 +3197,30 @@ def load_money_supply_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached money supply data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached money supply data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Money Supply Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Aggregate series: {len(aggregate_df.columns)}")
-        print(f"Component series: {len(component_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Money Supply Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Aggregate series: %d", len(aggregate_df.columns))
+        logger.info("Component series: %d", len(component_df.columns))
 
-        print("\nLatest values (Billions USD):")
+        logger.info("Latest values (Billions USD):")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
-                print(f"  {col}: ${latest:,.1f}B")
+                logger.info("  %s: $%.1fB", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading money supply data: {e}")
+        logger.error("downloading money supply data: %s", e)
         return None
 
 
@@ -3127,13 +3254,13 @@ def load_money_velocity_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'money_velocity_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'money_velocity_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached money velocity data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached money velocity data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading Money Velocity data from FRED...")
+    logger.info("Downloading Money Velocity data from FRED...")
 
     velocity_series = {
         'M1_Velocity': 'M1V',                   # Velocity of M1 Money Stock
@@ -3141,45 +3268,36 @@ def load_money_velocity_data(
     }
 
     try:
-        print("\n--- Money Velocity ---")
-        velocity_data = {}
-        for name, code in velocity_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                velocity_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        velocity_df = pd.DataFrame(velocity_data)
+        logger.info("--- Money Velocity ---")
+        velocity_df = _download_fred_series(velocity_series, start_date, end_date)
 
         result = {
             'velocity': velocity_df,
             'combined': velocity_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached money velocity data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached money velocity data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Money Velocity Summary ===")
-        print("=" * 60)
-        print(f"Date range: {velocity_df.index.min()} to {velocity_df.index.max()}")
-        print(f"Observations: {len(velocity_df)}")
+        logger.info("=" * 60)
+        logger.info("=== Money Velocity Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", velocity_df.index.min(), velocity_df.index.max())
+        logger.info("Observations: %d", len(velocity_df))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in velocity_df.columns:
             latest = velocity_df[col].dropna().iloc[-1] if len(velocity_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
-                print(f"  {col}: {latest:.2f}")
+                logger.info("  %s: %.2f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading money velocity data: {e}")
+        logger.error("downloading money velocity data: %s", e)
         return None
 
 
@@ -3218,13 +3336,13 @@ def load_fed_balance_sheet_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'fed_balance_sheet_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'fed_balance_sheet_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached Fed balance sheet data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached Fed balance sheet data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading Federal Reserve Balance Sheet data from FRED...")
+    logger.info("Downloading Federal Reserve Balance Sheet data from FRED...")
 
     # Fed assets
     asset_series = {
@@ -3244,30 +3362,12 @@ def load_fed_balance_sheet_data(
 
     try:
         # Download Fed assets
-        print("\n--- Federal Reserve Assets ---")
-        asset_data = {}
-        for name, code in asset_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                asset_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        asset_df = pd.DataFrame(asset_data)
+        logger.info("--- Federal Reserve Assets ---")
+        asset_df = _download_fred_series(asset_series, start_date, end_date)
 
         # Download reserve measures
-        print("\n--- Bank Reserves ---")
-        reserve_data = {}
-        for name, code in reserve_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                reserve_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        reserve_df = pd.DataFrame(reserve_data)
+        logger.info("--- Bank Reserves ---")
+        reserve_df = _download_fred_series(reserve_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([asset_df, reserve_df], axis=1)
@@ -3278,35 +3378,35 @@ def load_fed_balance_sheet_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached Fed balance sheet data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached Fed balance sheet data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Fed Balance Sheet Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Asset series: {len(asset_df.columns)}")
-        print(f"Reserve series: {len(reserve_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Fed Balance Sheet Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Asset series: %d", len(asset_df.columns))
+        logger.info("Reserve series: %d", len(reserve_df.columns))
 
-        print("\nLatest values (Millions/Billions USD):")
+        logger.info("Latest values (Millions/Billions USD):")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if latest > 1000000:
-                    print(f"  {col}: ${latest/1000000:,.2f}T")
+                    logger.info("  %s: $%.2fT", col, latest/1000000)
                 elif latest > 1000:
-                    print(f"  {col}: ${latest/1000:,.1f}B")
+                    logger.info("  %s: $%.1fB", col, latest/1000)
                 else:
-                    print(f"  {col}: ${latest:,.1f}M")
+                    logger.info("  %s: $%.1fM", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading Fed balance sheet data: {e}")
+        logger.error("downloading Fed balance sheet data: %s", e)
         return None
 
 
@@ -3324,53 +3424,53 @@ def load_m2_growth_rates(money_supply_data):
     pd.DataFrame : M2 growth rates (YoY, MoM)
     """
     if money_supply_data is None or 'aggregates' not in money_supply_data:
-        print("Money supply data not available")
+        logger.info("Money supply data not available")
         return None
 
     aggregates = money_supply_data['aggregates']
     growth = pd.DataFrame(index=aggregates.index)
 
-    print("Calculating M2 growth rates...")
+    logger.info("Calculating M2 growth rates...")
 
     # Year-over-Year growth
     if 'M2' in aggregates.columns:
         growth['M2_YoY'] = aggregates['M2'].pct_change(periods=12) * 100
-        print("  Calculated M2 YoY growth")
+        logger.info("  Calculated M2 YoY growth")
 
     if 'M1' in aggregates.columns:
         growth['M1_YoY'] = aggregates['M1'].pct_change(periods=12) * 100
-        print("  Calculated M1 YoY growth")
+        logger.info("  Calculated M1 YoY growth")
 
     # Month-over-Month growth (annualized)
     if 'M2' in aggregates.columns:
         growth['M2_MoM'] = aggregates['M2'].pct_change() * 100
         growth['M2_MoM_Annualized'] = aggregates['M2'].pct_change() * 100 * 12
-        print("  Calculated M2 MoM growth")
+        logger.info("  Calculated M2 MoM growth")
 
     if 'M1' in aggregates.columns:
         growth['M1_MoM'] = aggregates['M1'].pct_change() * 100
         growth['M1_MoM_Annualized'] = aggregates['M1'].pct_change() * 100 * 12
-        print("  Calculated M1 MoM growth")
+        logger.info("  Calculated M1 MoM growth")
 
     # 3-month and 6-month annualized growth
     if 'M2' in aggregates.columns:
         growth['M2_3M_Annualized'] = aggregates['M2'].pct_change(periods=3) * 100 * 4
         growth['M2_6M_Annualized'] = aggregates['M2'].pct_change(periods=6) * 100 * 2
-        print("  Calculated M2 3M and 6M annualized growth")
+        logger.info("  Calculated M2 3M and 6M annualized growth")
 
     # Print summary
-    print("\n" + "=" * 60)
-    print("=== M2 Growth Rates Summary ===")
-    print("=" * 60)
-    print(f"Date range: {growth.index.min()} to {growth.index.max()}")
+    logger.info("=" * 60)
+    logger.info("=== M2 Growth Rates Summary ===")
+    logger.info("=" * 60)
+    logger.info("Date range: %s to %s", growth.index.min(), growth.index.max())
 
-    print("\nLatest growth rates:")
+    logger.info("Latest growth rates:")
     for col in growth.columns:
         latest = growth[col].dropna().iloc[-1] if len(growth[col].dropna()) > 0 else 'N/A'
         if isinstance(latest, float):
-            print(f"  {col}: {latest:.2f}%")
+            logger.info("  %s: %.2f%%", col, latest)
         else:
-            print(f"  {col}: {latest}")
+            logger.info("  %s: %s", col, latest)
 
     return growth
 
@@ -3378,7 +3478,8 @@ def load_m2_growth_rates(money_supply_data):
 def load_comprehensive_m2_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive M2 Money Supply dataset from FRED (2000-2025).
@@ -3413,33 +3514,36 @@ def load_comprehensive_m2_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_m2_{start_date}_{end_date}.pkl'
+        f'comprehensive_m2_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive M2 data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive M2 Money Supply Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive M2 data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive M2 Money Supply Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load money supply data
-    print("\n[1/4] Loading money supply aggregates and components...")
+    logger.info("[1/4] Loading money supply aggregates and components...")
     money_supply_data = load_money_supply_data(start_date, end_date, cache_path)
 
     # Load velocity data
-    print("\n[2/4] Loading money velocity...")
+    logger.info("[2/4] Loading money velocity...")
     velocity_data = load_money_velocity_data(start_date, end_date, cache_path)
 
     # Load Fed balance sheet
-    print("\n[3/4] Loading Fed balance sheet...")
+    logger.info("[3/4] Loading Fed balance sheet...")
     fed_data = load_fed_balance_sheet_data(start_date, end_date, cache_path)
 
     # Calculate growth rates
-    print("\n[4/4] Calculating M2 growth rates...")
+    logger.info("[4/4] Calculating M2 growth rates...")
     growth_rates = load_m2_growth_rates(money_supply_data)
 
     # Combine all data
@@ -3490,50 +3594,50 @@ def load_comprehensive_m2_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive M2 data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive M2 data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive M2 Money Supply Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive M2 Money Supply Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
+    logger.info("--- Series Categories ---")
     if money_supply_data:
-        print(f"Money supply measures: {len(money_supply_data['combined'].columns)}")
+        logger.info("Money supply measures: %d", len(money_supply_data['combined'].columns))
     if velocity_data:
-        print(f"Velocity measures: {len(velocity_data['combined'].columns)}")
+        logger.info("Velocity measures: %d", len(velocity_data['combined'].columns))
     if fed_data:
-        print(f"Fed balance sheet: {len(fed_data['combined'].columns)}")
+        logger.info("Fed balance sheet: %d", len(fed_data['combined'].columns))
     if growth_rates is not None:
-        print(f"Growth rates: {len(growth_rates.columns)}")
+        logger.info("Growth rates: %d", len(growth_rates.columns))
 
     # Key metrics
     if money_supply_data and 'aggregates' in money_supply_data:
         agg_df = money_supply_data['aggregates']
         if 'M2' in agg_df.columns:
             latest_m2 = agg_df['M2'].dropna().iloc[-1]
-            print(f"\nLatest M2 Money Stock: ${latest_m2:,.1f}B")
+            logger.info("Latest M2 Money Stock: $%.1fB", latest_m2)
 
     if growth_rates is not None and 'M2_YoY' in growth_rates.columns:
         latest_growth = growth_rates['M2_YoY'].dropna().iloc[-1]
-        print(f"Latest M2 YoY Growth: {latest_growth:.2f}%")
+        logger.info("Latest M2 YoY Growth: %.2f%%", latest_growth)
 
     if velocity_data and 'velocity' in velocity_data:
         vel_df = velocity_data['velocity']
         if 'M2_Velocity' in vel_df.columns:
             latest_vel = vel_df['M2_Velocity'].dropna().iloc[-1]
-            print(f"Latest M2 Velocity: {latest_vel:.2f}")
+            logger.info("Latest M2 Velocity: %.2f", latest_vel)
 
-    print("\n" + "=" * 60)
-    print("Citation:")
-    print("Board of Governors of the Federal Reserve System (US)")
-    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-    print("https://fred.stlouisfed.org/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Citation:")
+    logger.info("Board of Governors of the Federal Reserve System (US)")
+    logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    logger.info("https://fred.stlouisfed.org/")
+    logger.info("=" * 60)
 
     return result
 
@@ -3576,13 +3680,13 @@ def load_gdp_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'gdp_data_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'gdp_data_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached GDP data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached GDP data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading GDP data from FRED...")
+    logger.info("Downloading GDP data from FRED...")
 
     # Headline GDP measures
     headline_series = {
@@ -3606,43 +3710,16 @@ def load_gdp_data(
 
     try:
         # Download headline GDP
-        print("\n--- Headline GDP ---")
-        headline_data = {}
-        for name, code in headline_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                headline_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        headline_df = pd.DataFrame(headline_data)
+        logger.info("--- Headline GDP ---")
+        headline_df = _download_fred_series(headline_series, start_date, end_date)
 
         # Download growth rates
-        print("\n--- GDP Growth Rates ---")
-        growth_data = {}
-        for name, code in growth_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                growth_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        growth_df = pd.DataFrame(growth_data)
+        logger.info("--- GDP Growth Rates ---")
+        growth_df = _download_fred_series(growth_series, start_date, end_date)
 
         # Download per capita measures
-        print("\n--- Per Capita GDP ---")
-        per_capita_data = {}
-        for name, code in per_capita_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                per_capita_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        per_capita_df = pd.DataFrame(per_capita_data)
+        logger.info("--- Per Capita GDP ---")
+        per_capita_df = _download_fred_series(per_capita_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([headline_df, growth_df, per_capita_df], axis=1)
@@ -3654,36 +3731,36 @@ def load_gdp_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached GDP data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== GDP Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Headline series: {len(headline_df.columns)}")
-        print(f"Growth series: {len(growth_df.columns)}")
-        print(f"Per capita series: {len(per_capita_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== GDP Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Headline series: %d", len(headline_df.columns))
+        logger.info("Growth series: %d", len(growth_df.columns))
+        logger.info("Per capita series: %d", len(per_capita_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'Growth' in col or 'Pct' in col:
-                    print(f"  {col}: {latest:.2f}%")
+                    logger.info("  %s: %.2f%%", col, latest)
                 elif latest > 1000:
-                    print(f"  {col}: ${latest:,.1f}B")
+                    logger.info("  %s: $%.1fB", col, latest)
                 else:
-                    print(f"  {col}: ${latest:,.2f}")
+                    logger.info("  %s: $%.2f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP data: {e}")
+        logger.error("downloading GDP data: %s", e)
         return None
 
 
@@ -3723,13 +3800,13 @@ def load_gdp_components_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'gdp_components_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'gdp_components_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached GDP components from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached GDP components from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading GDP components from FRED...")
+    logger.info("Downloading GDP components from FRED...")
 
     # Personal Consumption Expenditures (C)
     consumption_series = {
@@ -3772,56 +3849,20 @@ def load_gdp_components_data(
 
     try:
         # Download consumption
-        print("\n--- Personal Consumption Expenditures (C) ---")
-        consumption_data = {}
-        for name, code in consumption_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                consumption_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        consumption_df = pd.DataFrame(consumption_data)
+        logger.info("--- Personal Consumption Expenditures (C) ---")
+        consumption_df = _download_fred_series(consumption_series, start_date, end_date)
 
         # Download investment
-        print("\n--- Gross Private Domestic Investment (I) ---")
-        investment_data = {}
-        for name, code in investment_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                investment_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        investment_df = pd.DataFrame(investment_data)
+        logger.info("--- Gross Private Domestic Investment (I) ---")
+        investment_df = _download_fred_series(investment_series, start_date, end_date)
 
         # Download government spending
-        print("\n--- Government Consumption & Investment (G) ---")
-        government_data = {}
-        for name, code in government_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                government_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        government_df = pd.DataFrame(government_data)
+        logger.info("--- Government Consumption & Investment (G) ---")
+        government_df = _download_fred_series(government_series, start_date, end_date)
 
         # Download trade data
-        print("\n--- Net Exports (X - M) ---")
-        trade_data = {}
-        for name, code in trade_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                trade_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        trade_df = pd.DataFrame(trade_data)
+        logger.info("--- Net Exports (X - M) ---")
+        trade_df = _download_fred_series(trade_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([consumption_df, investment_df, government_df, trade_df], axis=1)
@@ -3834,24 +3875,24 @@ def load_gdp_components_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP components to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached GDP components to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== GDP Components Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Consumption (C): {len(consumption_df.columns)} series")
-        print(f"Investment (I): {len(investment_df.columns)} series")
-        print(f"Government (G): {len(government_df.columns)} series")
-        print(f"Trade (X-M): {len(trade_df.columns)} series")
+        logger.info("=" * 60)
+        logger.info("=== GDP Components Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Consumption (C): %d series", len(consumption_df.columns))
+        logger.info("Investment (I): %d series", len(investment_df.columns))
+        logger.info("Government (G): %d series", len(government_df.columns))
+        logger.info("Trade (X-M): %d series", len(trade_df.columns))
 
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP components: {e}")
+        logger.error("downloading GDP components: %s", e)
         return None
 
 
@@ -3884,13 +3925,13 @@ def load_gdp_by_industry_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'gdp_industry_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'gdp_industry_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached GDP by industry from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached GDP by industry from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading GDP by industry from FRED...")
+    logger.info("Downloading GDP by industry from FRED...")
 
     # GDP by industry (Value Added)
     industry_series = {
@@ -3915,45 +3956,37 @@ def load_gdp_by_industry_data(
     }
 
     try:
-        print("\n--- GDP by Industry (Value Added) ---")
-        industry_data = {}
-        for name, code in industry_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                industry_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        industry_df = pd.DataFrame(industry_data)
+        logger.info("--- GDP by Industry (Value Added) ---")
+        industry_df = _download_fred_series(industry_series, start_date, end_date)
 
         result = {
             'industries': industry_df,
             'combined': industry_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached GDP by industry to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached GDP by industry to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== GDP by Industry Summary ===")
-        print("=" * 60)
-        print(f"Date range: {industry_df.index.min()} to {industry_df.index.max()}")
-        print(f"Observations: {len(industry_df)}")
-        print(f"Industry sectors: {len(industry_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== GDP by Industry Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", industry_df.index.min(), industry_df.index.max())
+        logger.info("Observations: %d", len(industry_df))
+        logger.info("Industry sectors: %d", len(industry_df.columns))
 
         return result
 
     except Exception as e:
-        print(f"Error downloading GDP by industry: {e}")
+        logger.error("downloading GDP by industry: %s", e)
         return None
 
 
 def load_comprehensive_gdp_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive GDP dataset from FRED (2000-2025).
@@ -3987,29 +4020,32 @@ def load_comprehensive_gdp_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_gdp_{start_date}_{end_date}.pkl'
+        f'comprehensive_gdp_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive GDP data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive GDP Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive GDP data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive GDP Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load headline GDP
-    print("\n[1/3] Loading headline GDP measures...")
+    logger.info("[1/3] Loading headline GDP measures...")
     headline_data = load_gdp_data(start_date, end_date, cache_path)
 
     # Load GDP components
-    print("\n[2/3] Loading GDP components (C + I + G + NX)...")
+    logger.info("[2/3] Loading GDP components (C + I + G + NX)...")
     components_data = load_gdp_components_data(start_date, end_date, cache_path)
 
     # Load GDP by industry
-    print("\n[3/3] Loading GDP by industry...")
+    logger.info("[3/3] Loading GDP by industry...")
     industry_data = load_gdp_by_industry_data(start_date, end_date, cache_path)
 
     # Combine all data
@@ -4056,44 +4092,44 @@ def load_comprehensive_gdp_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive GDP data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive GDP data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive GDP Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive GDP Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
+    logger.info("--- Series Categories ---")
     if headline_data:
-        print(f"Headline GDP: {len(headline_data['combined'].columns)} series")
+        logger.info("Headline GDP: %d series", len(headline_data['combined'].columns))
     if components_data:
-        print(f"GDP components: {len(components_data['combined'].columns)} series")
+        logger.info("GDP components: %d series", len(components_data['combined'].columns))
     if industry_data:
-        print(f"GDP by industry: {len(industry_data['combined'].columns)} series")
+        logger.info("GDP by industry: %d series", len(industry_data['combined'].columns))
 
     # Key metrics
     if headline_data and 'headline' in headline_data:
         hdl_df = headline_data['headline']
         if 'GDP_Real' in hdl_df.columns:
             latest_gdp = hdl_df['GDP_Real'].dropna().iloc[-1]
-            print(f"\nLatest Real GDP: ${latest_gdp:,.1f}B")
+            logger.info("Latest Real GDP: $%.1fB", latest_gdp)
 
     if headline_data and 'growth' in headline_data:
         growth_df = headline_data['growth']
         if 'GDP_Growth_QoQ' in growth_df.columns:
             latest_growth = growth_df['GDP_Growth_QoQ'].dropna().iloc[-1]
-            print(f"Latest GDP Growth (QoQ Ann.): {latest_growth:.1f}%")
+            logger.info("Latest GDP Growth (QoQ Ann.): %.1f%%", latest_growth)
 
-    print("\n" + "=" * 60)
-    print("Citation:")
-    print("U.S. Bureau of Economic Analysis (BEA)")
-    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-    print("https://fred.stlouisfed.org/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Citation:")
+    logger.info("U.S. Bureau of Economic Analysis (BEA)")
+    logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    logger.info("https://fred.stlouisfed.org/")
+    logger.info("=" * 60)
 
     return result
 
@@ -4136,13 +4172,13 @@ def load_employment_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'employment_data_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'employment_data_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached employment data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached employment data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading employment data from FRED...")
+    logger.info("Downloading employment data from FRED...")
 
     # Nonfarm Payrolls
     payroll_series = {
@@ -4173,43 +4209,16 @@ def load_employment_data(
 
     try:
         # Download payroll data
-        print("\n--- Nonfarm Payrolls ---")
-        payroll_data = {}
-        for name, code in payroll_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                payroll_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        payroll_df = pd.DataFrame(payroll_data)
+        logger.info("--- Nonfarm Payrolls ---")
+        payroll_df = _download_fred_series(payroll_series, start_date, end_date)
 
         # Download unemployment rates
-        print("\n--- Unemployment Rates ---")
-        unemployment_data = {}
-        for name, code in unemployment_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                unemployment_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        unemployment_df = pd.DataFrame(unemployment_data)
+        logger.info("--- Unemployment Rates ---")
+        unemployment_df = _download_fred_series(unemployment_series, start_date, end_date)
 
         # Download labor force measures
-        print("\n--- Labor Force Measures ---")
-        labor_force_data = {}
-        for name, code in labor_force_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                labor_force_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        labor_force_df = pd.DataFrame(labor_force_data)
+        logger.info("--- Labor Force Measures ---")
+        labor_force_df = _download_fred_series(labor_force_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([payroll_df, unemployment_df, labor_force_df], axis=1)
@@ -4221,36 +4230,36 @@ def load_employment_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached employment data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached employment data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Employment Data Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Payroll series: {len(payroll_df.columns)}")
-        print(f"Unemployment series: {len(unemployment_df.columns)}")
-        print(f"Labor force series: {len(labor_force_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Employment Data Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Payroll series: %d", len(payroll_df.columns))
+        logger.info("Unemployment series: %d", len(unemployment_df.columns))
+        logger.info("Labor force series: %d", len(labor_force_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'Rate' in col or 'Ratio' in col or 'Participation' in col:
-                    print(f"  {col}: {latest:.1f}%")
+                    logger.info("  %s: %.1f%%", col, latest)
                 elif 'Level' in col or 'Payrolls' in col or 'Employment' in col:
-                    print(f"  {col}: {latest:,.0f}K")
+                    logger.info("  %s: %.0fK", col, latest)
                 else:
-                    print(f"  {col}: {latest:.2f}")
+                    logger.info("  %s: %.2f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading employment data: {e}")
+        logger.error("downloading employment data: %s", e)
         return None
 
 
@@ -4286,13 +4295,13 @@ def load_jobless_claims_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'jobless_claims_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'jobless_claims_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached jobless claims from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached jobless claims from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading jobless claims data from FRED...")
+    logger.info("Downloading jobless claims data from FRED...")
 
     claims_series = {
         'Initial_Claims': 'ICSA',               # Initial Unemployment Claims
@@ -4302,48 +4311,39 @@ def load_jobless_claims_data(
     }
 
     try:
-        print("\n--- Unemployment Insurance Claims ---")
-        claims_data = {}
-        for name, code in claims_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                claims_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        claims_df = pd.DataFrame(claims_data)
+        logger.info("--- Unemployment Insurance Claims ---")
+        claims_df = _download_fred_series(claims_series, start_date, end_date)
 
         result = {
             'claims': claims_df,
             'combined': claims_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached jobless claims to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached jobless claims to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Jobless Claims Summary ===")
-        print("=" * 60)
-        print(f"Date range: {claims_df.index.min()} to {claims_df.index.max()}")
-        print(f"Observations: {len(claims_df)}")
+        logger.info("=" * 60)
+        logger.info("=== Jobless Claims Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", claims_df.index.min(), claims_df.index.max())
+        logger.info("Observations: %d", len(claims_df))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in claims_df.columns:
             latest = claims_df[col].dropna().iloc[-1] if len(claims_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'Rate' in col:
-                    print(f"  {col}: {latest:.1f}%")
+                    logger.info("  %s: %.1f%%", col, latest)
                 else:
-                    print(f"  {col}: {latest:,.0f}")
+                    logger.info("  %s: %.0f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading jobless claims: {e}")
+        logger.error("downloading jobless claims: %s", e)
         return None
 
 
@@ -4381,13 +4381,13 @@ def load_wages_hours_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'wages_hours_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'wages_hours_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached wages/hours data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached wages/hours data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading wages and hours data from FRED...")
+    logger.info("Downloading wages and hours data from FRED...")
 
     # Wages and earnings
     wages_series = {
@@ -4409,30 +4409,12 @@ def load_wages_hours_data(
 
     try:
         # Download wages data
-        print("\n--- Wages and Earnings ---")
-        wages_data = {}
-        for name, code in wages_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                wages_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        wages_df = pd.DataFrame(wages_data)
+        logger.info("--- Wages and Earnings ---")
+        wages_df = _download_fred_series(wages_series, start_date, end_date)
 
         # Download hours data
-        print("\n--- Hours Worked ---")
-        hours_data = {}
-        for name, code in hours_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                hours_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        hours_df = pd.DataFrame(hours_data)
+        logger.info("--- Hours Worked ---")
+        hours_df = _download_fred_series(hours_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([wages_df, hours_df], axis=1)
@@ -4443,35 +4425,35 @@ def load_wages_hours_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached wages/hours data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached wages/hours data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Wages and Hours Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Wages series: {len(wages_df.columns)}")
-        print(f"Hours series: {len(hours_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== Wages and Hours Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Wages series: %d", len(wages_df.columns))
+        logger.info("Hours series: %d", len(hours_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'Hourly' in col or 'Earnings' in col:
-                    print(f"  {col}: ${latest:.2f}")
+                    logger.info("  %s: $%.2f", col, latest)
                 elif 'Hours' in col:
-                    print(f"  {col}: {latest:.1f} hrs")
+                    logger.info("  %s: %.1f hrs", col, latest)
                 else:
-                    print(f"  {col}: {latest:.2f}")
+                    logger.info("  %s: %.2f", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading wages/hours data: {e}")
+        logger.error("downloading wages/hours data: %s", e)
         return None
 
 
@@ -4509,13 +4491,13 @@ def load_jolts_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'jolts_data_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'jolts_data_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached JOLTS data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached JOLTS data from %s", cache_dir)
+        return _load_cache(cache_dir)
 
-    print("Downloading JOLTS data from FRED...")
+    logger.info("Downloading JOLTS data from FRED...")
 
     # Job openings
     openings_series = {
@@ -4536,30 +4518,12 @@ def load_jolts_data(
 
     try:
         # Download job openings
-        print("\n--- Job Openings ---")
-        openings_data = {}
-        for name, code in openings_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                openings_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        openings_df = pd.DataFrame(openings_data)
+        logger.info("--- Job Openings ---")
+        openings_df = _download_fred_series(openings_series, start_date, end_date)
 
         # Download turnover data
-        print("\n--- Labor Turnover ---")
-        turnover_data = {}
-        for name, code in turnover_series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                turnover_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
-
-        turnover_df = pd.DataFrame(turnover_data)
+        logger.info("--- Labor Turnover ---")
+        turnover_df = _download_fred_series(turnover_series, start_date, end_date)
 
         # Combine all data
         combined_df = pd.concat([openings_df, turnover_df], axis=1)
@@ -4570,40 +4534,41 @@ def load_jolts_data(
             'combined': combined_df
         }
 
-        pd.to_pickle(result, cache_file)
-        print(f"\nCached JOLTS data to {cache_file}")
+        _save_cache(result, cache_dir)
+        logger.info("Cached JOLTS data to %s", cache_dir)
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== JOLTS Summary ===")
-        print("=" * 60)
-        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-        print(f"Observations: {len(combined_df)}")
-        print(f"Openings series: {len(openings_df.columns)}")
-        print(f"Turnover series: {len(turnover_df.columns)}")
+        logger.info("=" * 60)
+        logger.info("=== JOLTS Summary ===")
+        logger.info("=" * 60)
+        logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+        logger.info("Observations: %d", len(combined_df))
+        logger.info("Openings series: %d", len(openings_df.columns))
+        logger.info("Turnover series: %d", len(turnover_df.columns))
 
-        print("\nLatest values:")
+        logger.info("Latest values:")
         for col in combined_df.columns:
             latest = combined_df[col].dropna().iloc[-1] if len(combined_df[col].dropna()) > 0 else 'N/A'
             if isinstance(latest, float):
                 if 'Rate' in col:
-                    print(f"  {col}: {latest:.1f}%")
+                    logger.info("  %s: %.1f%%", col, latest)
                 else:
-                    print(f"  {col}: {latest:,.0f}K")
+                    logger.info("  %s: %.0fK", col, latest)
             else:
-                print(f"  {col}: {latest}")
+                logger.info("  %s: %s", col, latest)
 
         return result
 
     except Exception as e:
-        print(f"Error downloading JOLTS data: {e}")
+        logger.error("downloading JOLTS data: %s", e)
         return None
 
 
 def load_comprehensive_employment_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load comprehensive employment dataset from FRED (2000-2025).
@@ -4639,33 +4604,36 @@ def load_comprehensive_employment_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(
+    cache_dir = os.path.join(
         cache_path,
-        f'comprehensive_employment_{start_date}_{end_date}.pkl'
+        f'comprehensive_employment_{start_date}_{end_date}'
     )
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached comprehensive employment data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("=" * 60)
-    print("Loading Comprehensive Employment Data (2000-2025)")
-    print("=" * 60)
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached comprehensive employment data from %s", cache_dir)
+        return _load_cache(cache_dir)
+    logger.info("=" * 60)
+    logger.info("Loading Comprehensive Employment Data (2000-2025)")
+    logger.info("=" * 60)
 
     # Load employment data
-    print("\n[1/4] Loading employment and unemployment data...")
+    logger.info("[1/4] Loading employment and unemployment data...")
     employment_data = load_employment_data(start_date, end_date, cache_path)
 
     # Load jobless claims
-    print("\n[2/4] Loading jobless claims...")
+    logger.info("[2/4] Loading jobless claims...")
     claims_data = load_jobless_claims_data(start_date, end_date, cache_path)
 
     # Load wages and hours
-    print("\n[3/4] Loading wages and hours...")
+    logger.info("[3/4] Loading wages and hours...")
     wages_hours_data = load_wages_hours_data(start_date, end_date, cache_path)
 
     # Load JOLTS data
-    print("\n[4/4] Loading JOLTS data...")
+    logger.info("[4/4] Loading JOLTS data...")
     jolts_data = load_jolts_data(start_date, end_date, cache_path)
 
     # Combine all data
@@ -4716,52 +4684,52 @@ def load_comprehensive_employment_data(
         'summary_stats': summary_stats
     }
 
-    pd.to_pickle(result, cache_file)
-    print(f"\nCached comprehensive employment data to {cache_file}")
+    _save_cache(result, cache_dir)
+    logger.info("Cached comprehensive employment data to %s", cache_dir)
 
     # Print final summary
-    print("\n" + "=" * 60)
-    print("=== Comprehensive Employment Summary ===")
-    print("=" * 60)
-    print(f"Total series loaded: {len(combined_df.columns)}")
-    print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
-    print(f"Total observations: {len(combined_df)}")
+    logger.info("=" * 60)
+    logger.info("=== Comprehensive Employment Summary ===")
+    logger.info("=" * 60)
+    logger.info("Total series loaded: %d", len(combined_df.columns))
+    logger.info("Date range: %s to %s", combined_df.index.min(), combined_df.index.max())
+    logger.info("Total observations: %d", len(combined_df))
 
-    print("\n--- Series Categories ---")
+    logger.info("--- Series Categories ---")
     if employment_data:
-        print(f"Employment/Unemployment: {len(employment_data['combined'].columns)} series")
+        logger.info("Employment/Unemployment: %d series", len(employment_data['combined'].columns))
     if claims_data:
-        print(f"Jobless claims: {len(claims_data['combined'].columns)} series")
+        logger.info("Jobless claims: %d series", len(claims_data['combined'].columns))
     if wages_hours_data:
-        print(f"Wages/Hours: {len(wages_hours_data['combined'].columns)} series")
+        logger.info("Wages/Hours: %d series", len(wages_hours_data['combined'].columns))
     if jolts_data:
-        print(f"JOLTS: {len(jolts_data['combined'].columns)} series")
+        logger.info("JOLTS: %d series", len(jolts_data['combined'].columns))
 
     # Key metrics
     if employment_data and 'unemployment' in employment_data:
         unemp_df = employment_data['unemployment']
         if 'Unemployment_Rate' in unemp_df.columns:
             latest_unemp = unemp_df['Unemployment_Rate'].dropna().iloc[-1]
-            print(f"\nLatest Unemployment Rate: {latest_unemp:.1f}%")
+            logger.info("Latest Unemployment Rate: %.1f%%", latest_unemp)
 
     if employment_data and 'payrolls' in employment_data:
         payroll_df = employment_data['payrolls']
         if 'Nonfarm_Payrolls' in payroll_df.columns:
             latest_payrolls = payroll_df['Nonfarm_Payrolls'].dropna().iloc[-1]
-            print(f"Latest Nonfarm Payrolls: {latest_payrolls:,.0f}K")
+            logger.info("Latest Nonfarm Payrolls: %.0fK", latest_payrolls)
 
     if jolts_data and 'openings' in jolts_data:
         open_df = jolts_data['openings']
         if 'Job_Openings' in open_df.columns:
             latest_openings = open_df['Job_Openings'].dropna().iloc[-1]
-            print(f"Latest Job Openings: {latest_openings:,.0f}K")
+            logger.info("Latest Job Openings: %.0fK", latest_openings)
 
-    print("\n" + "=" * 60)
-    print("Citation:")
-    print("U.S. Bureau of Labor Statistics (BLS)")
-    print("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
-    print("https://fred.stlouisfed.org/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Citation:")
+    logger.info("U.S. Bureau of Labor Statistics (BLS)")
+    logger.info("Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis")
+    logger.info("https://fred.stlouisfed.org/")
+    logger.info("=" * 60)
 
     return result
 
@@ -4769,7 +4737,8 @@ def load_comprehensive_employment_data(
 def load_additional_macro_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False
 ):
     """
     Load additional macroeconomic indicators from FRED.
@@ -4780,13 +4749,17 @@ def load_additional_macro_data(
         end_date = datetime.today().strftime('%Y-%m-%d')
 
     os.makedirs(cache_path, exist_ok=True)
-    cache_file = os.path.join(cache_path, f'macro_data_{start_date}_{end_date}.pkl')
+    cache_dir = os.path.join(cache_path, f'macro_data_{start_date}_{end_date}')
 
-    if os.path.exists(cache_file):
-        print(f"Loading cached macro data from {cache_file}")
-        return pd.read_pickle(cache_file)
+    if force_refresh and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        logger.info("Force refresh: removed %s", cache_dir)
 
-    print("Downloading macro data from FRED...")
+    if os.path.exists(cache_dir):
+        logger.info("Loading cached macro data from %s", cache_dir)
+        return _load_cache(cache_dir)
+
+    logger.info("Downloading macro data from FRED...")
 
     series = {
         'Unemployment_Rate': 'UNRATE',
@@ -4805,30 +4778,20 @@ def load_additional_macro_data(
     }
 
     try:
-        macro_data = {}
-        for name, code in series.items():
-            try:
-                print(f"  Downloading {name} ({code})...")
-                df = pdr.DataReader(code, 'fred', start=start_date, end=end_date)
-                macro_data[name] = df.iloc[:, 0]
-            except Exception as e:
-                print(f"  Warning: Could not download {name}: {e}")
+        macro_df = _download_fred_series(series, start_date, end_date)
 
-        macro_df = pd.DataFrame(macro_data)
+        _save_cache(macro_df, cache_dir)
+        logger.info("Cached macro data to %s", cache_dir)
 
-        pd.to_pickle(macro_df, cache_file)
-        print(f"Cached macro data to {cache_file}")
-
-        print("\n=== Macro Data Summary ===")
-        print(f"Date range: {macro_df.index.min()} to {macro_df.index.max()}")
-        print(f"Series downloaded: {len(macro_df.columns)}")
-        print("\nLatest values:")
-        print(macro_df.iloc[-1])
+        logger.info("=== Macro Data Summary ===")
+        logger.info("Date range: %s to %s", macro_df.index.min(), macro_df.index.max())
+        logger.info("Series downloaded: %d", len(macro_df.columns))
+        logger.info("Latest values:\n%s", macro_df.iloc[-1])
 
         return macro_df
 
     except Exception as e:
-        print(f"Error downloading macro data: {e}")
+        logger.error("downloading macro data: %s", e)
         return None
 
 
@@ -4884,7 +4847,7 @@ def load_news_data(
         sources = ['guardian', 'nyt', 'reddit']
 
     if os.path.exists(cache_file) and not refresh:
-        print(f"Loading cached news data from {cache_file}")
+        logger.info("Loading cached news data from %s", cache_file)
         news_df = pd.read_csv(cache_file)
         news_df['published_date'] = pd.to_datetime(news_df['published_date'])
 
@@ -5082,9 +5045,9 @@ def load_data():
         data_dict['culturewardata'] = import_culture_war_data(
             'Culture_War_Companies_160_fullmeta.csv'
         )
-        print("Loaded culture war data")
+        logger.info("Loaded culture war data")
     except Exception as e:
-        print(f"Error loading culture war data: {e}")
+        logger.error("loading culture war data: %s", e)
         data_dict['culturewardata'] = None
 
     # Load stock data
@@ -5094,19 +5057,19 @@ def load_data():
             data_dict['stockdata'] = get_stock_data(
                 tickers, start_date='2000-01-01', end_date='2025-12-31'
             )
-            print(f"Loaded stock data for {len(data_dict['stockdata'])} tickers")
+            logger.info("Loaded stock data for %d tickers", len(data_dict['stockdata']))
         else:
             data_dict['stockdata'] = None
     except Exception as e:
-        print(f"Error loading stock data: {e}")
+        logger.error("loading stock data: %s", e)
         data_dict['stockdata'] = None
 
     # Load VIX data
     try:
         data_dict['vixdata'] = download_vix_data()
-        print("Loaded VIX data")
+        logger.info("Loaded VIX data")
     except Exception as e:
-        print(f"Error loading VIX data: {e}")
+        logger.error("loading VIX data: %s", e)
         data_dict['vixdata'] = None
 
     # Load Fama-French factors
@@ -5114,11 +5077,11 @@ def load_data():
         data_dict['ff_factors'] = download_fama_french_factors(
             start_date='2000-01-01',
             frequency='daily',
-            save_path='./fama_french_data'
+            output_dir='./fama_french_data'
         )
-        print("Loaded Fama-French factors")
+        logger.info("Loaded Fama-French factors")
     except Exception as e:
-        print(f"Error loading Fama-French factors: {e}")
+        logger.error("loading Fama-French factors: %s", e)
         data_dict['ff_factors'] = None
 
     # Load Form 4 insider trading data
@@ -5132,11 +5095,11 @@ def load_data():
                 end_date='2025-12-31',
                 save_csv=True
             )
-            print("Loaded Form 4 data")
+            logger.info("Loaded Form 4 data")
         else:
             data_dict['form4data'] = None
     except Exception as e:
-        print(f"Error loading Form 4 data: {e}")
+        logger.error("loading Form 4 data: %s", e)
         data_dict['form4data'] = None
 
     # Load news data
@@ -5145,9 +5108,9 @@ def load_data():
             cache_file='./news_data/culture_war_news_2000_2025_final.csv',
             refresh=False
         )
-        print("Loaded news data")
+        logger.info("Loaded news data")
     except Exception as e:
-        print(f"Error loading news data: {e}")
+        logger.error("loading news data: %s", e)
         data_dict['newsdata'] = None
 
     # Load inflation data (core measures)
@@ -5157,9 +5120,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded inflation data")
+        logger.info("Loaded inflation data")
     except Exception as e:
-        print(f"Error loading inflation data: {e}")
+        logger.error("loading inflation data: %s", e)
         data_dict['inflationdata'] = None
 
     # Load inflation expectations (breakeven, surveys, Fed measures)
@@ -5169,9 +5132,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded inflation expectations data")
+        logger.info("Loaded inflation expectations data")
     except Exception as e:
-        print(f"Error loading inflation expectations data: {e}")
+        logger.error("loading inflation expectations data: %s", e)
         data_dict['inflation_expectations'] = None
 
     # Load comprehensive inflation data (all measures combined)
@@ -5181,9 +5144,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive inflation data")
+        logger.info("Loaded comprehensive inflation data")
     except Exception as e:
-        print(f"Error loading comprehensive inflation data: {e}")
+        logger.error("loading comprehensive inflation data: %s", e)
         data_dict['comprehensive_inflation'] = None
 
     # Load Treasury yields
@@ -5193,9 +5156,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded Treasury yields data")
+        logger.info("Loaded Treasury yields data")
     except Exception as e:
-        print(f"Error loading Treasury yields data: {e}")
+        logger.error("loading Treasury yields data: %s", e)
         data_dict['treasury_yields'] = None
 
     # Load policy rates (Fed Funds, SOFR, Prime)
@@ -5205,9 +5168,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded policy rates data")
+        logger.info("Loaded policy rates data")
     except Exception as e:
-        print(f"Error loading policy rates data: {e}")
+        logger.error("loading policy rates data: %s", e)
         data_dict['policy_rates'] = None
 
     # Load credit spreads and mortgage rates
@@ -5217,9 +5180,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded credit spreads data")
+        logger.info("Loaded credit spreads data")
     except Exception as e:
-        print(f"Error loading credit spreads data: {e}")
+        logger.error("loading credit spreads data: %s", e)
         data_dict['credit_spreads'] = None
 
     # Load comprehensive rates data (all rates combined with curve metrics)
@@ -5229,9 +5192,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive rates data")
+        logger.info("Loaded comprehensive rates data")
     except Exception as e:
-        print(f"Error loading comprehensive rates data: {e}")
+        logger.error("loading comprehensive rates data: %s", e)
         data_dict['comprehensive_rates'] = None
 
     # Load industrial production data
@@ -5241,9 +5204,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded industrial production data")
+        logger.info("Loaded industrial production data")
     except Exception as e:
-        print(f"Error loading industrial production data: {e}")
+        logger.error("loading industrial production data: %s", e)
         data_dict['industrial_production'] = None
 
     # Load IP growth rates and diffusion indices
@@ -5253,9 +5216,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded IP growth rates data")
+        logger.info("Loaded IP growth rates data")
     except Exception as e:
-        print(f"Error loading IP growth rates data: {e}")
+        logger.error("loading IP growth rates data: %s", e)
         data_dict['ip_growth'] = None
 
     # Load comprehensive IP data (all IP measures combined)
@@ -5265,9 +5228,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive IP data")
+        logger.info("Loaded comprehensive IP data")
     except Exception as e:
-        print(f"Error loading comprehensive IP data: {e}")
+        logger.error("loading comprehensive IP data: %s", e)
         data_dict['comprehensive_ip'] = None
 
     # Load money supply data (M1, M2, components)
@@ -5277,9 +5240,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded money supply data")
+        logger.info("Loaded money supply data")
     except Exception as e:
-        print(f"Error loading money supply data: {e}")
+        logger.error("loading money supply data: %s", e)
         data_dict['money_supply'] = None
 
     # Load money velocity data
@@ -5289,9 +5252,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded money velocity data")
+        logger.info("Loaded money velocity data")
     except Exception as e:
-        print(f"Error loading money velocity data: {e}")
+        logger.error("loading money velocity data: %s", e)
         data_dict['money_velocity'] = None
 
     # Load Fed balance sheet data
@@ -5301,9 +5264,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded Fed balance sheet data")
+        logger.info("Loaded Fed balance sheet data")
     except Exception as e:
-        print(f"Error loading Fed balance sheet data: {e}")
+        logger.error("loading Fed balance sheet data: %s", e)
         data_dict['fed_balance_sheet'] = None
 
     # Load comprehensive M2 data (all money supply measures combined)
@@ -5313,9 +5276,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive M2 data")
+        logger.info("Loaded comprehensive M2 data")
     except Exception as e:
-        print(f"Error loading comprehensive M2 data: {e}")
+        logger.error("loading comprehensive M2 data: %s", e)
         data_dict['comprehensive_m2'] = None
 
     # Load GDP headline data
@@ -5325,9 +5288,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded GDP data")
+        logger.info("Loaded GDP data")
     except Exception as e:
-        print(f"Error loading GDP data: {e}")
+        logger.error("loading GDP data: %s", e)
         data_dict['gdp_data'] = None
 
     # Load GDP components (C + I + G + NX)
@@ -5337,9 +5300,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded GDP components data")
+        logger.info("Loaded GDP components data")
     except Exception as e:
-        print(f"Error loading GDP components data: {e}")
+        logger.error("loading GDP components data: %s", e)
         data_dict['gdp_components'] = None
 
     # Load GDP by industry
@@ -5349,9 +5312,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded GDP by industry data")
+        logger.info("Loaded GDP by industry data")
     except Exception as e:
-        print(f"Error loading GDP by industry data: {e}")
+        logger.error("loading GDP by industry data: %s", e)
         data_dict['gdp_industry'] = None
 
     # Load comprehensive GDP data (all GDP measures combined)
@@ -5361,9 +5324,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive GDP data")
+        logger.info("Loaded comprehensive GDP data")
     except Exception as e:
-        print(f"Error loading comprehensive GDP data: {e}")
+        logger.error("loading comprehensive GDP data: %s", e)
         data_dict['comprehensive_gdp'] = None
 
     # Load employment data (payrolls, unemployment, labor force)
@@ -5373,9 +5336,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded employment data")
+        logger.info("Loaded employment data")
     except Exception as e:
-        print(f"Error loading employment data: {e}")
+        logger.error("loading employment data: %s", e)
         data_dict['employment_data'] = None
 
     # Load jobless claims data
@@ -5385,9 +5348,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded jobless claims data")
+        logger.info("Loaded jobless claims data")
     except Exception as e:
-        print(f"Error loading jobless claims data: {e}")
+        logger.error("loading jobless claims data: %s", e)
         data_dict['jobless_claims'] = None
 
     # Load wages and hours data
@@ -5397,9 +5360,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded wages and hours data")
+        logger.info("Loaded wages and hours data")
     except Exception as e:
-        print(f"Error loading wages and hours data: {e}")
+        logger.error("loading wages and hours data: %s", e)
         data_dict['wages_hours'] = None
 
     # Load JOLTS data (job openings, hires, quits)
@@ -5409,9 +5372,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded JOLTS data")
+        logger.info("Loaded JOLTS data")
     except Exception as e:
-        print(f"Error loading JOLTS data: {e}")
+        logger.error("loading JOLTS data: %s", e)
         data_dict['jolts_data'] = None
 
     # Load comprehensive employment data (all employment measures combined)
@@ -5421,9 +5384,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded comprehensive employment data")
+        logger.info("Loaded comprehensive employment data")
     except Exception as e:
-        print(f"Error loading comprehensive employment data: {e}")
+        logger.error("loading comprehensive employment data: %s", e)
         data_dict['comprehensive_employment'] = None
 
     # Load additional macro data (Consumer Sentiment, Housing, Dollar Index)
@@ -5433,9 +5396,9 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        print("Loaded additional macro data")
+        logger.info("Loaded additional macro data")
     except Exception as e:
-        print(f"Error loading additional macro data: {e}")
+        logger.error("loading additional macro data: %s", e)
         data_dict['additional_macro'] = None
 
     return data_dict
@@ -5472,8 +5435,8 @@ def clean_dataframe(df, method='ffill', max_gap=5):
         try:
             if cleaned.index.dtype == 'object':
                 cleaned.index = pd.to_datetime(cleaned.index, errors='coerce')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to convert index to datetime: %s", e)
 
     # Sort by index if datetime
     if isinstance(cleaned.index, pd.DatetimeIndex):
@@ -5516,9 +5479,9 @@ def clean_all_data(data_dict, verbose=True):
     dict : Dictionary of cleaned datasets
     """
     if verbose:
-        print("\n" + "=" * 60)
-        print("=== Cleaning All Datasets ===")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("=== Cleaning All Datasets ===")
+        logger.info("=" * 60)
 
     cleaned_dict = {}
 
@@ -5537,7 +5500,7 @@ def clean_all_data(data_dict, verbose=True):
         if data is None:
             cleaned_dict[key] = None
             if verbose:
-                print(f"  {key}: Skipped (None)")
+                logger.info("  %s: Skipped (None)", key)
             continue
 
         try:
@@ -5550,7 +5513,7 @@ def clean_all_data(data_dict, verbose=True):
                             cleaned_stocks[ticker] = clean_dataframe(stock_df, method='ffill')
                     cleaned_dict[key] = cleaned_stocks
                     if verbose:
-                        print(f"  {key}: Cleaned {len(cleaned_stocks)} ticker DataFrames")
+                        logger.info("  %s: Cleaned %d ticker DataFrames", key, len(cleaned_stocks))
                 else:
                     cleaned_dict[key] = data
 
@@ -5565,7 +5528,7 @@ def clean_all_data(data_dict, verbose=True):
                             cleaned_ff[factor_name] = factor_df
                     cleaned_dict[key] = cleaned_ff
                     if verbose:
-                        print(f"  {key}: Cleaned {len(cleaned_ff)} factor DataFrames")
+                        logger.info("  %s: Cleaned %d factor DataFrames", key, len(cleaned_ff))
                 else:
                     cleaned_dict[key] = data
 
@@ -5580,13 +5543,13 @@ def clean_all_data(data_dict, verbose=True):
                             cleaned_ts[sub_key] = sub_df
                     cleaned_dict[key] = cleaned_ts
                     if verbose:
-                        print(f"  {key}: Cleaned {len(cleaned_ts)} sub-DataFrames")
+                        logger.info("  %s: Cleaned %d sub-DataFrames", key, len(cleaned_ts))
                 elif isinstance(data, pd.DataFrame):
                     cleaned_dict[key] = clean_dataframe(data, method='ffill')
                     if verbose:
                         orig_nulls = data.isnull().sum().sum()
                         new_nulls = cleaned_dict[key].isnull().sum().sum() if cleaned_dict[key] is not None else 0
-                        print(f"  {key}: Cleaned (NaN: {orig_nulls} -> {new_nulls})")
+                        logger.info("  %s: Cleaned (NaN: %d -> %d)", key, orig_nulls, new_nulls)
                 else:
                     cleaned_dict[key] = data
 
@@ -5595,24 +5558,24 @@ def clean_all_data(data_dict, verbose=True):
                 cleaned_dict[key] = data
                 if verbose:
                     if isinstance(data, pd.DataFrame):
-                        print(f"  {key}: Kept as-is ({data.shape[0]} rows)")
+                        logger.info("  %s: Kept as-is (%d rows)", key, data.shape[0])
                     else:
-                        print(f"  {key}: Kept as-is")
+                        logger.info("  %s: Kept as-is", key)
 
             else:
                 # Unknown data type - keep as is
                 cleaned_dict[key] = data
                 if verbose:
-                    print(f"  {key}: Kept as-is (unknown type)")
+                    logger.info("  %s: Kept as-is (unknown type)", key)
 
         except Exception as e:
-            print(f"  {key}: Error during cleaning - {e}")
+            logger.error("%s: error during cleaning - %s", key, e)
             cleaned_dict[key] = data
 
     if verbose:
-        print("\n" + "=" * 60)
-        print("Data cleaning complete!")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("Data cleaning complete!")
+        logger.info("=" * 60)
 
     return cleaned_dict
 
@@ -5641,11 +5604,11 @@ def analyze_news_sentiment_around_events(data_dict):
     culture_wars = data_dict['culturewardata']
 
     if news is None or len(news) == 0:
-        print("No news data available")
+        logger.info("No news data available")
         return None
 
-    print("Available columns in culture_wars data:")
-    print(culture_wars.columns.tolist())
+    logger.info("Available columns in culture_wars data:")
+    logger.info("%s", culture_wars.columns.tolist())
 
     # Detect actual column names
     date_col = None
@@ -5661,10 +5624,10 @@ def analyze_news_sentiment_around_events(data_dict):
         if 'category' in col.lower() or 'type' in col.lower():
             cat_col = col
 
-    print(f"\nUsing columns:")
-    print(f"  Date: {date_col}")
-    print(f"  Description: {desc_col}")
-    print(f"  Category: {cat_col}")
+    logger.info("Using columns:")
+    logger.info("  Date: %s", date_col)
+    logger.info("  Description: %s", desc_col)
+    logger.info("  Category: %s", cat_col)
 
     merge_cols = ['Ticker']
     if date_col:
@@ -5690,17 +5653,17 @@ def analyze_news_sentiment_around_events(data_dict):
         event_window = analysis_df[analysis_df['days_from_event'].abs() <= 30]
 
         if cat_col:
-            print("\n=== News Coverage by Event Category ===")
+            logger.info("=== News Coverage by Event Category ===")
             category_coverage = event_window.groupby(cat_col).agg({
                 'title': 'count',
                 'ticker': 'nunique'
             }).rename(columns={'title': 'article_count', 'ticker': 'company_count'})
 
-            print(category_coverage)
+            logger.info("%s", category_coverage)
 
         return event_window
     else:
-        print("No date column found - cannot calculate event windows")
+        logger.info("No date column found - cannot calculate event windows")
         return analysis_df
 
 
@@ -5710,7 +5673,7 @@ def get_news_for_ticker(data_dict, ticker, days_window=30):
     culture_wars = data_dict['culturewardata']
 
     if news is None or len(news) == 0:
-        print("No news data available")
+        logger.info("No news data available")
         return None
 
     date_col = None
@@ -5736,19 +5699,21 @@ def get_news_for_ticker(data_dict, ticker, days_window=30):
                 (ticker_news['published_date'] <= event_date + pd.Timedelta(days=days_window))
             ]
 
-            print(f"\n=== {ticker}: {event_desc} ===")
-            print(f"Event Date: {event_date.date()}")
-            print(f"Articles in +/-{days_window} day window: {len(window_news)}")
+            logger.info("=== %s: %s ===", ticker, event_desc)
+            logger.info("Event Date: %s", event_date.date())
+            logger.info("Articles in +/-%d day window: %d", days_window, len(window_news))
 
             if len(window_news) > 0:
-                print("\nTop 5 articles:")
+                logger.info("Top 5 articles:")
                 for _, row in window_news.head().iterrows():
-                    print(
-                        f"  [{row['published_date'].date()}] "
-                        f"{row['source']}: {row['title']}"
+                    logger.info(
+                        "  [%s] %s: %s",
+                        row['published_date'].date(),
+                        row['source'],
+                        row['title']
                     )
     else:
-        print(f"No date column found. Showing all {len(ticker_news)} articles for {ticker}")
+        logger.info("No date column found. Showing all %d articles for %s", len(ticker_news), ticker)
 
     return ticker_news
 
