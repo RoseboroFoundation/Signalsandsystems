@@ -26,6 +26,10 @@ dependencies = [
     "streamlit>=1.40.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [dependency-groups]
 dev = [
     "black>=25.12.0",
