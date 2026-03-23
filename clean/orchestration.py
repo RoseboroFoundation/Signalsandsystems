@@ -8,6 +8,8 @@ import pandas as pd
 from .config import logger, import_culture_war_data, SCRIPT_DIR
 from .market_data import get_stock_data, download_vix_data, download_fama_french_factors
 from .sec_form4 import Form4Downloader
+from .sec_filings import SECFilingDownloader
+from .party_platforms import PartyPlatformDownloader
 from .news import load_news_data
 from .fred_loaders import (
     load_inflation_data,
@@ -37,7 +39,10 @@ from .fred_loaders import (
     get_inflation_regime,
 )
 
-def load_culture_war_companies(culture_war_data: pd.DataFrame) -> List[str]:
+def load_culture_war_companies(
+    culture_war_data: pd.DataFrame,
+    include_controls: bool = True,
+) -> List[str]:
     """
     Extract unique company tickers from culture war dataset.
 
@@ -45,13 +50,16 @@ def load_culture_war_companies(culture_war_data: pd.DataFrame) -> List[str]:
     -----------
     culture_war_data : pd.DataFrame
         Your culture war events dataset
+    include_controls : bool
+        If True, also include matched control firm tickers.
 
     Returns:
     --------
-    List[str] : Unique ticker symbols
+    List[str] : Unique ticker symbols (treatment + control)
     """
     possible_ticker_cols = ['Ticker', 'ticker', 'TICKER', 'Symbol', 'symbol']
     possible_company_cols = ['Company', 'company', 'COMPANY', 'company_name']
+    possible_control_cols = ['Control Ticker', 'Control_Ticker', 'CONTROL_TICKER']
 
     ticker_col = None
     for col in possible_ticker_cols:
@@ -66,6 +74,20 @@ def load_culture_war_companies(culture_war_data: pd.DataFrame) -> List[str]:
             if pd.notna(t) and
             str(t).strip() not in ['', 'Private', 'N/A', 'NA', 'None']
         ]
+
+        if include_controls:
+            for col in possible_control_cols:
+                if col in culture_war_data.columns:
+                    controls = culture_war_data[col].dropna().unique().tolist()
+                    controls = [
+                        t for t in controls
+                        if str(t).strip() not in ['', 'Private', 'N/A', 'NA', 'None']
+                        and t not in tickers
+                    ]
+                    tickers.extend(controls)
+                    logger.info("Including %d control tickers", len(controls))
+                    break
+
         return tickers
 
     for col in possible_company_cols:
@@ -77,6 +99,66 @@ def load_culture_war_companies(culture_war_data: pd.DataFrame) -> List[str]:
 
     logger.error("Available columns: %s", culture_war_data.columns.tolist())
     raise ValueError("Cannot find ticker or company column in culture war data")
+
+
+def build_control_companies(culture_war_data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a control companies table linking each control firm to its
+    treatment (culture war) company.
+
+    Parameters
+    ----------
+    culture_war_data : pd.DataFrame
+        Culture war events with Control Firm / Control Ticker columns.
+
+    Returns
+    -------
+    pd.DataFrame with columns:
+        CONTROL_TICKER, CONTROL_FIRM, TREATMENT_TICKER, TREATMENT_COMPANY,
+        INDUSTRY, NAICS_CODE, RATIONALE
+    """
+    # Detect column names (CSV uses spaces, DB uses underscores)
+    col_map = {}
+    for target, candidates in {
+        'ticker': ['Ticker', 'ticker', 'TICKER'],
+        'company': ['Company', 'company', 'COMPANY'],
+        'control_ticker': ['Control Ticker', 'Control_Ticker', 'CONTROL_TICKER'],
+        'control_firm': ['Control Firm', 'Control_Firm', 'CONTROL_FIRM'],
+        'industry': ['Industry', 'industry', 'INDUSTRY'],
+        'naics': ['NAICS Code', 'NAICS_Code', 'NAICS_CODE'],
+        'rationale': ['Rationale', 'rationale', 'RATIONALE'],
+    }.items():
+        for c in candidates:
+            if c in culture_war_data.columns:
+                col_map[target] = c
+                break
+
+    if 'control_ticker' not in col_map:
+        logger.warning("No control ticker column found in culture war data")
+        return pd.DataFrame()
+
+    df = culture_war_data.copy()
+    # Filter to rows with a valid control ticker
+    ct_col = col_map['control_ticker']
+    df = df[df[ct_col].notna() & (df[ct_col].str.strip() != '')]
+
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({
+            'CONTROL_TICKER': row[ct_col].strip(),
+            'CONTROL_FIRM': row.get(col_map.get('control_firm', ''), ''),
+            'TREATMENT_TICKER': row.get(col_map.get('ticker', ''), ''),
+            'TREATMENT_COMPANY': row.get(col_map.get('company', ''), ''),
+            'INDUSTRY': row.get(col_map.get('industry', ''), ''),
+            'NAICS_CODE': row.get(col_map.get('naics', ''), ''),
+            'RATIONALE': row.get(col_map.get('rationale', ''), ''),
+        })
+
+    result = pd.DataFrame(rows)
+    logger.info("Built CONTROL_COMPANIES table: %d rows (%d unique controls, %d unique treatments)",
+                len(result), result['CONTROL_TICKER'].nunique(),
+                result['TREATMENT_TICKER'].nunique())
+    return result
 
 
 def load_data():
@@ -91,6 +173,8 @@ def load_data():
         - vixdata: VIX volatility index
         - ff_factors: Fama-French factors (FF3, FF5, MOM)
         - form4data: SEC Form 4 insider trading
+        - sec_fundamentals: SEC 10-K/10-Q financial metrics (XBRL)
+        - party_platforms: Republican & Democratic party platforms (2000–2024)
         - newsdata: News articles from Guardian, NYT, Reddit
         - inflationdata: Inflation measures from FRED
         - inflation_expectations: Breakeven inflation & survey expectations
@@ -129,10 +213,42 @@ def load_data():
         logger.error("loading culture war data: %s", e)
         data_dict['culturewardata'] = None
 
-    # Load stock data
+    # Build control companies table
     try:
         if data_dict['culturewardata'] is not None:
-            tickers = data_dict['culturewardata']['Ticker'].unique().tolist()
+            data_dict['controlcompanies'] = build_control_companies(
+                data_dict['culturewardata'])
+            logger.info("Built control companies table: %d rows",
+                        len(data_dict['controlcompanies']))
+        else:
+            data_dict['controlcompanies'] = None
+    except Exception as e:
+        logger.error("building control companies: %s", e)
+        data_dict['controlcompanies'] = None
+
+    # Load stock data (treatment + control tickers)
+    try:
+        if data_dict['culturewardata'] is not None:
+            cw = data_dict['culturewardata']
+            treatment_tickers = cw['Ticker'].dropna().unique().tolist()
+            control_tickers = []
+            for col in ['Control Ticker', 'Control_Ticker', 'CONTROL_TICKER']:
+                if col in cw.columns:
+                    control_tickers = cw[col].dropna().unique().tolist()
+                    control_tickers = [
+                        t for t in control_tickers
+                        if str(t).strip() not in ('', 'Private', 'N/A', 'NA', 'None')
+                    ]
+                    break
+            # Deduplicate while preserving order
+            seen = set()
+            tickers = []
+            for t in treatment_tickers + control_tickers:
+                if t not in seen:
+                    seen.add(t)
+                    tickers.append(t)
+            logger.info("Downloading stock data: %d treatment + %d control = %d unique tickers",
+                        len(treatment_tickers), len(control_tickers), len(tickers))
             data_dict['stockdata'] = get_stock_data(
                 tickers, start_date='2000-01-01', end_date='2025-12-31'
             )
@@ -181,11 +297,40 @@ def load_data():
         logger.error("loading Form 4 data: %s", e)
         data_dict['form4data'] = None
 
-    # Load news data
+    # Load SEC 10-K/10-Q fundamentals
+    try:
+        sec_downloader = SECFilingDownloader()
+        if data_dict['culturewardata'] is not None:
+            tickers = load_culture_war_companies(data_dict['culturewardata'])
+            data_dict['sec_fundamentals'] = sec_downloader.build_fundamentals_dataset(
+                tickers,
+                start_date='2000-01-01',
+                end_date='2025-12-31',
+                save_csv=True
+            )
+            logger.info("Loaded SEC fundamentals: %d rows", len(data_dict['sec_fundamentals']))
+        else:
+            data_dict['sec_fundamentals'] = None
+    except Exception as e:
+        logger.error("loading SEC fundamentals: %s", e)
+        data_dict['sec_fundamentals'] = None
+
+    # Load party platforms (RNC/DNC, fallback to APP)
+    try:
+        platform_downloader = PartyPlatformDownloader()
+        data_dict['party_platforms'] = platform_downloader.download_all_platforms(
+            save_csv=True
+        )
+        logger.info("Loaded party platforms: %d documents", len(data_dict['party_platforms']))
+    except Exception as e:
+        logger.error("loading party platforms: %s", e)
+        data_dict['party_platforms'] = None
+
+    # Load news data (scrape from Guardian, NYT, Reddit)
     try:
         data_dict['newsdata'] = load_news_data(
-            cache_file='./news_data/culture_war_news_2000_2025_final.csv',
-            refresh=False
+            cache_file='./news_data/culture_war_news_checkpoint.csv',
+            refresh=True
         )
         logger.info("Loaded news data")
     except Exception as e:
@@ -632,7 +777,8 @@ def clean_all_data(data_dict, verbose=True):
                 else:
                     cleaned_dict[key] = data
 
-            elif key in ['culturewardata', 'newsdata', 'form4data']:
+            elif key in ['culturewardata', 'newsdata', 'form4data',
+                         'sec_fundamentals', 'party_platforms']:
                 # Cross-sectional data - keep as is (already cleaned during load)
                 cleaned_dict[key] = data
                 if verbose:
