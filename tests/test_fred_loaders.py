@@ -122,3 +122,68 @@ class TestInflationDataStructure:
 
         assert all(col.endswith("_YoY") for col in result["yoy"].columns)
         assert all(col.endswith("_MoM") for col in result["mom"].columns)
+
+
+class TestInflationMathCorrectness:
+    """Verify YoY and MoM calculations produce mathematically correct values.
+
+    Uses a hand-constructed CPI series where expected results can be
+    computed on paper, so any regression in the pct_change logic is caught.
+    """
+
+    @pytest.fixture
+    def inflation_result(self, tmp_path):
+        """Run load_inflation_data with a known CPI series: 100, 101, ..., 123."""
+        dates = pd.date_range("2020-01-01", periods=24, freq="MS")
+        # Only provide CPI to keep the math simple
+        values = list(range(100, 124))  # 100..123
+
+        def side_effect(code, source, start, end):
+            return pd.DataFrame({code: values}, index=dates)
+
+        series_map = {
+            "CPIAUCSL": "CPIAUCSL",
+            "CPILFESL": "CPILFESL",
+            "PCEPI": "PCEPI",
+            "PCEPILFE": "PCEPILFE",
+            "PPIACO": "PPIACO",
+            "GDPDEF": "GDPDEF",
+        }
+
+        with patch("clean.config.API_KEY", "test_key"):
+            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+                from clean.fred_loaders import load_inflation_data
+
+                return load_inflation_data(
+                    start_date="2020-01-01",
+                    end_date="2021-12-01",
+                    cache_path=str(tmp_path / "fred_math"),
+                )
+
+    def test_yoy_formula(self, inflation_result):
+        """YoY = (value / value_12_months_ago - 1) * 100.
+
+        At month index 12 (2021-01): value=112, 12 months prior=100.
+        Expected YoY = (112/100 - 1)*100 = 12.0%
+        """
+        yoy = inflation_result["yoy"]
+        # First 12 rows should be NaN (no prior year)
+        assert yoy.iloc[:12].isnull().all().all()
+        # Month 12: CPI went from 100 to 112 → 12%
+        assert yoy["CPI_YoY"].iloc[12] == pytest.approx(12.0)
+        # Month 23: CPI went from 111 to 123 → (123/111 - 1)*100 ≈ 10.81%
+        assert yoy["CPI_YoY"].iloc[23] == pytest.approx((123 / 111 - 1) * 100)
+
+    def test_mom_formula(self, inflation_result):
+        """MoM (annualized) = (value / prev_value - 1) * 100 * 12.
+
+        At month index 1 (2020-02): value=101, prior=100.
+        Expected MoM = (101/100 - 1)*100*12 = 12.0%
+        """
+        mom = inflation_result["mom"]
+        # First row should be NaN
+        assert mom.iloc[0].isnull().all()
+        # Month 1: 100→101, MoM annualized = (1/100)*100*12 = 12.0%
+        assert mom["CPI_MoM"].iloc[1] == pytest.approx(12.0)
+        # Month 10: 109→110, MoM annualized = (1/109)*100*12
+        assert mom["CPI_MoM"].iloc[10] == pytest.approx((1 / 109) * 100 * 12)

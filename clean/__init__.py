@@ -17,6 +17,9 @@ from .config import (
     _download_fred_series,
 )
 
+# Validation
+from .validation import validate_dataframe
+
 # Cache utilities
 from .cache import _save_cache, _load_cache
 
@@ -30,6 +33,9 @@ from .market_data import (
 
 # SEC Form 4
 from .sec_form4 import Form4Downloader
+
+# SEC 10-K / 10-Q filings
+from .sec_filings import SECFilingDownloader
 
 # News
 from .news import (
@@ -70,9 +76,13 @@ from .fred_loaders import (
     get_inflation_regime,
 )
 
+# Party Platforms
+from .party_platforms import PartyPlatformDownloader
+
 # Orchestration
 from .orchestration import (
     load_culture_war_companies,
+    build_control_companies,
     load_data,
     clean_dataframe,
     clean_all_data,
