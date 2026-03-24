@@ -29,7 +29,12 @@ from clean import (
     get_stock_data,
     download_vix_data,
     download_fama_french_factors,
+    download_industry_portfolios,
     load_culture_war_companies,
+    build_control_companies,
+    Form4Downloader,
+    SECFilingDownloader,
+    PartyPlatformDownloader,
     load_inflation_data,
     load_inflation_expectations_data,
     load_comprehensive_inflation_data,
@@ -56,7 +61,6 @@ from clean import (
     load_additional_macro_data,
     load_news_data,
     clean_all_data,
-    get_inflation_regime,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,8 +75,74 @@ START_DATE = '2000-01-01'
 END_DATE = '2025-12-31'
 CACHE_PATH = './data/fred'
 
+
+# ---------------------------------------------------------------------------
+# Wrapper loaders for dependency-injected and class-based downloaders.
+# Every DATA_DICTIONARY entry has a callable 'loader' — no string sentinels,
+# no key-name dispatch.  Wrappers that need other datasets receive `data_dict`
+# as first arg; _load_single dispatches via _DATA_DICT_LOADERS.
+# ---------------------------------------------------------------------------
+
+def _load_stockdata(data_dict, start_date=START_DATE, end_date=END_DATE, **_kw):
+    """Load stock prices for culture war tickers from Yahoo Finance."""
+    cw = data_dict.get('culturewardata')
+    if cw is None:
+        logger.warning("Skipping stockdata: culturewardata not loaded")
+        return None
+    tickers = cw['Ticker'].unique().tolist()
+    return get_stock_data(tickers, start_date=start_date, end_date=end_date)
+
+
+def _load_controlcompanies(data_dict, **_kw):
+    """Build control companies table from culture war dataset."""
+    cw = data_dict.get('culturewardata')
+    if cw is None:
+        logger.warning("Skipping controlcompanies: culturewardata not loaded")
+        return None
+    return build_control_companies(cw)
+
+
+def _load_form4(data_dict, start_date=START_DATE, end_date=END_DATE, **_kw):
+    """Load SEC Form 4 insider trading data for culture war tickers."""
+    cw = data_dict.get('culturewardata')
+    if cw is None:
+        logger.warning("Skipping form4data: culturewardata not loaded")
+        return None
+    tickers = load_culture_war_companies(cw)
+    return Form4Downloader().build_form4_dataset(
+        tickers, start_date=start_date, end_date=end_date, save_csv=True,
+    )
+
+
+def _load_sec_fundamentals(data_dict, start_date=START_DATE, end_date=END_DATE, **_kw):
+    """Load SEC 10-K/10-Q fundamentals for culture war tickers."""
+    cw = data_dict.get('culturewardata')
+    if cw is None:
+        logger.warning("Skipping sec_fundamentals: culturewardata not loaded")
+        return None
+    tickers = load_culture_war_companies(cw)
+    return SECFilingDownloader().build_fundamentals_dataset(
+        tickers, start_date=start_date, end_date=end_date, save_csv=True,
+    )
+
+
+def _load_party_platforms(**_kw):
+    """Load Republican & Democratic party platforms (2000-2024)."""
+    return PartyPlatformDownloader().download_all_platforms(save_csv=True)
+
+
+# Loaders that receive data_dict as first arg (dependency-injected)
+_DATA_DICT_LOADERS = {_load_stockdata, _load_controlcompanies,
+                      _load_form4, _load_sec_fundamentals}
+
+# Loaders that take only kwargs (no data_dict, no positional args)
+_KWARGS_ONLY_LOADERS = {_load_party_platforms}
+
+
 DATA_DICTIONARY = {
     # --- Culture War & Market Data ---
+    # args convention: () = no positional args; dependency-injected loaders
+    # receive their args in _load_single via the depends_on mechanism.
     'culturewardata': {
         'loader': import_culture_war_data,
         'args': ('Culture_War_Companies_160_fullmeta.csv',),
@@ -82,8 +152,8 @@ DATA_DICTIONARY = {
         'depends_on': [],
     },
     'stockdata': {
-        'loader': get_stock_data,
-        'args': None,  # Requires tickers from culturewardata
+        'loader': _load_stockdata,
+        'args': (),
         'kwargs': {'start_date': START_DATE, 'end_date': END_DATE},
         'category': 'market',
         'description': 'Historical stock prices from Yahoo Finance',
@@ -109,6 +179,27 @@ DATA_DICTIONARY = {
         'description': 'Fama-French 3-factor, 5-factor, and Momentum',
         'depends_on': [],
     },
+    'controlcompanies': {
+        'loader': _load_controlcompanies,
+        'args': (),
+        'kwargs': {},
+        'category': 'market',
+        'description': 'Control companies matched to culture war treatment firms',
+        'depends_on': ['culturewardata'],
+    },
+    'industry_portfolios': {
+        'loader': download_industry_portfolios,
+        'args': (),
+        'kwargs': {
+            'num_industries': 10,
+            'start_date': START_DATE,
+            'frequency': 'daily',
+            'output_dir': './fama_french_data',
+        },
+        'category': 'market',
+        'description': 'Fama-French industry portfolio returns',
+        'depends_on': [],
+    },
     'newsdata': {
         'loader': load_news_data,
         'args': (),
@@ -118,6 +209,34 @@ DATA_DICTIONARY = {
         },
         'category': 'market',
         'description': 'News articles from Guardian, NYT, Reddit',
+        'depends_on': [],
+    },
+
+    # --- SEC Filings ---
+    'form4data': {
+        'loader': _load_form4,
+        'args': (),
+        'kwargs': {'start_date': START_DATE, 'end_date': END_DATE},
+        'category': 'sec',
+        'description': 'SEC Form 4 insider trading filings',
+        'depends_on': ['culturewardata'],
+    },
+    'sec_fundamentals': {
+        'loader': _load_sec_fundamentals,
+        'args': (),
+        'kwargs': {'start_date': START_DATE, 'end_date': END_DATE},
+        'category': 'sec',
+        'description': 'SEC 10-K/10-Q financial fundamentals (XBRL)',
+        'depends_on': ['culturewardata'],
+    },
+
+    # --- Political ---
+    'party_platforms': {
+        'loader': _load_party_platforms,
+        'args': (),
+        'kwargs': {},
+        'category': 'political',
+        'description': 'Republican & Democratic party platforms (2000-2024)',
         'depends_on': [],
     },
 
@@ -330,7 +449,9 @@ DATA_DICTIONARY = {
 
 # Category descriptions for reporting
 CATEGORIES = {
-    'market': 'Market Data (stocks, VIX, Fama-French, news)',
+    'market': 'Market Data (stocks, VIX, Fama-French, industry portfolios, news)',
+    'sec': 'SEC Filings (Form 4 insider trading, 10-K/10-Q fundamentals)',
+    'political': 'Political (party platforms 2000-2024)',
     'inflation': 'Inflation (CPI, PCE, PPI, expectations, components)',
     'rates': 'Interest Rates (Treasury curve, policy rates, credit spreads)',
     'production': 'Industrial Production (IP indices, capacity utilization)',
@@ -361,9 +482,9 @@ def run_etl(
     Parameters
     ----------
     categories : list[str], optional
-        Which categories to load. Options: 'market', 'inflation', 'rates',
-        'production', 'money', 'gdp', 'employment', 'macro'.
-        Defaults to all categories.
+        Which categories to load. Options: 'market', 'sec', 'political',
+        'inflation', 'rates', 'production', 'money', 'gdp', 'employment',
+        'macro'. Defaults to all categories.
     keys : list[str], optional
         Specific dataset keys to load (overrides categories).
         E.g. ['inflationdata', 'treasury_yields', 'employment_data']
@@ -400,6 +521,10 @@ def run_etl(
 
     # Resolve dependencies: add any required keys not already in list
     resolved = _resolve_dependencies(load_keys)
+
+    extra = [k for k in resolved if k not in load_keys]
+    if extra and verbose:
+        logger.info("  Auto-added dependencies: %s", extra)
 
     if verbose:
         logger.info("=" * 60)
@@ -490,18 +615,21 @@ def _load_single(key, entry, data_dict, start_date, end_date, force_refresh):
         kwargs['end_date'] = end_date
 
     # Pass force_refresh if the loader supports it
-    if force_refresh and 'force_refresh' in _get_param_names(loader):
-        kwargs['force_refresh'] = force_refresh
+    if force_refresh:
+        if 'force_refresh' in _get_param_names(loader):
+            kwargs['force_refresh'] = force_refresh
+        else:
+            logger.debug("force_refresh has no effect on '%s' (loader does not support it)", key)
 
-    # Handle special dependency: stockdata needs tickers from culturewardata
-    if key == 'stockdata':
-        cw = data_dict.get('culturewardata')
-        if cw is None:
-            logger.warning("Skipping stockdata: culturewardata not loaded")
-            return None
-        tickers = cw['Ticker'].unique().tolist()
-        args = (tickers,)
+    # Dependency-injected loaders: receive data_dict as first arg
+    if loader in _DATA_DICT_LOADERS:
+        return loader(data_dict, **kwargs)
 
+    # Kwargs-only loaders (no positional args, no data_dict)
+    if loader in _KWARGS_ONLY_LOADERS:
+        return loader(**kwargs)
+
+    # Standard loaders: called with positional args + kwargs
     return loader(*args, **kwargs)
 
 
@@ -635,8 +763,18 @@ def load_macro_only(clean=True):
 
 
 def load_market_only(clean=True):
-    """Load only market data (stocks, VIX, Fama-French, news)."""
+    """Load only market data (stocks, VIX, Fama-French, industry portfolios, news)."""
     return run_etl(categories=['market'], clean=clean)
+
+
+def load_sec_only(clean=True):
+    """Load SEC filings data (Form 4 insider trading, 10-K/10-Q fundamentals)."""
+    return run_etl(categories=['sec'], clean=clean)
+
+
+def load_political_only(clean=True):
+    """Load political data (party platforms)."""
+    return run_etl(categories=['political'], clean=clean)
 
 
 # =============================================================================
