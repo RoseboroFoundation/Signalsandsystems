@@ -89,7 +89,9 @@ def _load_stockdata(data_dict, start_date=START_DATE, end_date=END_DATE, **_kw):
     if cw is None:
         logger.warning("Skipping stockdata: culturewardata not loaded")
         return None
-    tickers = cw['Ticker'].unique().tolist()
+    # Use load_culture_war_companies to get both treatment and control tickers,
+    # matching the ticker universe used by _load_form4 and _load_sec_fundamentals.
+    tickers = load_culture_war_companies(cw)
     return get_stock_data(tickers, start_date=start_date, end_date=end_date)
 
 
