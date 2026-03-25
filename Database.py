@@ -57,7 +57,7 @@ AWS_PROFILE = os.getenv('AWS_PROFILE', None)  # None = use default credential ch
 GLUE_DATABASE = os.getenv('GLUE_DATABASE', 'roseboro_research')
 ATHENA_WORKGROUP = os.getenv('ATHENA_WORKGROUP', 'roseboro')
 ATHENA_RESULTS_BUCKET = os.getenv('ATHENA_RESULTS_BUCKET', 's3://roseboro-athena-results/')
-S3_DATA_BUCKET = os.getenv('S3_DATA_BUCKET', 'roseboro-snowflake-export')
+S3_DATA_BUCKET = os.getenv('S3_DATA_BUCKET', 'roseboro-snowflake-export')  # legacy name; set S3_DATA_BUCKET to override
 S3_DATA_PREFIX = os.getenv('S3_DATA_PREFIX', 'signals_systems')
 
 _VALID_EXTRACT_MODES = {'dataframe', 'combined', 'concat', 'multi', 'nested'}
@@ -268,7 +268,7 @@ def _prepare_dataframe(df):
     # Uppercase column names
     write_df.columns = [str(c).upper().replace(' ', '_').replace('-', '_') for c in write_df.columns]
 
-    # Deduplicate column names (#1: fixed off-by-one — first dupe gets _1, not _0)
+    # Deduplicate column names (original kept clean, first duplicate gets _2)
     seen = {}
     new_cols = []
     for col in write_df.columns:
@@ -416,13 +416,6 @@ class BaseLoader:
 
             extract_mode = mapping['extract_mode']
 
-            if extract_mode not in _VALID_EXTRACT_MODES:
-                logger.warning(
-                    "Unknown extract_mode '%s' for key '%s' — skipping",
-                    extract_mode, etl_key,
-                )
-                continue
-
             if extract_mode == 'multi':
                 sub_tables = mapping.get('sub_tables', {})
                 for sub_key, sub_table in sub_tables.items():
@@ -532,7 +525,7 @@ class BaseLoader:
                 "before calling write_table()."
             )
         table_name = table_name.upper()
-        return self._write_table(df, table_name, replace, etl_key='model_results', verbose=True)
+        return self._write_table(df, table_name, replace, etl_key=table_name.lower(), verbose=True)
 
 
 # =============================================================================
@@ -582,7 +575,7 @@ class AthenaLoader(BaseLoader):
     def _check_access(self):
         """Verify we can reach S3 and Glue."""
         try:
-            self._s3.head_bucket(Bucket=self.s3_bucket)
+            _retry(lambda: self._s3.head_bucket(Bucket=self.s3_bucket))
         except Exception as e:
             raise ConnectionError(
                 f"Cannot access S3 bucket s3://{self.s3_bucket}: {e}"
@@ -640,6 +633,7 @@ class AthenaLoader(BaseLoader):
         status = 'SUCCESS'
         error_msg = None
         rows = len(df)
+        s3_uploaded = False
         glue_registered = False
 
         try:
@@ -651,6 +645,10 @@ class AthenaLoader(BaseLoader):
                     write_df[col] = write_df[col].astype(str)
 
             glue_table = table_name.lower()
+
+            # In replace mode, clear any stale files from prior appends
+            if replace:
+                self._clear_s3_prefix(glue_table)
 
             # Generate a timestamped key for append mode, flat key for replace
             if replace:
@@ -670,6 +668,7 @@ class AthenaLoader(BaseLoader):
             _retry(lambda: self._s3.upload_fileobj(
                 BytesIO(parquet_bytes), self.s3_bucket, s3_key,
             ))
+            s3_uploaded = True
 
             # Register/update Glue table (skip on append if schema unchanged)
             should_register = replace
@@ -683,9 +682,9 @@ class AthenaLoader(BaseLoader):
             status = 'FAILED'
             error_msg = str(e)[:500]
             rows = 0
-            if not glue_registered:
+            if s3_uploaded and not glue_registered:
                 logger.error(
-                    "  [FAIL] %s: %s (S3 data may be orphaned — not registered in Glue)",
+                    "  [FAIL] %s: %s (S3 data orphaned — not registered in Glue)",
                     table_name, e,
                 )
             else:
@@ -706,6 +705,36 @@ class AthenaLoader(BaseLoader):
             'error': error_msg,
             'etl_key': etl_key,
         }
+
+    def _clear_s3_prefix(self, glue_table):
+        """Delete all existing objects under a table's S3 prefix before replace."""
+        prefix = f"{self.s3_prefix}/{glue_table}/"
+        total_deleted = 0
+        continuation_token = None
+
+        while True:
+            list_kwargs = {'Bucket': self.s3_bucket, 'Prefix': prefix}
+            if continuation_token:
+                list_kwargs['ContinuationToken'] = continuation_token
+
+            resp = self._s3.list_objects_v2(**list_kwargs)
+            objects = resp.get('Contents', [])
+            if not objects:
+                break
+
+            delete_keys = [{'Key': obj['Key']} for obj in objects]
+            self._s3.delete_objects(
+                Bucket=self.s3_bucket,
+                Delete={'Objects': delete_keys, 'Quiet': True},
+            )
+            total_deleted += len(delete_keys)
+
+            if not resp.get('IsTruncated'):
+                break
+            continuation_token = resp.get('NextContinuationToken')
+
+        if total_deleted:
+            logger.debug("Cleared %d stale S3 objects under %s", total_deleted, prefix)
 
     def _glue_schema_matches(self, table_name, df):
         """Check if the Glue table already exists with matching columns."""
@@ -827,12 +856,46 @@ class AthenaLoader(BaseLoader):
         return pd.read_csv(obj['Body'])
 
     def read_table(self, table_name, limit=None):
-        """Read a table into a pandas DataFrame via Athena."""
+        """Read a table into a pandas DataFrame via Athena.
+
+        Unlike run_query(), this method coerces columns to their Glue catalog
+        types so that timestamps come back as datetime64 and numerics as
+        int/float — matching the behaviour of SQLiteLoader.read_table().
+        """
         glue_table = table_name.lower()
         query = f'SELECT * FROM "{glue_table}"'
         if limit:
             query += f" LIMIT {limit}"
-        return self.run_query(query)
+        df = self.run_query(query)
+        return self._coerce_types(df, glue_table)
+
+    def _coerce_types(self, df, glue_table):
+        """Cast CSV-typed columns to their Glue catalog types."""
+        try:
+            resp = self._glue.get_table(DatabaseName=self.database, Name=glue_table)
+            columns = resp['Table']['StorageDescriptor']['Columns']
+        except Exception:
+            return df
+
+        glue_types = {c['Name']: c['Type'] for c in columns}
+
+        for col in df.columns:
+            glue_type = glue_types.get(col.lower())
+            if glue_type is None:
+                continue
+            try:
+                if glue_type == 'timestamp':
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                elif glue_type == 'bigint':
+                    df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+                elif glue_type == 'double':
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                elif glue_type == 'boolean':
+                    df[col] = df[col].map({'true': True, 'false': False, 'True': True, 'False': False})
+            except Exception:
+                pass  # leave column as-is if coercion fails
+
+        return df
 
     def list_tables(self):
         """List Signals & Systems tables in the Glue catalog."""
