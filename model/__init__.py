@@ -35,6 +35,8 @@ from .essay1 import (
     ff5_by_regime,
     CultureWarRegimeAnalysis,
     culture_war_by_regime,
+    SentimentRegimeAnalysis,
+    sentiment_by_regime,
     save_results as save_essay1_results,
 )
 
@@ -85,6 +87,8 @@ __all__ = [
     "ff5_by_regime",
     "CultureWarRegimeAnalysis",
     "culture_war_by_regime",
+    "SentimentRegimeAnalysis",
+    "sentiment_by_regime",
     "save_essay1_results",
     # Essay 1 — Matched Controls
     "MatchedControlResult",

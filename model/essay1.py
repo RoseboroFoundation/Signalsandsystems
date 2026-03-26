@@ -22,6 +22,7 @@ import re
 import time
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -832,6 +833,301 @@ def assemble_macro_controls(store: DataStore) -> pd.DataFrame:
 
 
 # =========================================================================
+# FINBERT SENTIMENT ANALYSIS & FOMO Z-SCORE
+# =========================================================================
+
+_NEWS_CSV = 'news_data/culture_war_news.csv'
+_FINBERT_MODEL = 'ProsusAI/finbert'
+_FINBERT_BATCH_SIZE = 64
+_FINBERT_MAX_LEN = 512
+
+
+@dataclass
+class SentimentRegimeAnalysis:
+    """FinBERT sentiment scored by volatility regime with FOMO z-scores."""
+    sentiment_daily: pd.DataFrame       # DATE, TICKER, REGIME, SENT_MEAN, SENT_STD, N_ARTICLES, FOMO_Z
+    regime_stats: pd.DataFrame          # REGIME, REGIME_SENT_MEAN, REGIME_SENT_STD, N_OBS
+    fomo_zscores: pd.DataFrame          # DATE, TICKER, REGIME, FOMO_Z
+    fomo_by_regime: pd.DataFrame        # REGIME, MEAN_SENTIMENT, PCT_EUPHORIA, PCT_PANIC, ...
+    n_articles: int
+    n_scored: int
+
+
+def _load_news(store: DataStore, news_path: str = None) -> pd.DataFrame:
+    """
+    Load news articles, merge with event tickers, parse dates.
+
+    Tries news_path CSV first, then falls back to CULTURE_WAR_NEWS table
+    in the database.
+    """
+    df = pd.DataFrame()
+
+    # Try CSV
+    if news_path is None:
+        # Resolve relative to the project root (parent of model/)
+        news_path = str(Path(__file__).parent.parent / _NEWS_CSV)
+
+    if Path(news_path).exists():
+        df = pd.read_csv(news_path, low_memory=False)
+        logger.info("Loaded %d news articles from %s", len(df), news_path)
+    else:
+        # Fallback: try database table
+        try:
+            df = store.read_table('CULTURE_WAR_NEWS')
+            logger.info("Loaded %d news articles from database", len(df))
+        except Exception as e:
+            logger.warning("Could not load CULTURE_WAR_NEWS from database: %s", e)
+
+    if df.empty:
+        logger.warning("No news data found")
+        return df
+
+    # Normalise column names to uppercase
+    df.columns = [c.upper() for c in df.columns]
+
+    # Parse dates
+    for dcol in ['PUBLISHED_DATE', 'EVENT_DATE']:
+        if dcol in df.columns:
+            df[dcol] = pd.to_datetime(df[dcol], errors='coerce')
+
+    # Build text column: title + snippet (title always present, snippet may be null)
+    df['TEXT'] = df['TITLE'].fillna('').str.strip()
+    if 'SNIPPET' in df.columns:
+        snippet = df['SNIPPET'].fillna('').str.strip()
+        df['TEXT'] = df['TEXT'] + ' ' + snippet
+    df['TEXT'] = df['TEXT'].str.strip()
+
+    # Drop rows with no usable text
+    df = df[df['TEXT'].str.len() > 10].copy()
+
+    # Rename ticker column if needed
+    if 'TICKER' not in df.columns and 'ticker' in df.columns:
+        df = df.rename(columns={'ticker': 'TICKER'})
+
+    # Create DATE column from published_date (date only, no time)
+    if 'PUBLISHED_DATE' in df.columns:
+        df['DATE'] = df['PUBLISHED_DATE'].dt.normalize()
+
+    return df
+
+
+_FINBERT_DEVICE = -1  # CPU; set to 0 for GPU or 'auto' for device_map
+
+
+def _score_finbert(
+    texts: list,
+    batch_size: int = _FINBERT_BATCH_SIZE,
+    pipe=None,
+) -> list:
+    """
+    Score a list of texts with FinBERT.
+
+    Returns list of dicts: {'label': 'positive'|'negative'|'neutral', 'score': float}.
+    FinBERT maps: positive → bullish, negative → bearish, neutral → flat.
+
+    Parameters
+    ----------
+    texts : list of str
+    batch_size : int
+    pipe : transformers.Pipeline, optional
+        Pre-loaded FinBERT pipeline. If None, loads from HuggingFace Hub
+        (~440MB). Pass a cached pipeline to avoid reloading across calls.
+    """
+    if pipe is None:
+        from transformers import pipeline as hf_pipeline
+
+        logger.info("Loading FinBERT model (%s)...", _FINBERT_MODEL)
+        pipe = hf_pipeline(
+            'sentiment-analysis',
+            model=_FINBERT_MODEL,
+            device=_FINBERT_DEVICE,
+            truncation=True,
+            max_length=_FINBERT_MAX_LEN,
+        )
+
+    results = []
+    n = len(texts)
+    for i in range(0, n, batch_size):
+        batch = texts[i:i + batch_size]
+        batch_results = pipe(batch)
+        results.extend(batch_results)
+        if i % (batch_size * 10) == 0 or i + batch_size >= n:
+            logger.info("  FinBERT: %d/%d articles scored", min(i + batch_size, n), n)
+
+    return results
+
+
+def _sentiment_to_numeric(label: str) -> float:
+    """Convert FinBERT label to numeric: positive=+1, negative=-1, neutral=0."""
+    if label == 'positive':
+        return 1.0
+    elif label == 'negative':
+        return -1.0
+    return 0.0
+
+
+def sentiment_by_regime(
+    store: DataStore,
+    regime_result: RegimeResult = None,
+    n_regimes: int = 3,
+    news_path: str = None,
+    finbert_pipeline=None,
+) -> Optional[SentimentRegimeAnalysis]:
+    """
+    Run FinBERT sentiment analysis on culture war news and compute
+    FOMO z-scores by volatility regime.
+
+    Pipeline
+    --------
+    1. Load news articles (CSV or database).
+    2. Score each article with FinBERT (positive/negative/neutral + confidence).
+    3. Compute daily sentiment per ticker (weighted mean of signed scores).
+    4. Merge with regime assignments.
+    5. Compute FOMO z-score: how extreme the sentiment is relative to the
+       regime's own distribution. Z > 2 indicates euphoria (FOMO buying),
+       Z < -2 indicates panic selling.
+
+    The FOMO z-score is defined as:
+        FOMO_Z_it = (S_it - mu_r) / sigma_r
+    where S_it is the daily sentiment score for ticker i on date t,
+    and mu_r, sigma_r are the mean and std of sentiment within regime r.
+
+    Parameters
+    ----------
+    store : DataStore
+    regime_result : RegimeResult, optional
+    n_regimes : int
+    news_path : str, optional
+        Path to news CSV. If None, uses default location.
+
+    Returns
+    -------
+    SentimentRegimeAnalysis or None
+    """
+    # Step 0: Regimes
+    if regime_result is None:
+        regime_result = estimate_vix_regimes(store, n_regimes=n_regimes)
+        if regime_result is None:
+            return None
+
+    # Step 1: Load news
+    news = _load_news(store, news_path)
+    if news.empty:
+        logger.error("No news data available for sentiment analysis")
+        return None
+
+    n_articles = len(news)
+    logger.info("Scoring %d articles with FinBERT...", n_articles)
+
+    # Step 2: FinBERT scoring
+    texts = news['TEXT'].tolist()
+    scores = _score_finbert(texts, pipe=finbert_pipeline)
+
+    news['FINBERT_LABEL'] = [s['label'] for s in scores]
+    news['FINBERT_CONF'] = [s['score'] for s in scores]
+    news['SENTIMENT'] = news['FINBERT_LABEL'].apply(_sentiment_to_numeric)
+    # Weighted sentiment: direction * confidence
+    news['SENT_WEIGHTED'] = news['SENTIMENT'] * news['FINBERT_CONF']
+
+    n_scored = len(news)
+    logger.info("FinBERT scoring complete: %d positive, %d negative, %d neutral",
+                (news['FINBERT_LABEL'] == 'positive').sum(),
+                (news['FINBERT_LABEL'] == 'negative').sum(),
+                (news['FINBERT_LABEL'] == 'neutral').sum())
+
+    # Step 3: Daily sentiment per ticker
+    # Note: SENT_STD is NaN for single-article dates (std undefined for n=1).
+    daily = (
+        news.groupby(['DATE', 'TICKER'])
+        .agg(
+            SENT_MEAN=('SENT_WEIGHTED', 'mean'),
+            SENT_STD=('SENT_WEIGHTED', 'std'),
+            N_ARTICLES=('SENT_WEIGHTED', 'count'),
+            PCT_POSITIVE=('FINBERT_LABEL', lambda x: (x == 'positive').mean()),
+            PCT_NEGATIVE=('FINBERT_LABEL', lambda x: (x == 'negative').mean()),
+        )
+        .reset_index()
+    )
+    daily['DATE'] = pd.to_datetime(daily['DATE'])
+
+    # Step 4: Merge with regime assignments
+    regime_dates = regime_result.regime_assignments[['DATE', 'REGIME_LABEL']].copy()
+    regime_dates['DATE'] = pd.to_datetime(regime_dates['DATE'])
+
+    daily = daily.merge(regime_dates, on='DATE', how='inner')
+
+    if daily.empty:
+        logger.error("No overlap between news dates and regime dates")
+        return None
+
+    logger.info("Daily sentiment: %d ticker-date observations across %d regimes",
+                len(daily), daily['REGIME_LABEL'].nunique())
+
+    # Step 5: FOMO z-score per regime
+    # Compute regime-level sentiment statistics
+    regime_stats = (
+        daily.groupby('REGIME_LABEL')['SENT_MEAN']
+        .agg(['mean', 'std', 'count'])
+        .reset_index()
+    )
+    regime_stats.columns = ['REGIME', 'REGIME_SENT_MEAN', 'REGIME_SENT_STD', 'N_OBS']
+
+    # Merge regime stats back to daily
+    daily = daily.merge(
+        regime_stats[['REGIME', 'REGIME_SENT_MEAN', 'REGIME_SENT_STD']],
+        left_on='REGIME_LABEL', right_on='REGIME', how='left',
+    )
+
+    # Z-score: how extreme is today's sentiment vs the regime norm
+    # NaN when std=0 (all sentiment identical in regime) — avoids conflating
+    # undefined z-scores with "perfectly average" sentiment.
+    daily['FOMO_Z'] = np.where(
+        daily['REGIME_SENT_STD'] > 0,
+        (daily['SENT_MEAN'] - daily['REGIME_SENT_MEAN']) / daily['REGIME_SENT_STD'],
+        np.nan,
+    )
+
+    # FOMO summary by regime
+    fomo_by_regime = (
+        daily.groupby('REGIME_LABEL')
+        .agg(
+            MEAN_SENTIMENT=('SENT_MEAN', 'mean'),
+            STD_SENTIMENT=('SENT_MEAN', 'std'),
+            MEAN_FOMO_Z=('FOMO_Z', 'mean'),
+            STD_FOMO_Z=('FOMO_Z', 'std'),
+            PCT_EUPHORIA=('FOMO_Z', lambda x: (x > 2).sum() / x.notna().sum() if x.notna().any() else np.nan),
+            PCT_PANIC=('FOMO_Z', lambda x: (x < -2).sum() / x.notna().sum() if x.notna().any() else np.nan),
+            N_OBS=('FOMO_Z', lambda x: x.notna().sum()),
+        )
+        .reset_index()
+    )
+    fomo_by_regime.columns = ['REGIME', 'MEAN_SENTIMENT', 'STD_SENTIMENT',
+                               'MEAN_FOMO_Z', 'STD_FOMO_Z',
+                               'PCT_EUPHORIA', 'PCT_PANIC', 'N_OBS']
+
+    logger.info("FOMO z-scores by regime:")
+    for _, row in fomo_by_regime.iterrows():
+        logger.info("  %s: mean_sent=%.3f, mean_z=%.3f, euphoria=%.1f%%, panic=%.1f%% (%d obs)",
+                    row['REGIME'], row['MEAN_SENTIMENT'], row['MEAN_FOMO_Z'],
+                    row['PCT_EUPHORIA'] * 100, row['PCT_PANIC'] * 100, row['N_OBS'])
+
+    # Build output DataFrames
+    sentiment_daily = daily[['DATE', 'TICKER', 'REGIME_LABEL', 'SENT_MEAN',
+                             'SENT_STD', 'N_ARTICLES', 'PCT_POSITIVE',
+                             'PCT_NEGATIVE', 'FOMO_Z']].copy()
+    sentiment_daily = sentiment_daily.rename(columns={'REGIME_LABEL': 'REGIME'})
+
+    return SentimentRegimeAnalysis(
+        sentiment_daily=sentiment_daily,
+        regime_stats=regime_stats,
+        fomo_zscores=sentiment_daily[['DATE', 'TICKER', 'REGIME', 'FOMO_Z']],
+        fomo_by_regime=fomo_by_regime,
+        n_articles=n_articles,
+        n_scored=n_scored,
+    )
+
+
+# =========================================================================
 # RESULT PERSISTENCE
 # =========================================================================
 
@@ -839,6 +1135,7 @@ def save_results(
     store: DataStore,
     ff5_analysis: FF5RegimeAnalysis = None,
     cw_analysis: CultureWarRegimeAnalysis = None,
+    sentiment_analysis: SentimentRegimeAnalysis = None,
 ) -> dict:
     """
     Save Essay 1 results to the database.
@@ -848,6 +1145,7 @@ def save_results(
     store : DataStore
     ff5_analysis : FF5RegimeAnalysis, optional
     cw_analysis : CultureWarRegimeAnalysis, optional
+    sentiment_analysis : SentimentRegimeAnalysis, optional
 
     Returns
     -------
@@ -878,6 +1176,21 @@ def save_results(
             'ESSAY1_CW_STOCK_RESULTS', replace=True,
         )
         results['ESSAY1_CW_STOCK_RESULTS'] = res
+
+    if sentiment_analysis is not None:
+        if not sentiment_analysis.sentiment_daily.empty:
+            res = store.write_table(
+                sentiment_analysis.sentiment_daily,
+                'ESSAY1_SENTIMENT_DAILY', replace=True,
+            )
+            results['ESSAY1_SENTIMENT_DAILY'] = res
+
+        if not sentiment_analysis.fomo_by_regime.empty:
+            res = store.write_table(
+                sentiment_analysis.fomo_by_regime,
+                'ESSAY1_FOMO_BY_REGIME', replace=True,
+            )
+            results['ESSAY1_FOMO_BY_REGIME'] = res
 
     logger.info("Saved Essay 1 results: %s", list(results.keys()))
     return results
@@ -979,12 +1292,44 @@ if __name__ == '__main__':
     print(f"  Input p-values: {test_pvals}")
     print(f"  Rejected (FDR=5%): {bh}")
 
-    # Step 7: Save results to database
+    # Step 7: FinBERT sentiment & FOMO z-scores
     print()
     print("=" * 60)
-    print("  Step 7: Save results to database")
+    print("  Step 7: FinBERT sentiment & FOMO z-scores")
     print("=" * 60)
-    saved = save_results(store, ff5_analysis=ff5_analysis, cw_analysis=cw)
+    sentiment = None
+    if regime_result is not None:
+        news_path = Path(__file__).resolve().parent.parent / 'news_data' / 'culture_war_news.csv'
+        # For robustness checks across K values, load the pipeline once
+        # outside the loop and pass finbert_pipeline= to avoid 440MB reloads.
+        sentiment = sentiment_by_regime(
+            store, regime_result=regime_result,
+            n_regimes=regime_result.n_regimes,
+            news_path=news_path,
+        )
+        if sentiment is not None:
+            print(f"  Articles loaded: {sentiment.n_articles}")
+            print(f"  Articles scored: {sentiment.n_scored}")
+            print(f"  Daily rows: {len(sentiment.sentiment_daily)}")
+            print(f"  FOMO by regime:")
+            for _, row in sentiment.fomo_by_regime.iterrows():
+                print(f"    {row['REGIME']}: mean_z={row['MEAN_FOMO_Z']:.3f}, "
+                      f"euphoria={row['PCT_EUPHORIA']*100:.1f}%, "
+                      f"panic={row['PCT_PANIC']*100:.1f}%")
+        else:
+            print("  FAILED — no news data or FinBERT error")
+    else:
+        print("  SKIPPED — no regime result")
+
+    # Step 8: Save results to database
+    print()
+    print("=" * 60)
+    print("  Step 8: Save results to database")
+    print("=" * 60)
+    saved = save_results(
+        store, ff5_analysis=ff5_analysis, cw_analysis=cw,
+        sentiment_analysis=sentiment,
+    )
     if saved:
         for table, res in saved.items():
             print(f"    {table}: {res}")
