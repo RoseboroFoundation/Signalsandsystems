@@ -26,6 +26,9 @@ dependencies = [
     "streamlit>=1.40.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["clean*", "model*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
