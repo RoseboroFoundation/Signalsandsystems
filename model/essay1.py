@@ -167,7 +167,7 @@ def estimate_vix_regimes(
     # Smoothed probabilities (full-sample inference)
     smooth_probs = pd.DataFrame({'DATE': vix['DATE'].values})
     for i in range(n_regimes):
-        smooth_probs[f'P_{label_map[i]}'] = fit.smoothed_marginal_probabilities[:, i]
+        smooth_probs[f'P_{label_map[i]}'] = fit.smoothed_marginal_probabilities.iloc[:, i].values
 
     # Regime assignments (most probable regime per date)
     regime_series = fit.smoothed_marginal_probabilities.values.argmax(axis=1)
