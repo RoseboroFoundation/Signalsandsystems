@@ -757,8 +757,12 @@ def culture_war_by_regime(
 
     if rows:
         summary = pd.DataFrame(rows)
-        bh_rejected = benjamini_hochberg(summary['ALPHA_P'].tolist(), q=0.05)
-        summary['ALPHA_SIGNIFICANT_BH'] = bh_rejected
+        valid_mask = summary['ALPHA_P'].notna()
+        summary['ALPHA_SIGNIFICANT_BH'] = False
+        if valid_mask.any():
+            bh_rejected = benjamini_hochberg(
+                summary.loc[valid_mask, 'ALPHA_P'].tolist(), q=0.05)
+            summary.loc[valid_mask, 'ALPHA_SIGNIFICANT_BH'] = bh_rejected
     else:
         summary = pd.DataFrame()
 
