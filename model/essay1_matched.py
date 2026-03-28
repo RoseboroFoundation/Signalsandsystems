@@ -1,18 +1,18 @@
 """
-Essay 1 — Matched Control Analysis.
+Essay 1 — Complete Analysis with Matched Controls.
 
-Compares FF5 factor loadings between culture war (treatment) firms and
-their industry-matched control firms across volatility regimes.
+Full Essay 1 pipeline: volatility regime estimation, FF5 factor analysis,
+culture war stock regressions, matched control comparisons, FinBERT
+sentiment scoring, and FOMO z-scores.
 
-The identification logic: treatment and control firms are matched on
+Matched control identification: treatment and control firms are matched on
 industry (NAICS), so any residual difference in regime-conditional
 factor loadings is attributable to culture war exposure rather than
 sector or firm-characteristic effects.
 
-Unlike the spanning regression in essay1.py (MKT_RF ~ SMB + HML + RMW + CMA),
-this module uses the full FF5 pricing regression (R_i - RF ~ MKT_RF + SMB +
-HML + RMW + CMA) for individual stock returns.  The dependent variable is
-each firm's excess return, and all five factors serve as regressors.
+Unlike the spanning regression (MKT_RF ~ SMB + HML + RMW + CMA),
+matched control regressions use the full FF5 pricing regression
+(R_i - RF ~ MKT_RF + SMB + HML + RMW + CMA) for individual stock returns.
 
 WMT-as-multiple-control: regressions run at the unique-firm level so that
 a control firm appearing in multiple pairs has its betas estimated once.
@@ -23,11 +23,16 @@ References
 ----------
 Barillas, F. & Shanken, J. (2017). Which alpha? Review of Financial
     Studies, 30(4).
+Hamilton, J.D. (1989). A new approach to the economic analysis of
+    nonstationary time series and the business cycle. Econometrica, 57(2).
+Fama, E.F. & French, K.R. (2015). A five-factor model. Journal of
+    Financial Economics, 116(1).
 """
 
 import logging
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -39,6 +44,15 @@ from .datastore import DataStore
 from .essay1 import (
     RegimeResult,
     estimate_vix_regimes,
+    select_n_regimes,
+    FF5RegimeAnalysis,
+    ff5_by_regime,
+    CultureWarRegimeAnalysis,
+    culture_war_by_regime,
+    assemble_macro_controls,
+    SentimentRegimeAnalysis,
+    sentiment_by_regime,
+    save_results as save_essay1_results,
     _FF5_ALL,
     _HAC_MAXLAGS,
     _MIN_REGIME_OBS,
@@ -46,6 +60,12 @@ from .essay1 import (
 )
 
 logger = logging.getLogger(__name__)
+
+# FDR threshold for Benjamini-Hochberg correction.  q=0.10 (not 0.05)
+# because the matched sample has limited pair count, making 0.05 overly
+# conservative for an exploratory dissertation analysis.  This choice
+# must be stated in the paper's methodology section.
+_BH_FDR_Q = 0.10
 
 
 @dataclass
@@ -121,6 +141,7 @@ def _run_stock_ff5(
     """
     returns = store.get_ticker_returns(ticker)
     if returns.empty or 'RETURN' not in returns.columns:
+        logger.warning("%s: no return data found, skipping", ticker)
         return {}
 
     ret = returns[['DATE', 'RETURN']].copy()
@@ -128,7 +149,8 @@ def _run_stock_ff5(
     merged = ret.merge(factor_regime, on='DATE', how='inner')
     merged = merged.dropna(subset=['RETURN'] + factor_cols + ['RF'])
     # Convert percent to decimal if needed (median-based check)
-    if merged['RETURN'].abs().median() > 0.1:
+    if merged['RETURN'].abs().max() > 1.5:
+        logger.warning("%s: returns appear to be in percent, dividing by 100", ticker)
         merged['RETURN'] = merged['RETURN'] / 100
     merged['EXCESS_RETURN'] = merged['RETURN'] - merged['RF']
 
@@ -250,7 +272,8 @@ def ff5_matched_control_analysis(
     factors = store.ff5[['DATE'] + pricing_factors + ['RF']].dropna().copy()
     factors['DATE'] = pd.to_datetime(factors['DATE'], errors='coerce')
     for col in pricing_factors + ['RF']:
-        if factors[col].abs().median() > 0.1:
+        if factors[col].abs().max() > 1.5:
+            logger.warning("Factor %s appears to be in percent, dividing by 100", col)
             factors[col] = factors[col] / 100
 
     # Merge factors with regime assignments
@@ -318,7 +341,11 @@ def ff5_matched_control_analysis(
             row['R_SQUARED_CTRL'] = c.r_squared
 
             for f in pricing_factors:
-                row[f'{f}_DELTA'] = t.betas.get(f, np.nan) - c.betas.get(f, np.nan)
+                delta_val = t.betas.get(f, np.nan) - c.betas.get(f, np.nan)
+                if np.isnan(delta_val):
+                    logger.debug("NaN delta for %s/%s factor %s in %s",
+                                 treat_ticker, ctrl_ticker, f, label)
+                row[f'{f}_DELTA'] = delta_val
                 row[f'{f}_TREAT'] = t.betas.get(f, np.nan)
                 row[f'{f}_CTRL'] = c.betas.get(f, np.nan)
 
@@ -362,7 +389,8 @@ def ff5_matched_control_analysis(
                 'VARIABLE': dc.replace('_DELTA', ''),
                 'MEAN_DELTA': agg_deltas.mean(),
                 'STD_DELTA': agg_deltas.std(),
-                'N_PAIRS': len(agg_deltas),
+                'N_TREATMENT_FIRMS': len(agg_deltas),
+                'N_RAW_PAIRS': len(sub[dc].dropna()),
                 'T_STAT': t_stat,
                 'P_VALUE': p_val,
             })
@@ -375,7 +403,9 @@ def ff5_matched_control_analysis(
     # the hypothesis is that culture war effects amplify at volatility
     # extremes, not that they change monotonically across all regimes.
     did_rows = []
-    if len(labels) >= 2:
+    if len(labels) < 2:
+        logger.warning("Regime amplification requires at least 2 regimes, skipping")
+    else:
         low_label = labels[0]
         high_label = labels[-1]
         low_deltas = delta_df[delta_df['REGIME'] == low_label]
@@ -396,33 +426,50 @@ def ff5_matched_control_analysis(
             if len(merged_did) < 5:
                 continue
 
-            diff = merged_did['HIGH'] - merged_did['LOW']
+            # Aggregate to treatment-firm level before the t-test to avoid
+            # pseudoreplication when one control appears in multiple pairs
+            # (same pattern as Tests 1 and 3).
+            agg = merged_did.groupby('TREATMENT_TICKER')[['LOW', 'HIGH']].mean()
+            diff = agg['HIGH'] - agg['LOW']
+
+            if len(diff) < 5:
+                continue
+
             t_stat, p_val = stats.ttest_1samp(diff, 0)
             did_rows.append({
                 'VARIABLE': dc.replace('_DELTA', ''),
-                'MEAN_DELTA_LOW': merged_did['LOW'].mean(),
-                'MEAN_DELTA_HIGH': merged_did['HIGH'].mean(),
+                'MEAN_DELTA_LOW': agg['LOW'].mean(),
+                'MEAN_DELTA_HIGH': agg['HIGH'].mean(),
                 'MEAN_DIFF': diff.mean(),
-                'N_PAIRS': len(diff),
+                'N_TREATMENT_FIRMS': len(diff),
+                'N_RAW_PAIRS': len(merged_did),
                 'T_STAT': t_stat,
                 'P_VALUE': p_val,
             })
 
-    regime_amplification = pd.DataFrame(did_rows)
+    if did_rows:
+        regime_amplification = pd.DataFrame(did_rows)
+    else:
+        logger.info("Regime amplification: no results produced")
+        regime_amplification = pd.DataFrame()
 
     # --- Test 3: Sign consistency ---
+    # Aggregate to treatment-firm level (matching t-test logic) to avoid
+    # pseudoreplication when one control appears in multiple pairs.
     sign_rows = []
     for label in labels:
         sub = delta_df[delta_df['REGIME'] == label]
         if sub.empty:
             continue
         for dc in delta_cols:
-            vals = sub[dc].dropna()
-            if len(vals) < 5:
+            agg_vals = (sub.groupby('TREATMENT_TICKER')[dc]
+                        .mean()
+                        .dropna())
+            if len(agg_vals) < 5:
                 continue
-            n_pos = (vals > 0).sum()
-            n_neg = (vals < 0).sum()
-            n_total = len(vals)
+            n_pos = (agg_vals > 0).sum()
+            n_neg = (agg_vals < 0).sum()
+            n_total = len(agg_vals)
             majority_sign = 'positive' if n_pos >= n_neg else 'negative'
             consistency = max(n_pos, n_neg) / n_total
             # Binomial test: H0 = 50% positive
@@ -432,6 +479,7 @@ def ff5_matched_control_analysis(
                 'VARIABLE': dc.replace('_DELTA', ''),
                 'N_POSITIVE': int(n_pos),
                 'N_NEGATIVE': int(n_neg),
+                'N_TREATMENT_FIRMS': n_total,
                 'PCT_MAJORITY': consistency,
                 'MAJORITY_SIGN': majority_sign,
                 'BINOMIAL_P': binom_p,
@@ -467,17 +515,16 @@ def ff5_matched_control_analysis(
     coverage_df = pd.DataFrame(coverage_rows)
 
     # BH correction — applied per family to avoid cross-DataFrame index
-    # collision risk. q=0.10: more lenient FDR threshold given limited
-    # pair count. All tests address a single hypothesis family (culture
-    # war regime effects) so per-family BH at the same q is equivalent
-    # in FDR control to cross-family pooling.
+    # collision risk.  All tests address a single hypothesis family
+    # (culture war regime effects) so per-family BH at the same q is
+    # equivalent in FDR control to cross-family pooling.
     for test_df, pcol in [
         (paired_ttest, 'P_VALUE'),
         (regime_amplification, 'P_VALUE'),
         (sign_consistency, 'BINOMIAL_P'),
     ]:
         if not test_df.empty and pcol in test_df.columns:
-            bh_sig = benjamini_hochberg(test_df[pcol].tolist(), q=0.10)
+            bh_sig = benjamini_hochberg(test_df[pcol].tolist(), q=_BH_FDR_Q)
             test_df['BH_SIGNIFICANT'] = bh_sig
 
     logger.info("Matched control analysis complete: %d pairs, %d delta obs",
@@ -538,6 +585,139 @@ def save_matched_results(
 
 
 # =========================================================================
+# FULL ESSAY 1 PIPELINE
+# =========================================================================
+
+@dataclass
+class FullEssay1Result:
+    """Complete Essay 1 results: regime estimation, FF5 analysis,
+    culture war stocks, matched controls, sentiment, and macro."""
+    regime_result: Optional[RegimeResult] = None
+    model_selection: Optional[pd.DataFrame] = None
+    ff5_analysis: Optional[FF5RegimeAnalysis] = None
+    macro_controls: Optional[pd.DataFrame] = None
+    cw_analysis: Optional[CultureWarRegimeAnalysis] = None
+    sentiment_analysis: Optional[SentimentRegimeAnalysis] = None
+    matched_control: Optional[MatchedControlResult] = None
+
+
+def run_full_analysis(
+    store: DataStore,
+    n_regimes: int = 3,
+    run_model_selection: bool = True,
+    run_sentiment: bool = True,
+    news_path: str = None,
+    finbert_pipeline=None,
+) -> FullEssay1Result:
+    """
+    Run the complete Essay 1 pipeline.
+
+    Steps
+    -----
+    1. Markov regime-switching on VIX
+    2. Model selection (K=2,3,4)
+    3. FF5 spanning regression by regime (+ Chow test + interaction model)
+    4. Macro controls assembly
+    5. Culture war stocks by regime (unmatched)
+    6. Matched control FF5 analysis (+ paired t-test + DiD + sign consistency)
+    7. FinBERT sentiment & FOMO z-scores
+
+    Parameters
+    ----------
+    store : DataStore
+    n_regimes : int
+        Number of regimes for the primary analysis.
+    run_model_selection : bool
+        If True, compare K=2,3,4 regime models.
+    run_sentiment : bool
+        If True, run FinBERT sentiment scoring (requires ~440MB model).
+    news_path : str, optional
+        Path to news CSV for sentiment analysis.
+    finbert_pipeline : optional
+        Pre-loaded FinBERT pipeline to avoid reloading.
+
+    Returns
+    -------
+    FullEssay1Result
+    """
+    result = FullEssay1Result()
+
+    # Step 1: Estimate VIX regimes
+    logger.info("Step 1: Markov regime-switching on VIX")
+    result.regime_result = estimate_vix_regimes(store, n_regimes=n_regimes)
+    if result.regime_result is None:
+        logger.error("Regime estimation failed — aborting pipeline")
+        return result
+
+    # Step 2: Model selection
+    if run_model_selection:
+        logger.info("Step 2: Model selection (K=2,3,4)")
+        result.model_selection = select_n_regimes(store)
+
+    # Step 3: FF5 spanning regression by regime
+    logger.info("Step 3: FF5 factor analysis by regime")
+    result.ff5_analysis = ff5_by_regime(
+        store, regime_result=result.regime_result)
+
+    # Step 4: Macro controls
+    logger.info("Step 4: Macro controls assembly")
+    result.macro_controls = assemble_macro_controls(store)
+
+    # Step 5: Culture war stocks by regime (unmatched)
+    logger.info("Step 5: Culture war stocks by regime")
+    result.cw_analysis = culture_war_by_regime(
+        store, regime_result=result.regime_result)
+
+    # Step 6: Matched control FF5 analysis
+    logger.info("Step 6: Matched control FF5 analysis")
+    result.matched_control = ff5_matched_control_analysis(
+        store, regime_result=result.regime_result, n_regimes=n_regimes)
+
+    # Step 7: FinBERT sentiment & FOMO z-scores
+    if run_sentiment:
+        logger.info("Step 7: FinBERT sentiment & FOMO z-scores")
+        result.sentiment_analysis = sentiment_by_regime(
+            store, regime_result=result.regime_result,
+            n_regimes=n_regimes, news_path=news_path,
+            finbert_pipeline=finbert_pipeline,
+        )
+
+    return result
+
+
+def save_all_results(
+    store: DataStore,
+    result: FullEssay1Result,
+) -> dict:
+    """Persist all Essay 1 results to the database."""
+    all_saved = {}
+
+    # Save model selection (K=2,3,4 comparison)
+    if result.model_selection is not None and not result.model_selection.empty:
+        all_saved['ESSAY1_MODEL_SELECTION'] = store.write_table(
+            result.model_selection,
+            'ESSAY1_MODEL_SELECTION', replace=True,
+        )
+
+    # Save essay1.py results (FF5, culture war, sentiment)
+    essay1_saved = save_essay1_results(
+        store,
+        ff5_analysis=result.ff5_analysis,
+        cw_analysis=result.cw_analysis,
+        sentiment_analysis=result.sentiment_analysis,
+    )
+    all_saved.update(essay1_saved)
+
+    # Save matched control results
+    if result.matched_control is not None:
+        matched_saved = save_matched_results(store, result.matched_control)
+        all_saved.update(matched_saved)
+
+    logger.info("Saved all Essay 1 results: %d tables", len(all_saved))
+    return all_saved
+
+
+# =========================================================================
 # MAIN — run and test
 # =========================================================================
 
@@ -549,89 +729,188 @@ if __name__ == '__main__':
         format='%(asctime)s - %(levelname)s - %(message)s',
     )
 
-    print("Dissertation Essay 1 — Matched Control Analysis")
+    print("Dissertation Essay 1 — Full Analysis with Matched Controls")
     print(f"Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
 
     store = DataStore()
 
-    # Step 1: Estimate regimes (shared with essay1.py)
+    # Step 1: Estimate VIX regimes
     print("=" * 60)
-    print("  Step 1: Estimate VIX regimes")
+    print("  Step 1: Markov regime-switching on VIX")
     print("=" * 60)
     regime_result = estimate_vix_regimes(store, n_regimes=3)
     if regime_result is not None:
+        print(f"  Regimes: {regime_result.n_regimes}")
         for label, mean in regime_result.regime_means.items():
-            print(f"    {label}: mean VIX={mean:.1f}")
+            n = regime_result.regime_summary.loc[
+                regime_result.regime_summary['REGIME'] == label, 'N_DAYS'
+            ].values[0]
+            dur = regime_result.expected_durations[label]
+            print(f"    {label}: mean VIX={mean:.1f} ({n} days, E[dur]={dur:.0f}d)")
+        print(f"  AIC={regime_result.aic:.1f}, BIC={regime_result.bic:.1f}")
     else:
-        print("  FAILED — no VIX data")
+        print("  FAILED — no VIX data or estimation error")
 
-    # Step 2: Matched control analysis
+    # Step 2: Model selection
     print()
     print("=" * 60)
-    print("  Step 2: Matched control FF5 analysis")
+    print("  Step 2: Model selection (K=2,3,4)")
     print("=" * 60)
-    result = ff5_matched_control_analysis(store, regime_result=regime_result)
+    selection = select_n_regimes(store)
+    if not selection.empty:
+        for _, row in selection.iterrows():
+            print(f"    K={int(row['K'])}: AIC={row['AIC']:.1f}, "
+                  f"BIC={row['BIC']:.1f}, LL={row['LOG_LIKELIHOOD']:.1f}")
 
-    if result is not None:
-        print(f"  Pairs: {result.n_pairs} total, {result.n_pairs_complete} complete")
-        print(f"  Treatment results: {len(result.treatment_results)} rows")
-        print(f"  Control results:   {len(result.control_results)} rows")
-        print(f"  Delta betas:       {len(result.delta_betas)} rows")
+    # Step 3: FF5 by regime
+    print()
+    print("=" * 60)
+    print("  Step 3: FF5 factor analysis by regime")
+    print("=" * 60)
+    ff5_analysis = ff5_by_regime(store, regime_result=regime_result)
+
+    if ff5_analysis is not None:
+        chow = ff5_analysis.chow_test
+        print(f"  Chow test: F={chow['f_stat']:.2f}, p={chow['p_value']:.4f}")
+        print(f"  Structural break: {'YES' if chow['significant_005'] else 'NO'} (p<0.05)")
+        if not ff5_analysis.coefficient_comparison.empty:
+            print("  Coefficient comparison:")
+            print(ff5_analysis.coefficient_comparison.to_string(index=False))
+    else:
+        print("  FAILED — insufficient data")
+
+    # Step 4: Macro controls
+    print()
+    print("=" * 60)
+    print("  Step 4: Macro controls")
+    print("=" * 60)
+    macro = assemble_macro_controls(store)
+    print(f"  Macro panel: {len(macro)} rows, {len(macro.columns)-1} variables")
+
+    # Step 5: Culture war stocks by regime
+    print()
+    print("=" * 60)
+    print("  Step 5: Culture war stocks by regime")
+    print("=" * 60)
+    cw = culture_war_by_regime(store, regime_result=regime_result)
+    if cw is not None:
+        print(f"  Stocks analysed: {cw.n_stocks}")
+        print(f"  Stocks failed: {cw.n_failed}")
+        if not cw.summary.empty:
+            print(f"  Summary rows: {len(cw.summary)}")
+    else:
+        print("  FAILED — no event tickers or data")
+
+    # Step 6: Matched control analysis
+    print()
+    print("=" * 60)
+    print("  Step 6: Matched control FF5 analysis")
+    print("=" * 60)
+    matched = ff5_matched_control_analysis(store, regime_result=regime_result)
+
+    if matched is not None:
+        print(f"  Pairs: {matched.n_pairs} total, {matched.n_pairs_complete} complete")
+        print(f"  Treatment results: {len(matched.treatment_results)} rows")
+        print(f"  Control results:   {len(matched.control_results)} rows")
+        print(f"  Delta betas:       {len(matched.delta_betas)} rows")
 
         # Paired t-test summary
-        if not result.paired_ttest.empty:
+        if not matched.paired_ttest.empty:
             print()
             print("  --- Paired t-test (delta = 0) ---")
-            for _, row in result.paired_ttest.iterrows():
+            for _, row in matched.paired_ttest.iterrows():
                 sig = "*" if row['P_VALUE'] < 0.05 else ""
-                bh = " [BH]" if row.get('BH_SIGNIFICANT', False) else ""
+                bh_flag = " [BH]" if row.get('BH_SIGNIFICANT', False) else ""
                 print(f"    {row['REGIME']:20s} {row['VARIABLE']:10s} "
                       f"delta={row['MEAN_DELTA']:+.4f} t={row['T_STAT']:+.2f} "
-                      f"p={row['P_VALUE']:.4f}{sig}{bh}")
+                      f"p={row['P_VALUE']:.4f}{sig}{bh_flag}")
 
         # Regime amplification
-        if not result.regime_amplification.empty:
+        if not matched.regime_amplification.empty:
             print()
             print("  --- Regime amplification (High - Low) ---")
-            for _, row in result.regime_amplification.iterrows():
+            for _, row in matched.regime_amplification.iterrows():
                 sig = "*" if row['P_VALUE'] < 0.05 else ""
                 print(f"    {row['VARIABLE']:10s} diff={row['MEAN_DIFF']:+.4f} "
                       f"t={row['T_STAT']:+.2f} p={row['P_VALUE']:.4f}{sig}")
 
         # Sign consistency
-        if not result.sign_consistency.empty:
+        if not matched.sign_consistency.empty:
             print()
             print("  --- Sign consistency ---")
-            for _, row in result.sign_consistency.iterrows():
+            for _, row in matched.sign_consistency.iterrows():
                 print(f"    {row['REGIME']:20s} {row['VARIABLE']:10s} "
                       f"{row['PCT_MAJORITY']:.0%} {row['MAJORITY_SIGN']} "
+                      f"n={row['N_TREATMENT_FIRMS']} "
                       f"(binom p={row['BINOMIAL_P']:.4f})")
 
         # Coverage
-        if not result.coverage.empty:
-            total = len(result.coverage)
-            covered = result.coverage['HAS_RESULT'].sum()
+        if not matched.coverage.empty:
+            total = len(matched.coverage)
+            covered = matched.coverage['HAS_RESULT'].sum()
             print(f"\n  Coverage: {covered}/{total} ticker-regime slots "
                   f"({covered/total:.0%})")
     else:
         print("  FAILED — no control companies or data")
 
-    # Step 3: Save results to database
+    # Step 7: FinBERT sentiment & FOMO z-scores
     print()
     print("=" * 60)
-    print("  Step 3: Save results to database")
+    print("  Step 7: FinBERT sentiment & FOMO z-scores")
     print("=" * 60)
-    if result is not None:
-        saved = save_matched_results(store, result)
-        if saved:
-            for table, res in saved.items():
-                print(f"    {table}: {res}")
-            print(f"  Saved {len(saved)} tables")
+    sentiment = None
+    if regime_result is not None:
+        news_path = Path(__file__).resolve().parent.parent / 'news_data' / 'culture_war_news.csv'
+        sentiment = sentiment_by_regime(
+            store, regime_result=regime_result,
+            n_regimes=regime_result.n_regimes,
+            news_path=news_path,
+        )
+        if sentiment is not None:
+            print(f"  Articles loaded: {sentiment.n_articles}")
+            print(f"  Articles scored: {sentiment.n_scored}")
+            print(f"  Daily rows: {len(sentiment.sentiment_daily)}")
+            print(f"  FOMO by regime:")
+            for _, row in sentiment.fomo_by_regime.iterrows():
+                print(f"    {row['REGIME']}: mean_z={row['MEAN_FOMO_Z']:.3f}, "
+                      f"euphoria={row['PCT_EUPHORIA']*100:.1f}%, "
+                      f"panic={row['PCT_PANIC']*100:.1f}%")
         else:
-            print("  Nothing saved")
+            print("  FAILED — no news data or FinBERT error")
     else:
-        print("  Skipped — no results to save")
+        print("  SKIPPED — no regime result")
+
+    # Step 8: Save all results to database
+    print()
+    print("=" * 60)
+    print("  Step 8: Save results to database")
+    print("=" * 60)
+    full_result = FullEssay1Result(
+        regime_result=regime_result,
+        model_selection=selection,
+        ff5_analysis=ff5_analysis,
+        macro_controls=macro,
+        cw_analysis=cw,
+        sentiment_analysis=sentiment,
+        matched_control=matched,
+    )
+    all_saved = save_all_results(store, full_result)
+
+    if all_saved:
+        for table, res in all_saved.items():
+            print(f"    {table}: {res}")
+        print(f"  Saved {len(all_saved)} tables")
+    else:
+        print("  Nothing to save (no results produced)")
+
+    # BH sanity check (diagnostic, not a pipeline step)
+    print()
+    print("  --- BH sanity check (q=%.2f) ---" % _BH_FDR_Q)
+    test_pvals = [0.001, 0.008, 0.039, 0.041, 0.23, 0.45, 0.89]
+    bh = benjamini_hochberg(test_pvals, q=_BH_FDR_Q)
+    print(f"  Input p-values: {test_pvals}")
+    print(f"  Rejected (FDR={_BH_FDR_Q:.0%}): {bh}")
 
     store.close()
     print()

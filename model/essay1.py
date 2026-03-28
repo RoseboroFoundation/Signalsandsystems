@@ -50,6 +50,7 @@ _HAC_MAXLAGS = 5
 
 # Minimum observations per regime for regression estimation
 _MIN_REGIME_OBS = 30
+MIN_REGIME_OBS = _MIN_REGIME_OBS  # public alias for cross-module import
 
 # Trading days per year (for annualising daily premia)
 _TRADING_DAYS_PER_YEAR = 252
@@ -395,7 +396,7 @@ def ff5_by_regime(
     # Use median of absolute values — max > 1 fires on legitimate returns.
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
     for col in _FF5_ALL + ['RF']:
-        if factors[col].abs().median() > 0.1:
+        if factors[col].abs().max() > 1.5:
             factors[col] = factors[col] / 100
 
     # Merge with regime assignments
@@ -465,10 +466,14 @@ def ff5_by_regime(
 
     # Step 3: Interaction model — test regime effect on factor loadings
     # Create regime dummies (baseline = lowest volatility regime)
+    # IMPORTANT: Only include regimes that passed the _MIN_REGIME_OBS threshold
+    # in Step 2. Including skipped regimes creates near-zero dummy columns that
+    # inflate the condition number and produce meaningless interaction terms.
+    fitted_labels = [l for l in labels if l in regime_regressions]
     interaction_data = merged.copy()
 
     interact_cols = []
-    for label in labels[1:]:
+    for label in fitted_labels[1:]:
         dummy_name = f'D_{_safe_col(label)}'
         interaction_data[dummy_name] = (interaction_data['REGIME_LABEL'] == label).astype(int)
 
@@ -478,7 +483,7 @@ def ff5_by_regime(
             interaction_data[interact_name] = interaction_data[dummy_name] * interaction_data[col]
             interact_cols.append(interact_name)
 
-    dummy_cols = [f'D_{_safe_col(l)}' for l in labels[1:]]
+    dummy_cols = [f'D_{_safe_col(l)}' for l in fitted_labels[1:]]
     all_regressors = _FF5_REGRESSORS + dummy_cols + interact_cols
 
     y_int = interaction_data['MKT_RF']
@@ -495,6 +500,12 @@ def ff5_by_regime(
         )
 
     # Step 4: Chow test — are the regime-specific models significantly different?
+    # ENDOGENEITY NOTE: Regime boundaries come from the same Markov-switching
+    # model fitted on VIX, which correlates with MKT_RF.  The Chow F-stat is
+    # therefore biased upward — interpret the reported p-value as a lower bound
+    # on the true probability of no structural break.  A permutation-based
+    # critical value (shuffling regime labels) is the proper robustness check;
+    # this is flagged for a future PR.
     chow = _chow_test(merged, factor_cols=_FF5_REGRESSORS,
                        dep_var='MKT_RF', regime_col='REGIME_LABEL')
 
@@ -650,6 +661,7 @@ class CultureWarRegimeAnalysis:
     """Results from culture war stock analysis conditioned on regimes."""
     n_stocks: int
     n_failed: int
+    n_partial: int = 0   # stocks with < n_regimes estimable (some regimes skipped)
     stock_results: dict = field(default_factory=dict)
     summary: pd.DataFrame = field(default_factory=pd.DataFrame)
 
@@ -688,6 +700,8 @@ def culture_war_by_regime(
 
     stock_results = {}
     n_failed = 0
+    n_partial = 0
+    n_total_regimes = regime_result.n_regimes
 
     for ticker in tickers:
         returns = store.get_ticker_returns(ticker)
@@ -710,7 +724,7 @@ def culture_war_by_regime(
 
         # Convert percent to decimal if needed (median-based check)
         for col in _FF5_ALL + ['RF']:
-            if col in merged.columns and merged[col].abs().median() > 0.1:
+            if col in merged.columns and merged[col].abs().max() > 1.5:
                 merged[col] = merged[col] / 100
 
         merged['EXCESS_RETURN'] = merged['RETURN'] - merged['RF']
@@ -740,6 +754,8 @@ def culture_war_by_regime(
         # Only count as success if at least one regime was estimable
         if regime_betas:
             stock_results[ticker] = regime_betas
+            if len(regime_betas) < n_total_regimes:
+                n_partial += 1
         else:
             logger.warning("No estimable regimes for %s (all regimes < %d obs)",
                           ticker, _MIN_REGIME_OBS)
@@ -763,16 +779,17 @@ def culture_war_by_regime(
         if valid_mask.any():
             bh_rejected = benjamini_hochberg(
                 summary.loc[valid_mask, 'ALPHA_P'].tolist(), q=0.05)
-            summary.loc[valid_mask, 'ALPHA_SIGNIFICANT_BH'] = bh_rejected
+            summary.loc[valid_mask, 'ALPHA_SIGNIFICANT_BH'] = list(bh_rejected)
     else:
         summary = pd.DataFrame()
 
-    logger.info("Culture war analysis: %d stocks, %d failed",
-                len(stock_results), n_failed)
+    logger.info("Culture war analysis: %d stocks, %d failed, %d partial-regime",
+                len(stock_results), n_failed, n_partial)
 
     return CultureWarRegimeAnalysis(
         n_stocks=len(stock_results),
         n_failed=n_failed,
+        n_partial=n_partial,
         stock_results=stock_results,
         summary=summary,
     )
@@ -824,8 +841,9 @@ def assemble_macro_controls(store: DataStore) -> pd.DataFrame:
         result = result.merge(df, on='DATE', how='outer')
 
     result = result.sort_values('DATE').reset_index(drop=True)
-    # Forward-fill monthly/quarterly series
-    result = result.ffill()
+    # Forward-fill monthly/quarterly series (capped at ~3 calendar months
+    # to prevent stale macro data from propagating into forward models)
+    result = result.ffill(limit=63)
 
     logger.info("Assembled macro controls: %d rows, %d columns",
                 len(result), len(result.columns) - 1)
@@ -947,18 +965,30 @@ def _score_finbert(
 
     results = []
     n = len(texts)
+    n_errors = 0
     for i in range(0, n, batch_size):
         batch = texts[i:i + batch_size]
-        batch_results = pipe(batch)
-        results.extend(batch_results)
+        try:
+            batch_results = pipe(batch)
+            results.extend(batch_results)
+        except Exception as e:
+            n_errors += len(batch)
+            logger.warning("  FinBERT batch %d-%d failed: %s", i, i + len(batch), e)
+            # Fill failed articles with None so they are excluded from
+            # aggregation rather than silently contributing neutral zeros
+            # to daily sentiment averages and FOMO z-score distributions.
+            results.extend([{'label': None, 'score': None}] * len(batch))
         if i % (batch_size * 10) == 0 or i + batch_size >= n:
-            logger.info("  FinBERT: %d/%d articles scored", min(i + batch_size, n), n)
+            logger.info("  FinBERT: %d/%d articles scored (%d errors)",
+                         min(i + batch_size, n), n, n_errors)
 
     return results
 
 
 def _sentiment_to_numeric(label: str) -> float:
-    """Convert FinBERT label to numeric: positive=+1, negative=-1, neutral=0."""
+    """Convert FinBERT label to numeric: positive=+1, negative=-1, neutral=0, None=NaN."""
+    if label is None:
+        return np.nan
     if label == 'positive':
         return 1.0
     elif label == 'negative':
@@ -1016,6 +1046,14 @@ def sentiment_by_regime(
         logger.error("No news data available for sentiment analysis")
         return None
 
+    # Guard: DATE column is required for regime merge (Step 4).  If the CSV
+    # lacks PUBLISHED_DATE, _load_news won't create DATE — catch it here
+    # *before* spending compute on FinBERT scoring.
+    if 'DATE' not in news.columns:
+        logger.error("News data has no DATE column (need PUBLISHED_DATE in source). "
+                      "Columns present: %s", list(news.columns))
+        return None
+
     n_articles = len(news)
     logger.info("Scoring %d articles with FinBERT...", n_articles)
 
@@ -1028,6 +1066,10 @@ def sentiment_by_regime(
     news['SENTIMENT'] = news['FINBERT_LABEL'].apply(_sentiment_to_numeric)
     # Weighted sentiment: direction * confidence
     news['SENT_WEIGHTED'] = news['SENTIMENT'] * news['FINBERT_CONF']
+
+    # Drop rows where FinBERT failed (None label/score) so they don't
+    # contribute to daily aggregation or FOMO z-score distributions.
+    news = news.dropna(subset=['FINBERT_LABEL', 'SENTIMENT'])
 
     n_scored = len(news)
     logger.info("FinBERT scoring complete: %d positive, %d negative, %d neutral",
@@ -1169,6 +1211,14 @@ def save_results(
                 'ESSAY1_FACTOR_PREMIA', replace=True,
             )
             results['ESSAY1_FACTOR_PREMIA'] = res
+
+        # Save Chow test result
+        if ff5_analysis.chow_test:
+            chow_df = pd.DataFrame([ff5_analysis.chow_test])
+            res = store.write_table(
+                chow_df, 'ESSAY1_CHOW_TEST', replace=True,
+            )
+            results['ESSAY1_CHOW_TEST'] = res
 
     if cw_analysis is not None and not cw_analysis.summary.empty:
         res = store.write_table(

@@ -11,9 +11,11 @@ from .essay1 import (
     RegimeResult,
     FF5RegimeAnalysis,
     CultureWarRegimeAnalysis,
+    SentimentRegimeAnalysis,
     estimate_vix_regimes,
     ff5_by_regime,
     culture_war_by_regime,
+    sentiment_by_regime,
     assemble_macro_controls,
     save_results as save_essay1_results,
 )
@@ -32,6 +34,7 @@ class DissertationResults:
     regime_result: Optional[RegimeResult] = None
     ff5_analysis: Optional[FF5RegimeAnalysis] = None
     cw_analysis: Optional[CultureWarRegimeAnalysis] = None
+    sentiment_analysis: Optional[SentimentRegimeAnalysis] = None
     matched_result: Optional[MatchedControlResult] = None
 
 
@@ -147,9 +150,21 @@ def run_and_save(backend=None, save=True):
         print(f"  {matched_result.n_pairs} pairs, "
               f"{matched_result.n_pairs_complete} complete")
 
+    # Step 6: Sentiment analysis (FinBERT + FOMO z-scores)
+    print("\nRunning sentiment analysis...")
+    sentiment_analysis = sentiment_by_regime(
+        store, regime_result=regime_result)
+    output.sentiment_analysis = sentiment_analysis
+
+    if sentiment_analysis is not None:
+        print(f"  {len(sentiment_analysis.sentiment_daily)} daily observations")
+
     # Save
     if save and ff5_analysis is not None:
-        save_essay1_results(store, ff5_analysis, cw_analysis)
+        save_essay1_results(
+            store, ff5_analysis, cw_analysis,
+            sentiment_analysis=sentiment_analysis,
+        )
     if save and matched_result is not None:
         save_matched_results(store, matched_result)
 
