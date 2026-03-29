@@ -26,6 +26,12 @@ dependencies = [
     "streamlit>=1.40.0",
 ]
 
+[project.optional-dependencies]
+sentiment = ["torch>=2.0.0", "transformers>=4.30.0"]
+
+[tool.setuptools.packages.find]
+include = ["clean*", "model*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

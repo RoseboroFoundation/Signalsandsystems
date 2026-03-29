@@ -10,7 +10,8 @@ import numpy as np
 from pathlib import Path
 from io import BytesIO
 import logging
-import sqlite3
+
+from Database import AthenaLoader, SQLiteLoader
 
 # =============================================================================
 # CONFIG & CONSTANTS
@@ -25,6 +26,33 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "data" / "signals_systems.db"
+
+
+# =============================================================================
+# DATABASE BACKEND (Athena preferred, SQLite fallback)
+# =============================================================================
+
+@st.cache_resource
+def _detect_backend():
+    """Probe AWS credentials once; return 'athena' or 'sqlite'."""
+    try:
+        with AthenaLoader() as db:
+            db.list_tables()
+        return "athena"
+    except Exception:
+        logging.info("Athena unavailable, falling back to SQLite")
+        return "sqlite"
+
+
+DB_BACKEND = _detect_backend()
+
+
+def _get_loader():
+    """Return the appropriate loader (context manager) for the active backend."""
+    if DB_BACKEND == "athena":
+        return AthenaLoader()
+    return SQLiteLoader(db_path=str(DB_PATH))
+
 
 NAVY = "#1B2A4A"
 GOLD = "#C5A55A"
@@ -315,40 +343,50 @@ def render_df(df, label, key, height=None):
 
 @st.cache_data(ttl=300)
 def query_df(sql):
-    """Run a SQL query against the SQLite database."""
-    conn = sqlite3.connect(str(DB_PATH))
+    """Run a SQL query against the active backend (Athena or SQLite)."""
     try:
-        return pd.read_sql(sql, conn)
+        with _get_loader() as db:
+            return db.run_query(sql)
     except Exception as e:
         logging.warning("Query failed: %s", e)
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
 def load_table(table_name):
-    """Load a full table from SQLite."""
-    return query_df(f'SELECT * FROM "{table_name}"')
+    """Load a full table from the active backend (Athena or SQLite).
+
+    Model-result tables (written by Model.py, not the ETL pipeline) only exist
+    in SQLite, so we fall back automatically when Athena raises an error.
+    """
+    try:
+        with _get_loader() as db:
+            return db.read_table(table_name)
+    except Exception:
+        # Table may only exist in SQLite (model results, figures, etc.)
+        if DB_BACKEND == "athena":
+            try:
+                with SQLiteLoader(db_path=str(DB_PATH)) as db:
+                    return db.read_table(table_name)
+            except Exception as e:
+                logging.warning("load_table(%s) failed on both backends: %s", table_name, e)
+                return pd.DataFrame()
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_figure_blob(figure_name):
-    """Load a figure's PNG bytes from the FIGURES table."""
-    conn = sqlite3.connect(str(DB_PATH))
+    """Load a figure's PNG bytes from the FIGURES table (SQLite only)."""
     try:
-        cur = conn.execute(
-            'SELECT IMAGE_DATA, FILE_SIZE_BYTES FROM FIGURES WHERE FIGURE_NAME = ?',
-            (figure_name,),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0]
+        with SQLiteLoader(db_path=str(DB_PATH)) as db:
+            df = db.run_query(
+                f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{figure_name}'"
+            )
+            if not df.empty:
+                return df.iloc[0]["IMAGE_DATA"]
         return None
     except Exception:
         return None
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
@@ -377,12 +415,13 @@ def load_summary():
 # =============================================================================
 
 def database_has_data():
-    """Check if the database exists and has model results."""
+    """Check if model results exist (these are always in SQLite)."""
     if not DB_PATH.exists():
         return False
     try:
-        result = query_df("SELECT COUNT(*) as n FROM EVENT_STUDY_RESULTS")
-        return not result.empty and result.iloc[0]["n"] > 0
+        with SQLiteLoader(db_path=str(DB_PATH)) as db:
+            result = db.run_query("SELECT COUNT(*) as n FROM EVENT_STUDY_RESULTS")
+            return not result.empty and result.iloc[0]["n"] > 0
     except Exception:
         return False
 
@@ -455,10 +494,13 @@ with st.sidebar:
     st.divider()
     st.markdown("#### Methodology")
     for item in [
-        "FF3 / FF5 / FF5+MOM Factor Models",
+        "Markov Regime-Switching (VIX)",
+        "FF5 Spanning & Pricing Regressions",
+        "Matched Control (Paired t-test)",
         "Event Study (CAR, Patell t-test)",
         "Difference-in-Differences (DiD)",
-        "Cross-Sectional CAR Analysis",
+        "FinBERT Sentiment & FOMO Z-Scores",
+        "Benjamini-Hochberg FDR Correction",
     ]:
         st.markdown(
             f"<span style='color:{GOLD}; margin-right:0.4rem;'>&#8226;</span> {item}",
@@ -466,6 +508,8 @@ with st.sidebar:
         )
 
     st.divider()
+    _backend_label = "AWS Athena" if DB_BACKEND == "athena" else "Local SQLite"
+    st.caption(f"Data: {_backend_label}")
     st.caption("Roseboro | University of South Alabama | 2026")
 
 
@@ -1019,6 +1063,355 @@ with tab_a1:
             display = display.sort_values("R_SQUARED")
             render_df(display, "Factor Model Results", "a1_full_results", height=500)
 
+    # =====================================================================
+    # ESSAY 1 — MARKOV REGIME ANALYSIS (from model/essay1.py)
+    # =====================================================================
+
+    st.divider()
+    st.header("Volatility Regime Analysis")
+    st.markdown(
+        "Markov regime-switching on VIX identifies distinct volatility regimes "
+        "(Hamilton, 1989). FF5 spanning regressions and culture war stock pricing "
+        "regressions are then estimated within each regime."
+    )
+
+    # --- Regime coefficients ---
+    regime_coeff = load_table("ESSAY1_FF5_COEFFICIENTS")
+    factor_premia = load_table("ESSAY1_FACTOR_PREMIA")
+
+    if not regime_coeff.empty:
+        st.subheader("FF5 Spanning Regression by Regime")
+        st.markdown(
+            "MKT-RF regressed on SMB, HML, RMW, CMA within each volatility regime. "
+            "The Chow test confirms a statistically significant structural break (p < 0.001)."
+        )
+
+        # Key finding callout
+        low_alpha = regime_coeff.loc[regime_coeff["REGIME"].str.contains("Low"), "ALPHA"]
+        high_alpha = regime_coeff.loc[regime_coeff["REGIME"].str.contains("High"), "ALPHA"]
+        low_rsq = regime_coeff.loc[regime_coeff["REGIME"].str.contains("Low"), "R_SQUARED"]
+        high_rsq = regime_coeff.loc[regime_coeff["REGIME"].str.contains("High"), "R_SQUARED"]
+
+        if not low_alpha.empty and not high_alpha.empty:
+            st.markdown(
+                f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
+                f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
+                f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
+                f"Market alpha is <strong>{low_alpha.values[0]:.4f}</strong> in Low Volatility "
+                f"(p < 0.001) but disappears in High Volatility "
+                f"(<strong>{high_alpha.values[0]:.4f}</strong>, p = 0.60). "
+                f"R-squared rises from <strong>{low_rsq.values[0]:.3f}</strong> to "
+                f"<strong>{high_rsq.values[0]:.3f}</strong> as crisis-driven factors explain more "
+                f"of the market.</div>",
+                unsafe_allow_html=True,
+            )
+
+        # Format for display
+        coeff_display = regime_coeff.copy()
+        for col in coeff_display.columns:
+            if col != "REGIME":
+                coeff_display[col] = pd.to_numeric(coeff_display[col], errors="coerce")
+        # Add significance stars
+        for factor in ["SMB", "HML", "RMW", "CMA"]:
+            pcol = f"{factor}_P"
+            if pcol in coeff_display.columns:
+                coeff_display[f"{factor}_SIG"] = coeff_display[pcol].apply(fmt_sig)
+
+        render_df(coeff_display, "Regime Coefficients", "a1_regime_coeff")
+
+        st.divider()
+
+    # --- Factor premia ---
+    if not factor_premia.empty:
+        st.subheader("Factor Premia by Regime")
+        st.markdown(
+            "Annualized mean factor returns within each volatility regime. "
+            "The market premium swings sharply: positive in calm markets, "
+            "negative in crisis."
+        )
+
+        premia_display = factor_premia.copy()
+        for col in premia_display.columns:
+            if col not in ("REGIME", "N_DAYS"):
+                premia_display[col] = pd.to_numeric(premia_display[col], errors="coerce")
+        # Show annualized columns as percentages
+        ann_cols = [c for c in premia_display.columns if "ANN" in c]
+        for c in ann_cols:
+            premia_display[c] = premia_display[c].apply(lambda x: f"{x:.2%}" if pd.notna(x) else "--")
+
+        render_df(premia_display, "Factor Premia", "a1_factor_premia")
+
+        st.divider()
+
+    # --- Culture war stock results ---
+    cw_regime = load_table("ESSAY1_CW_STOCK_RESULTS")
+    if not cw_regime.empty:
+        st.subheader("Culture War Stocks: FF5 by Regime")
+        st.markdown(
+            "Individual stock pricing regressions (R_i - RF ~ MKT_RF + SMB + HML + RMW + CMA) "
+            "within each regime. Benjamini-Hochberg FDR correction applied at q = 0.05."
+        )
+
+        for col in cw_regime.columns:
+            if col not in ("TICKER", "REGIME", "ALPHA_SIGNIFICANT_BH"):
+                cw_regime[col] = pd.to_numeric(cw_regime[col], errors="coerce")
+
+        # Summary metrics
+        valid_cw = cw_regime[cw_regime["ALPHA"].notna()]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Stocks Analyzed", fmt_num(cw_regime["TICKER"].nunique()))
+        c2.metric("Stock-Regime Obs", fmt_num(len(cw_regime)))
+        c3.metric("Valid Regressions", fmt_num(len(valid_cw)))
+        c4.metric("BH Significant Alphas",
+                   fmt_num(int(cw_regime["ALPHA_SIGNIFICANT_BH"].sum()))
+                   if "ALPHA_SIGNIFICANT_BH" in cw_regime.columns else "--")
+
+        # Aggregate by regime
+        if not valid_cw.empty:
+            cw_agg = valid_cw.groupby("REGIME").agg(
+                n=("TICKER", "count"),
+                mean_alpha=("ALPHA", "mean"),
+                mean_rsq=("R_SQUARED", "mean"),
+                mean_mkt=("MKT_RF_BETA", "mean"),
+            ).reset_index()
+            cw_agg.columns = ["Regime", "N", "Mean Alpha", "Mean R-sq", "Mean Mkt Beta"]
+            cw_agg = cw_agg.round(4)
+            render_df(cw_agg, "CW Stocks by Regime", "a1_cw_regime_agg")
+
+        with st.expander("Full Stock-Regime Results", expanded=False):
+            render_df(cw_regime, "CW Stock Results", "a1_cw_regime_full", height=500)
+
+        st.divider()
+
+    # =====================================================================
+    # ESSAY 1 — MATCHED CONTROL ANALYSIS (from model/essay1_matched.py)
+    # =====================================================================
+
+    st.header("Matched Control Analysis")
+    st.markdown(
+        "Treatment (culture war) firms vs. industry-matched control firms. "
+        "Deltas isolate culture war exposure from sector effects."
+    )
+
+    matched_ttest = load_table("ESSAY1_MATCHED_TTEST")
+    matched_amp = load_table("ESSAY1_MATCHED_AMPLIFICATION")
+    matched_sign = load_table("ESSAY1_MATCHED_SIGN")
+    matched_deltas = load_table("ESSAY1_MATCHED_DELTAS")
+    matched_coverage = load_table("ESSAY1_MATCHED_COVERAGE")
+
+    # --- Matched t-test ---
+    if not matched_ttest.empty:
+        st.subheader("Paired t-test: Treatment - Control Deltas")
+        st.markdown(
+            "Tests whether mean delta (treatment beta - control beta) differs "
+            "from zero within each regime. Aggregated to one observation per "
+            "treatment firm before testing."
+        )
+
+        ttest_display = matched_ttest.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+        for col in ttest_display.columns:
+            if col not in ("REGIME", "VARIABLE", "BH_SIGNIFICANT"):
+                ttest_display[col] = pd.to_numeric(ttest_display[col], errors="coerce")
+        ttest_display["Sig."] = ttest_display["P_VALUE"].apply(fmt_sig)
+        ttest_display = ttest_display.round(4)
+        render_df(ttest_display, "Paired t-test", "a1_matched_ttest")
+
+        st.divider()
+
+    # --- Regime amplification ---
+    if not matched_amp.empty:
+        st.subheader("Regime Amplification: High Vol - Low Vol")
+        st.markdown(
+            "Tests whether culture war effects *amplify* from low to high volatility. "
+            "A significant result means the treatment-control gap widens in crisis."
+        )
+
+        # Key finding callout
+        amp_display = matched_amp.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+        for col in amp_display.columns:
+            if col not in ("VARIABLE", "BH_SIGNIFICANT"):
+                amp_display[col] = pd.to_numeric(amp_display[col], errors="coerce")
+
+        sig_amp = amp_display[amp_display["BH_SIGNIFICANT"] == 1] if "BH_SIGNIFICANT" in amp_display.columns else pd.DataFrame()
+        if not sig_amp.empty:
+            sig_vars = ", ".join(sig_amp["VARIABLE"].tolist())
+            st.markdown(
+                f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
+                f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
+                f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
+                f"Regime amplification is BH-significant for <strong>{sig_vars}</strong>. "
+                f"Culture war firms' loadings on these factors shift more than matched controls "
+                f"when moving from low to high volatility.</div>",
+                unsafe_allow_html=True,
+            )
+
+        amp_display["Sig."] = amp_display["P_VALUE"].apply(fmt_sig)
+        amp_display = amp_display.round(4)
+        render_df(amp_display, "Regime Amplification", "a1_matched_amp")
+
+        st.divider()
+
+    # --- Sign consistency ---
+    if not matched_sign.empty:
+        st.subheader("Sign Consistency")
+        st.markdown(
+            "Percentage of pairs where the treatment-control delta has the same sign. "
+            "Binomial test for departure from 50%."
+        )
+
+        sign_display = matched_sign.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+        for col in sign_display.columns:
+            if col not in ("REGIME", "VARIABLE", "MAJORITY_SIGN", "BH_SIGNIFICANT"):
+                sign_display[col] = pd.to_numeric(sign_display[col], errors="coerce")
+        sign_display["PCT_MAJORITY"] = sign_display["PCT_MAJORITY"].apply(
+            lambda x: f"{x:.0%}" if pd.notna(x) else "--")
+        sign_display = sign_display.round(4)
+        render_df(sign_display, "Sign Consistency", "a1_matched_sign")
+
+        st.divider()
+
+    # --- Delta betas (expandable) ---
+    if not matched_deltas.empty:
+        with st.expander(f"Full Pair-Level Delta Betas ({len(matched_deltas)} rows)", expanded=False):
+            delta_display = matched_deltas.drop(columns=["RUN_TIMESTAMP"], errors="ignore")
+            render_df(delta_display, "Matched Deltas", "a1_matched_deltas", height=500)
+
+    # --- Coverage ---
+    if not matched_coverage.empty:
+        cov = matched_coverage.drop(columns=["RUN_TIMESTAMP"], errors="ignore")
+        cov_summary = cov.groupby("STATUS")["TICKER"].count().reset_index()
+        cov_summary.columns = ["Status", "Count"]
+
+        with st.expander("Ticker-Regime Coverage", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                render_df(cov_summary, "Coverage Summary", "a1_cov_summary")
+            with c2:
+                total = len(cov)
+                ok_count = int(cov["HAS_RESULT"].sum())
+                st.metric("Coverage Rate", f"{ok_count}/{total} ({ok_count/total:.0%})")
+            render_df(cov, "Full Coverage", "a1_matched_coverage", height=400)
+
+
+    # =====================================================================
+    # ESSAY 1 — FINBERT SENTIMENT & FOMO Z-SCORES (from model/essay1.py)
+    # =====================================================================
+
+    st.header("FinBERT Sentiment & FOMO Z-Scores")
+    st.markdown(
+        "FinBERT (ProsusAI/finbert) scores 57K+ culture war news articles. "
+        "FOMO z-scores measure how extreme each day's sentiment is relative "
+        "to its volatility regime norm — euphoria (Z>2) and panic (Z<-2)."
+    )
+
+    sent_daily = load_table("ESSAY1_SENTIMENT_DAILY")
+    fomo_regime = load_table("ESSAY1_FOMO_BY_REGIME")
+
+    if not fomo_regime.empty:
+        st.subheader("Sentiment by Volatility Regime")
+
+        fomo_display = fomo_regime.copy()
+        for col in fomo_display.columns:
+            if col != "REGIME":
+                fomo_display[col] = pd.to_numeric(fomo_display[col], errors="coerce")
+
+        # Format percentage columns
+        for pct_col in ["PCT_EUPHORIA", "PCT_PANIC"]:
+            if pct_col in fomo_display.columns:
+                fomo_display[pct_col] = fomo_display[pct_col].apply(
+                    lambda x: f"{x*100:.1f}%" if pd.notna(x) else "--"
+                )
+        fomo_display = fomo_display.round(4)
+        render_df(fomo_display, "FOMO by Regime", "a1_fomo_regime")
+
+        st.divider()
+
+    if not sent_daily.empty:
+        for col in sent_daily.columns:
+            if col not in ("DATE", "TICKER", "REGIME"):
+                sent_daily[col] = pd.to_numeric(sent_daily[col], errors="coerce")
+
+        # --- Sentiment distribution by regime ---
+        st.subheader("Daily Sentiment Distribution by Regime")
+
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4), sharey=True)
+        regimes = sorted(sent_daily["REGIME"].dropna().unique())
+        colors = {"Low Volatility": "#2E7D32", "Normal": "#1565C0", "High Volatility": "#C62828"}
+
+        for i, regime in enumerate(regimes):
+            ax = axes[i] if len(regimes) > 1 else axes
+            subset = sent_daily[sent_daily["REGIME"] == regime]["SENT_MEAN"].dropna()
+            color = colors.get(regime, NAVY)
+            ax.hist(subset, bins=50, color=color, alpha=0.7, edgecolor="white")
+            ax.set_title(regime, fontsize=11, fontweight="bold")
+            ax.set_xlabel("Daily Mean Sentiment")
+            if i == 0:
+                ax.set_ylabel("Frequency")
+            ax.axvline(0, color="gray", linestyle="--", linewidth=0.8)
+
+        fig.suptitle("FinBERT Daily Sentiment by Regime", fontsize=13, fontweight="bold")
+        fig.tight_layout()
+        st.pyplot(fig)
+
+        st.divider()
+
+        # --- FOMO Z-score distribution ---
+        st.subheader("FOMO Z-Score Distribution")
+
+        fig2, axes2 = plt.subplots(1, 3, figsize=(14, 4), sharey=True)
+        for i, regime in enumerate(regimes):
+            ax = axes2[i] if len(regimes) > 1 else axes2
+            subset = sent_daily[sent_daily["REGIME"] == regime]["FOMO_Z"].dropna()
+            color = colors.get(regime, NAVY)
+            ax.hist(subset, bins=50, color=color, alpha=0.7, edgecolor="white")
+            ax.set_title(regime, fontsize=11, fontweight="bold")
+            ax.set_xlabel("FOMO Z-Score")
+            if i == 0:
+                ax.set_ylabel("Frequency")
+            ax.axvline(2, color="#C62828", linestyle="--", linewidth=1, label="Euphoria (Z>2)")
+            ax.axvline(-2, color="#1565C0", linestyle="--", linewidth=1, label="Panic (Z<-2)")
+            if i == len(regimes) - 1:
+                ax.legend(fontsize=8)
+
+        fig2.suptitle("FOMO Z-Scores by Regime (Euphoria vs Panic Thresholds)", fontsize=13, fontweight="bold")
+        fig2.tight_layout()
+        st.pyplot(fig2)
+
+        st.divider()
+
+        # --- Top euphoria & panic days ---
+        st.subheader("Extreme Sentiment Days")
+        c1, c2 = st.columns(2)
+
+        euphoria = sent_daily[sent_daily["FOMO_Z"] > 2].sort_values("FOMO_Z", ascending=False).head(15)
+        panic = sent_daily[sent_daily["FOMO_Z"] < -2].sort_values("FOMO_Z").head(15)
+
+        with c1:
+            st.markdown(f"**Top Euphoria Days** (Z > 2)")
+            if not euphoria.empty:
+                render_df(
+                    euphoria[["DATE", "TICKER", "REGIME", "SENT_MEAN", "FOMO_Z", "N_ARTICLES"]].round(3),
+                    "Euphoria Days", "a1_euphoria"
+                )
+            else:
+                st.info("No euphoria days detected.")
+
+        with c2:
+            st.markdown(f"**Top Panic Days** (Z < -2)")
+            if not panic.empty:
+                render_df(
+                    panic[["DATE", "TICKER", "REGIME", "SENT_MEAN", "FOMO_Z", "N_ARTICLES"]].round(3),
+                    "Panic Days", "a1_panic"
+                )
+            else:
+                st.info("No panic days detected.")
+
+        # --- Full daily data (expandable) ---
+        with st.expander(f"Full Daily Sentiment Data ({len(sent_daily)} rows)", expanded=False):
+            render_df(sent_daily.round(4), "Daily Sentiment", "a1_sent_daily", height=500)
+
 
 # =============================================================================
 # TAB 2: ARTICLE 2 - Culture Wars and Capital Markets
@@ -1532,21 +1925,25 @@ with tab_enriched:
     )
     st.divider()
 
-    # List all available tables
-    conn = sqlite3.connect(str(DB_PATH))
-    table_list = pd.read_sql(
-        "SELECT name FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        conn,
-    )
+    # List all available tables from active backend + SQLite model tables
     table_counts = {}
-    for tbl in table_list["name"]:
-        try:
-            cnt = pd.read_sql(f'SELECT COUNT(*) as n FROM "{tbl}"', conn).iloc[0]["n"]
-            table_counts[tbl] = cnt
-        except Exception:
-            table_counts[tbl] = 0
-    conn.close()
+    with _get_loader() as db:
+        for t in db.list_tables():
+            name = t["name"]
+            if "rows" in t:
+                table_counts[name] = t["rows"]
+            else:
+                try:
+                    cnt_df = db.run_query(f'SELECT COUNT(*) as n FROM "{name}"')
+                    table_counts[name] = int(cnt_df.iloc[0]["n"]) if not cnt_df.empty else 0
+                except Exception:
+                    table_counts[name] = 0
+    # Also include SQLite-only tables (model results, figures) when using Athena
+    if DB_BACKEND == "athena" and DB_PATH.exists():
+        with SQLiteLoader(db_path=str(DB_PATH)) as db:
+            for t in db.list_tables():
+                if t["name"] not in table_counts:
+                    table_counts[t["name"]] = t["rows"]
 
     total_tables = len(table_counts)
     total_rows = sum(table_counts.values())
