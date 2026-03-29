@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from model.essay1 import benjamini_hochberg, _chow_test
+from model.essay1 import benjamini_hochberg, _chow_test, compute_fomo_z
 from model.datastore import DataStore
 
 
@@ -138,24 +138,14 @@ class TestChowTest:
 class TestFOMOZScore:
     """Tests for FOMO z-score logic (within-regime normalization).
 
-    Tests the z-score formula directly since the full sentiment_by_regime
-    function requires FinBERT. The formula is:
+    Tests call compute_fomo_z from essay1.py directly. The formula is:
         FOMO_Z = (sent_mean - regime_mean) / regime_std
     with NaN when regime_std == 0.
     """
 
-    @staticmethod
-    def _compute_fomo_z(sent_mean, regime_mean, regime_std):
-        """Mirror the z-score logic from essay1.py line 1084."""
-        return np.where(
-            regime_std > 0,
-            (sent_mean - regime_mean) / regime_std,
-            np.nan,
-        )
-
     def test_at_regime_mean(self):
         """Sentiment at regime mean → Z ≈ 0."""
-        z = self._compute_fomo_z(
+        z = compute_fomo_z(
             sent_mean=np.array([0.5]),
             regime_mean=np.array([0.5]),
             regime_std=np.array([0.2]),
@@ -164,7 +154,7 @@ class TestFOMOZScore:
 
     def test_two_std_above(self):
         """Sentiment 2 std above regime mean → Z ≈ 2 (euphoria)."""
-        z = self._compute_fomo_z(
+        z = compute_fomo_z(
             sent_mean=np.array([0.9]),
             regime_mean=np.array([0.5]),
             regime_std=np.array([0.2]),
@@ -173,7 +163,7 @@ class TestFOMOZScore:
 
     def test_zero_std_returns_nan(self):
         """Regime with zero std → Z = NaN (not Inf, not 0)."""
-        z = self._compute_fomo_z(
+        z = compute_fomo_z(
             sent_mean=np.array([0.5]),
             regime_mean=np.array([0.5]),
             regime_std=np.array([0.0]),

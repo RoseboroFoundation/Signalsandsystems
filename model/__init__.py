@@ -22,6 +22,7 @@ from .datastore import DataStore
 from .essay1 import (
     benjamini_hochberg,
     assemble_macro_controls,
+    compute_fomo_z,
 )
 
 # ── Essay 1 — Volatility Regimes & FF5 ─────────────────────────────────
@@ -49,12 +50,39 @@ from .essay1_matched import (
     save_matched_results,
 )
 
-# ── Essay 2 — Culture War Event Study ──────────────────────────────────
-# TODO: add save_essay2_results once event study persistence is implemented
+# ── Essay 2 — Factor Model (backward compat) + NLP Pipeline ──────────
 
 from .essay2 import (
     FactorModelResult,
     factor_model,
+    NLPAnalysis,
+    FilingSentiment,
+    EventNLPResult,
+    score_news_sentiment,
+    score_filing_sentiment,
+    download_and_parse_filings,
+    build_event_nlp_panel,
+    run_nlp_analysis,
+    save_nlp_results,
+    PoliticalAlignmentResult,
+    load_platform_corpus,
+    extract_distinctive_phrases,
+    compute_stance_scores,
+    compute_political_alignment,
+    save_alignment_results,
+)
+
+# ── Essay 2 — Culture War Event DiD ──────────────────────────────────
+
+from .essay2_did import (
+    EventCAR,
+    DiDResult,
+    ParallelTrendsResult,
+    build_car_panel,
+    compute_car,
+    run_did,
+    parallel_trends_test,
+    save_did_results,
 )
 
 # ── Essay 3 — Systematic Risk (in progress) ────────────────────────────
@@ -95,9 +123,35 @@ __all__ = [
     "StockRegimeResult",
     "ff5_matched_control_analysis",
     "save_matched_results",
-    # Essay 2 — Event Study
+    # Essay 1 — FOMO z-score
+    "compute_fomo_z",
+    # Essay 2 — Factor Model + NLP
     "FactorModelResult",
     "factor_model",
+    "NLPAnalysis",
+    "FilingSentiment",
+    "EventNLPResult",
+    "score_news_sentiment",
+    "score_filing_sentiment",
+    "download_and_parse_filings",
+    "build_event_nlp_panel",
+    "run_nlp_analysis",
+    "save_nlp_results",
+    "PoliticalAlignmentResult",
+    "load_platform_corpus",
+    "extract_distinctive_phrases",
+    "compute_stance_scores",
+    "compute_political_alignment",
+    "save_alignment_results",
+    # Essay 2 — Event DiD
+    "EventCAR",
+    "DiDResult",
+    "ParallelTrendsResult",
+    "build_car_panel",
+    "compute_car",
+    "run_did",
+    "parallel_trends_test",
+    "save_did_results",
     # Essay 3 — Systematic Risk (in progress)
     "classify_inflation_regime",
     # Reporting

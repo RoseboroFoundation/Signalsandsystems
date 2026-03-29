@@ -12,12 +12,6 @@ import pandas as pd
 
 from .datastore import DataStore
 
-warnings.warn(
-    "essay3 is under active development; the API may change.",
-    FutureWarning,
-    stacklevel=2,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +21,11 @@ def classify_inflation_regime(store: DataStore, low=2.0, high=4.0):
 
     Returns a DataFrame with DATE and INFLATION_REGIME columns.
     """
+    warnings.warn(
+        "essay3 is under active development; the API may change.",
+        FutureWarning,
+        stacklevel=2,
+    )
     if store.inflation.empty:
         return pd.DataFrame()
 
