@@ -687,7 +687,7 @@ def clean_dataframe(df, method='ffill', max_gap=5):
     # Ensure datetime index if applicable
     if hasattr(cleaned, 'index') and not isinstance(cleaned.index, pd.DatetimeIndex):
         try:
-            if cleaned.index.dtype == 'object':
+            if cleaned.index.dtype == 'object' or cleaned.index.dtype.name == 'str':
                 cleaned.index = pd.to_datetime(cleaned.index, errors='coerce')
         except Exception as e:
             logger.debug("Failed to convert index to datetime: %s", e)

@@ -1,11 +1,18 @@
 """Tests for clean/fred_loaders.py and clean/config.py FRED helpers."""
 
+import sys
 from unittest.mock import patch, MagicMock
 
 import pandas as pd
 import pytest
 
 from clean.config import _download_fred_series, _validate_fred_api_key
+
+
+# Create a fake pandas_datareader module to avoid importing the real one
+# (which crashes on newer pandas due to deprecate_kwarg incompatibility).
+_mock_pdr = MagicMock()
+_PDR_PATCH = patch.dict(sys.modules, {"pandas_datareader": _mock_pdr})
 
 
 class TestValidateFredApiKey:
@@ -36,8 +43,9 @@ class TestDownloadFredSeries:
         def side_effect(code, source, start, end):
             return mock_fred_data[code]
 
-        with patch("clean.config.API_KEY", "test_key"):
-            with patch("pandas_datareader.DataReader", side_effect=side_effect):
+        with _PDR_PATCH:
+            _mock_pdr.DataReader.side_effect = side_effect
+            with patch("clean.config.API_KEY", "test_key"):
                 result = _download_fred_series(
                     {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
                     "2020-01-01",
@@ -54,8 +62,9 @@ class TestDownloadFredSeries:
                 raise Exception("API error")
             return mock_fred_data[code]
 
-        with patch("clean.config.API_KEY", "test_key"):
-            with patch("pandas_datareader.DataReader", side_effect=side_effect):
+        with _PDR_PATCH:
+            _mock_pdr.DataReader.side_effect = side_effect
+            with patch("clean.config.API_KEY", "test_key"):
                 result = _download_fred_series(
                     {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
                     "2020-01-01",
@@ -85,8 +94,9 @@ class TestInflationDataStructure:
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: mock_df[code]})
 
-        with patch("clean.config.API_KEY", "test_key"):
-            with patch("pandas_datareader.DataReader", side_effect=side_effect):
+        with _PDR_PATCH:
+            _mock_pdr.DataReader.side_effect = side_effect
+            with patch("clean.config.API_KEY", "test_key"):
                 from clean.fred_loaders import load_inflation_data
 
                 result = load_inflation_data(
@@ -110,8 +120,9 @@ class TestInflationDataStructure:
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: mock_df[code]})
 
-        with patch("clean.config.API_KEY", "test_key"):
-            with patch("pandas_datareader.DataReader", side_effect=side_effect):
+        with _PDR_PATCH:
+            _mock_pdr.DataReader.side_effect = side_effect
+            with patch("clean.config.API_KEY", "test_key"):
                 from clean.fred_loaders import load_inflation_data
 
                 result = load_inflation_data(
@@ -141,17 +152,9 @@ class TestInflationMathCorrectness:
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: values}, index=dates)
 
-        series_map = {
-            "CPIAUCSL": "CPIAUCSL",
-            "CPILFESL": "CPILFESL",
-            "PCEPI": "PCEPI",
-            "PCEPILFE": "PCEPILFE",
-            "PPIACO": "PPIACO",
-            "GDPDEF": "GDPDEF",
-        }
-
-        with patch("clean.config.API_KEY", "test_key"):
-            with patch("pandas_datareader.DataReader", side_effect=side_effect):
+        with _PDR_PATCH:
+            _mock_pdr.DataReader.side_effect = side_effect
+            with patch("clean.config.API_KEY", "test_key"):
                 from clean.fred_loaders import load_inflation_data
 
                 return load_inflation_data(
