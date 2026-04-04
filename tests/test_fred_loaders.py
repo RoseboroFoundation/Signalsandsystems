@@ -1,18 +1,16 @@
 """Tests for clean/fred_loaders.py and clean/config.py FRED helpers."""
 
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from clean.config import _download_fred_series, _validate_fred_api_key
 
-
-# Create a fake pandas_datareader module to avoid importing the real one
-# (which crashes on newer pandas due to deprecate_kwarg incompatibility).
-_mock_pdr = MagicMock()
-_PDR_PATCH = patch.dict(sys.modules, {"pandas_datareader": _mock_pdr})
+# The fake pandas_datareader is injected by conftest.py.  Grab a reference
+# so individual tests can set DataReader.side_effect.
+_mock_pdr = sys.modules["pandas_datareader"]
 
 
 class TestValidateFredApiKey:
@@ -43,14 +41,13 @@ class TestDownloadFredSeries:
         def side_effect(code, source, start, end):
             return mock_fred_data[code]
 
-        with _PDR_PATCH:
-            _mock_pdr.DataReader.side_effect = side_effect
-            with patch("clean.config.API_KEY", "test_key"):
-                result = _download_fred_series(
-                    {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
-                    "2020-01-01",
-                    "2020-06-01",
-                )
+        _mock_pdr.DataReader.side_effect = side_effect
+        with patch("clean.config.API_KEY", "test_key"):
+            result = _download_fred_series(
+                {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
+                "2020-01-01",
+                "2020-06-01",
+            )
 
         assert isinstance(result, pd.DataFrame)
         assert list(result.columns) == ["CPI", "Core_CPI"]
@@ -62,14 +59,13 @@ class TestDownloadFredSeries:
                 raise Exception("API error")
             return mock_fred_data[code]
 
-        with _PDR_PATCH:
-            _mock_pdr.DataReader.side_effect = side_effect
-            with patch("clean.config.API_KEY", "test_key"):
-                result = _download_fred_series(
-                    {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
-                    "2020-01-01",
-                    "2020-06-01",
-                )
+        _mock_pdr.DataReader.side_effect = side_effect
+        with patch("clean.config.API_KEY", "test_key"):
+            result = _download_fred_series(
+                {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
+                "2020-01-01",
+                "2020-06-01",
+            )
 
         # Should still return the successful series
         assert "CPI" in result.columns
@@ -94,16 +90,15 @@ class TestInflationDataStructure:
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: mock_df[code]})
 
-        with _PDR_PATCH:
-            _mock_pdr.DataReader.side_effect = side_effect
-            with patch("clean.config.API_KEY", "test_key"):
-                from clean.fred_loaders import load_inflation_data
+        _mock_pdr.DataReader.side_effect = side_effect
+        with patch("clean.config.API_KEY", "test_key"):
+            from clean.fred_loaders import load_inflation_data
 
-                result = load_inflation_data(
-                    start_date="2020-01-01",
-                    end_date="2021-12-01",
-                    cache_path=str(tmp_path / "fred"),
-                )
+            result = load_inflation_data(
+                start_date="2020-01-01",
+                end_date="2021-12-01",
+                cache_path=str(tmp_path / "fred"),
+            )
 
         assert result is not None
         assert set(result.keys()) == {"raw", "yoy", "mom", "combined"}
@@ -120,16 +115,15 @@ class TestInflationDataStructure:
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: mock_df[code]})
 
-        with _PDR_PATCH:
-            _mock_pdr.DataReader.side_effect = side_effect
-            with patch("clean.config.API_KEY", "test_key"):
-                from clean.fred_loaders import load_inflation_data
+        _mock_pdr.DataReader.side_effect = side_effect
+        with patch("clean.config.API_KEY", "test_key"):
+            from clean.fred_loaders import load_inflation_data
 
-                result = load_inflation_data(
-                    start_date="2020-01-01",
-                    end_date="2021-12-01",
-                    cache_path=str(tmp_path / "fred2"),
-                )
+            result = load_inflation_data(
+                start_date="2020-01-01",
+                end_date="2021-12-01",
+                cache_path=str(tmp_path / "fred2"),
+            )
 
         assert all(col.endswith("_YoY") for col in result["yoy"].columns)
         assert all(col.endswith("_MoM") for col in result["mom"].columns)
@@ -146,22 +140,20 @@ class TestInflationMathCorrectness:
     def inflation_result(self, tmp_path):
         """Run load_inflation_data with a known CPI series: 100, 101, ..., 123."""
         dates = pd.date_range("2020-01-01", periods=24, freq="MS")
-        # Only provide CPI to keep the math simple
         values = list(range(100, 124))  # 100..123
 
         def side_effect(code, source, start, end):
             return pd.DataFrame({code: values}, index=dates)
 
-        with _PDR_PATCH:
-            _mock_pdr.DataReader.side_effect = side_effect
-            with patch("clean.config.API_KEY", "test_key"):
-                from clean.fred_loaders import load_inflation_data
+        _mock_pdr.DataReader.side_effect = side_effect
+        with patch("clean.config.API_KEY", "test_key"):
+            from clean.fred_loaders import load_inflation_data
 
-                return load_inflation_data(
-                    start_date="2020-01-01",
-                    end_date="2021-12-01",
-                    cache_path=str(tmp_path / "fred_math"),
-                )
+            return load_inflation_data(
+                start_date="2020-01-01",
+                end_date="2021-12-01",
+                cache_path=str(tmp_path / "fred_math"),
+            )
 
     def test_yoy_formula(self, inflation_result):
         """YoY = (value / value_12_months_ago - 1) * 100.
