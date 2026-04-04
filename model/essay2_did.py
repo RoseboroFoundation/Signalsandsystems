@@ -180,6 +180,9 @@ def _lookup_regime(event_date: pd.Timestamp, regime_dates: pd.DataFrame) -> str:
     return regime_dates.loc[diffs.idxmin(), 'REGIME_LABEL']
 
 
+# NOTE: Cache is process-scoped and store-agnostic. If the DataStore
+# backend changes within a session, call _normal_return_cache.clear()
+# before re-running.
 _normal_return_cache: Dict[Tuple[str, str], Optional[NormalReturnEstimate]] = {}
 
 
