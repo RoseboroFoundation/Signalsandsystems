@@ -265,13 +265,18 @@ class Form4Downloader:
         """
         Parse Form 4 to extract insider trading details.
 
+        The filing_url may be an XSLT-rendered page (xslF345X03/doc4.xml)
+        or a direct XML file.  We first try parsing it as raw XML; if that
+        fails we fall back to fetching the filing index and looking for the
+        raw XML link.
+
         Returns:
         --------
         List[Dict] : Parsed transaction data
         """
         try:
             response = requests.get(filing_url, headers=self._get_headers(filing_url))
-            time.sleep(0.2)
+            time.sleep(0.15)
         except Exception as e:
             logger.error("fetching filing page: %s", e)
             return []
@@ -279,32 +284,53 @@ class Form4Downloader:
         if response.status_code != 200:
             return []
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Try parsing directly as XML first (works for raw XML docs)
+        xml_soup = BeautifulSoup(response.content, 'xml')
+        if xml_soup.find('ownershipDocument') or xml_soup.find('reportingOwner'):
+            pass  # Successfully parsed as Form 4 XML
+        else:
+            # The URL is an XSLT-rendered page — try to find raw XML
+            # Build the filing index URL from the filing URL
+            # e.g., .../000120919121052386/xslF345X03/doc4.xml
+            #     → .../000120919121052386/
+            parts = filing_url.rsplit('/', 2)
+            if len(parts) >= 2 and 'xsl' in parts[-2].lower():
+                index_url = parts[0] + '/' + parts[-2].split('/')[0] if '/' in parts[-2] else filing_url.rsplit('/', 2)[0] + '/'
+            else:
+                index_url = filing_url.rsplit('/', 1)[0] + '/'
 
-        # Find the XML document link
-        xml_link = None
-        for link in soup.find_all('a'):
-            href = link.get('href', '')
-            if '.xml' in href.lower() and 'primary_doc' not in href:
-                xml_link = (
-                    'https://www.sec.gov' + href
-                    if not href.startswith('http')
-                    else href
-                )
-                break
+            # Fetch the filing index to find the raw XML
+            try:
+                idx_resp = requests.get(index_url, headers=self._get_headers(index_url))
+                time.sleep(0.15)
+            except Exception:
+                return []
 
-        if not xml_link:
-            logger.info("    No XML document found")
-            return []
+            if idx_resp.status_code != 200:
+                return []
 
-        # Fetch and parse the XML
-        xml_response = requests.get(xml_link, headers=self._get_headers(xml_link))
-        time.sleep(0.2)
+            idx_soup = BeautifulSoup(idx_resp.text, 'html.parser')
+            xml_link = None
+            for link in idx_soup.find_all('a'):
+                href = link.get('href', '')
+                if href.endswith('.xml') and 'primary_doc' not in href and 'xsl' not in href.lower():
+                    xml_link = (
+                        'https://www.sec.gov' + href
+                        if not href.startswith('http')
+                        else href
+                    )
+                    break
 
-        if xml_response.status_code != 200:
-            return []
+            if not xml_link:
+                return []
 
-        xml_soup = BeautifulSoup(xml_response.content, 'xml')
+            xml_response = requests.get(xml_link, headers=self._get_headers(xml_link))
+            time.sleep(0.15)
+
+            if xml_response.status_code != 200:
+                return []
+
+            xml_soup = BeautifulSoup(xml_response.content, 'xml')
 
         # Extract reporting owner
         reporting_owner = xml_soup.find('reportingOwner')

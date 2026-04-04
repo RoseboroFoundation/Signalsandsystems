@@ -203,23 +203,40 @@ def load_data():
     """
     data_dict = {}
 
+    # Progress tracking — write step/total to a file the dashboard can read
+    _progress_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'clean_progress.txt')
+    _total_steps = 34
+    _current_step = 0
+
+    def _report(label):
+        nonlocal _current_step
+        _current_step += 1
+        pct = int((_current_step / _total_steps) * 100)
+        try:
+            os.makedirs(os.path.dirname(_progress_file), exist_ok=True)
+            with open(_progress_file, 'w') as f:
+                f.write(f"{_current_step}/{_total_steps}|{pct}%|{label}\n")
+        except Exception:
+            pass
+        logger.info("[%d/%d %d%%] %s", _current_step, _total_steps, pct, label)
+
     # Load culture war companies data
     try:
         data_dict['culturewardata'] = import_culture_war_data(
             'Culture_War_Companies_160_fullmeta.csv'
         )
-        logger.info("Loaded culture war data")
+        _report("Culture war data")
     except Exception as e:
         logger.error("loading culture war data: %s", e)
         data_dict['culturewardata'] = None
+        _report("Culture war data (failed)")
 
     # Build control companies table
     try:
         if data_dict['culturewardata'] is not None:
             data_dict['controlcompanies'] = build_control_companies(
                 data_dict['culturewardata'])
-            logger.info("Built control companies table: %d rows",
-                        len(data_dict['controlcompanies']))
+            _report("Control companies")
         else:
             data_dict['controlcompanies'] = None
     except Exception as e:
@@ -252,7 +269,7 @@ def load_data():
             data_dict['stockdata'] = get_stock_data(
                 tickers, start_date='2000-01-01', end_date='2025-12-31'
             )
-            logger.info("Loaded stock data for %d tickers", len(data_dict['stockdata']))
+            _report("Stock data (%d tickers)" % len(data_dict['stockdata']))
         else:
             data_dict['stockdata'] = None
     except Exception as e:
@@ -262,7 +279,7 @@ def load_data():
     # Load VIX data
     try:
         data_dict['vixdata'] = download_vix_data()
-        logger.info("Loaded VIX data")
+        _report("VIX data")
     except Exception as e:
         logger.error("loading VIX data: %s", e)
         data_dict['vixdata'] = None
@@ -274,7 +291,7 @@ def load_data():
             frequency='daily',
             output_dir='./fama_french_data'
         )
-        logger.info("Loaded Fama-French factors")
+        _report("Fama-French factors")
     except Exception as e:
         logger.error("loading Fama-French factors: %s", e)
         data_dict['ff_factors'] = None
@@ -290,7 +307,7 @@ def load_data():
                 end_date='2025-12-31',
                 save_csv=True
             )
-            logger.info("Loaded Form 4 data")
+            _report("Form 4 insider trading")
         else:
             data_dict['form4data'] = None
     except Exception as e:
@@ -308,12 +325,25 @@ def load_data():
                 end_date='2025-12-31',
                 save_csv=True
             )
-            logger.info("Loaded SEC fundamentals: %d rows", len(data_dict['sec_fundamentals']))
+            _report("SEC fundamentals")
+
+            # Also extract filing text sections (MD&A, Risk Factors)
+            data_dict['sec_filing_text'] = sec_downloader.build_filing_text_dataset(
+                tickers,
+                start_date='2000-01-01',
+                end_date='2025-12-31',
+                max_filings_per_ticker=10,
+                save_csv=True,
+                checkpoint=True,
+            )
+            _report("SEC filing text")
         else:
             data_dict['sec_fundamentals'] = None
+            data_dict['sec_filing_text'] = None
     except Exception as e:
         logger.error("loading SEC fundamentals: %s", e)
         data_dict['sec_fundamentals'] = None
+        data_dict['sec_filing_text'] = None
 
     # Load party platforms (RNC/DNC, fallback to APP)
     try:
@@ -321,7 +351,7 @@ def load_data():
         data_dict['party_platforms'] = platform_downloader.download_all_platforms(
             save_csv=True
         )
-        logger.info("Loaded party platforms: %d documents", len(data_dict['party_platforms']))
+        _report("Party platforms")
     except Exception as e:
         logger.error("loading party platforms: %s", e)
         data_dict['party_platforms'] = None
@@ -332,7 +362,7 @@ def load_data():
             cache_file='./news_data/culture_war_news_checkpoint.csv',
             refresh=True
         )
-        logger.info("Loaded news data")
+        _report("News data")
     except Exception as e:
         logger.error("loading news data: %s", e)
         data_dict['newsdata'] = None
@@ -344,7 +374,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded inflation data")
+        _report("Inflation data")
     except Exception as e:
         logger.error("loading inflation data: %s", e)
         data_dict['inflationdata'] = None
@@ -356,7 +386,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded inflation expectations data")
+        _report("Inflation expectations")
     except Exception as e:
         logger.error("loading inflation expectations data: %s", e)
         data_dict['inflation_expectations'] = None
@@ -368,7 +398,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive inflation data")
+        _report("Comprehensive inflation")
     except Exception as e:
         logger.error("loading comprehensive inflation data: %s", e)
         data_dict['comprehensive_inflation'] = None
@@ -380,7 +410,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded Treasury yields data")
+        _report("Treasury yields")
     except Exception as e:
         logger.error("loading Treasury yields data: %s", e)
         data_dict['treasury_yields'] = None
@@ -392,7 +422,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded policy rates data")
+        _report("Policy rates")
     except Exception as e:
         logger.error("loading policy rates data: %s", e)
         data_dict['policy_rates'] = None
@@ -404,7 +434,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded credit spreads data")
+        _report("Credit spreads")
     except Exception as e:
         logger.error("loading credit spreads data: %s", e)
         data_dict['credit_spreads'] = None
@@ -416,7 +446,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive rates data")
+        _report("Comprehensive rates")
     except Exception as e:
         logger.error("loading comprehensive rates data: %s", e)
         data_dict['comprehensive_rates'] = None
@@ -428,7 +458,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded industrial production data")
+        _report("Industrial production")
     except Exception as e:
         logger.error("loading industrial production data: %s", e)
         data_dict['industrial_production'] = None
@@ -440,7 +470,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded IP growth rates data")
+        _report("IP growth rates")
     except Exception as e:
         logger.error("loading IP growth rates data: %s", e)
         data_dict['ip_growth'] = None
@@ -452,7 +482,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive IP data")
+        _report("Comprehensive IP")
     except Exception as e:
         logger.error("loading comprehensive IP data: %s", e)
         data_dict['comprehensive_ip'] = None
@@ -464,7 +494,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded money supply data")
+        _report("Money supply")
     except Exception as e:
         logger.error("loading money supply data: %s", e)
         data_dict['money_supply'] = None
@@ -476,7 +506,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded money velocity data")
+        _report("Money velocity")
     except Exception as e:
         logger.error("loading money velocity data: %s", e)
         data_dict['money_velocity'] = None
@@ -488,7 +518,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded Fed balance sheet data")
+        _report("Fed balance sheet")
     except Exception as e:
         logger.error("loading Fed balance sheet data: %s", e)
         data_dict['fed_balance_sheet'] = None
@@ -500,7 +530,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive M2 data")
+        _report("Comprehensive M2")
     except Exception as e:
         logger.error("loading comprehensive M2 data: %s", e)
         data_dict['comprehensive_m2'] = None
@@ -512,7 +542,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded GDP data")
+        _report("GDP data")
     except Exception as e:
         logger.error("loading GDP data: %s", e)
         data_dict['gdp_data'] = None
@@ -524,7 +554,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded GDP components data")
+        _report("GDP components")
     except Exception as e:
         logger.error("loading GDP components data: %s", e)
         data_dict['gdp_components'] = None
@@ -536,7 +566,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded GDP by industry data")
+        _report("GDP by industry")
     except Exception as e:
         logger.error("loading GDP by industry data: %s", e)
         data_dict['gdp_industry'] = None
@@ -548,7 +578,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive GDP data")
+        _report("Comprehensive GDP")
     except Exception as e:
         logger.error("loading comprehensive GDP data: %s", e)
         data_dict['comprehensive_gdp'] = None
@@ -560,7 +590,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded employment data")
+        _report("Employment data")
     except Exception as e:
         logger.error("loading employment data: %s", e)
         data_dict['employment_data'] = None
@@ -572,7 +602,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded jobless claims data")
+        _report("Jobless claims")
     except Exception as e:
         logger.error("loading jobless claims data: %s", e)
         data_dict['jobless_claims'] = None
@@ -584,7 +614,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded wages and hours data")
+        _report("Wages and hours")
     except Exception as e:
         logger.error("loading wages and hours data: %s", e)
         data_dict['wages_hours'] = None
@@ -596,7 +626,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded JOLTS data")
+        _report("JOLTS data")
     except Exception as e:
         logger.error("loading JOLTS data: %s", e)
         data_dict['jolts_data'] = None
@@ -608,7 +638,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded comprehensive employment data")
+        _report("Comprehensive employment")
     except Exception as e:
         logger.error("loading comprehensive employment data: %s", e)
         data_dict['comprehensive_employment'] = None
@@ -620,7 +650,7 @@ def load_data():
             end_date='2025-12-31',
             cache_path='./data/fred'
         )
-        logger.info("Loaded additional macro data")
+        _report("Additional macro data")
     except Exception as e:
         logger.error("loading additional macro data: %s", e)
         data_dict['additional_macro'] = None

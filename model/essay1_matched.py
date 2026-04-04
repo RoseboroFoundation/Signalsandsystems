@@ -912,6 +912,40 @@ if __name__ == '__main__':
     print(f"  Input p-values: {test_pvals}")
     print(f"  Rejected (FDR={_BH_FDR_Q:.0%}): {bh}")
 
+    # ── Upload results to AWS (S3 + Glue) ──
+    print()
+    print("=" * 60)
+    print("  Upload results to AWS")
+    print("=" * 60)
+
+    if all_saved:
+        try:
+            from Database import AthenaLoader
+            aws_loader = AthenaLoader()
+            aws_loader.connect()
+            print(f"  Connected to AWS ({aws_loader.database} / {aws_loader.s3_bucket})")
+
+            for table_name in all_saved:
+                try:
+                    df = store.read_table(table_name)
+                    if df.empty:
+                        print(f"    {table_name}: SKIPPED (empty)")
+                        continue
+                    res = aws_loader.write_table(df, table_name, replace=True)
+                    status = res.get('status', 'UNKNOWN')
+                    rows = res.get('rows', len(df))
+                    print(f"    {table_name}: {status} ({rows} rows)")
+                except Exception as e:
+                    print(f"    {table_name}: FAILED — {e}")
+
+            aws_loader.close()
+            print(f"  Uploaded {len(all_saved)} tables to AWS")
+        except Exception as e:
+            print(f"  AWS upload failed: {e}")
+            print("  Results are saved locally in SQLite.")
+    else:
+        print("  No results to upload")
+
     store.close()
     print()
     print(f"Completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

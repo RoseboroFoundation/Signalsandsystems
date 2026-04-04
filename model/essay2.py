@@ -29,6 +29,7 @@ Huang, A.H., Wang, H. & Yang, Y. (2023). FinBERT: A large language model
 
 import logging
 import re
+import threading
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -52,6 +53,41 @@ from .essay1 import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── FinBERT Lazy Singleton ───────────────────────────────────────────
+# Ensures the ~440MB model is loaded at most once per process, even when
+# callers pass finbert_pipeline=None to multiple scoring functions.
+# Thread-safe: uses a lock to prevent double-loading under Streamlit's
+# multi-threaded executor.
+#
+# ImportError propagation: if transformers/torch are not installed, the
+# ImportError propagates to the caller.  Callers that wrap scoring in
+# try/except ImportError (e.g. run_nlp_analysis) will still catch it
+# because _get_finbert_pipeline is called *inside* the try block.
+
+_finbert_singleton = None
+_finbert_lock = threading.Lock()
+
+
+def _get_finbert_pipeline(pipe=None):
+    """Return the provided pipeline or lazily load a shared singleton.
+
+    Raises ImportError if transformers/torch are not installed.
+    """
+    global _finbert_singleton
+    if pipe is not None:
+        return pipe
+    with _finbert_lock:
+        if _finbert_singleton is None:
+            from transformers import pipeline as hf_pipeline
+            logger.info("Loading FinBERT pipeline (singleton, ~440MB)...")
+            _finbert_singleton = hf_pipeline(
+                'sentiment-analysis',
+                model='ProsusAI/finbert',
+                tokenizer='ProsusAI/finbert',
+            )
+    return _finbert_singleton
+
 
 # ── NLP Configuration ─────────────────────────────────────────────────
 
@@ -88,16 +124,21 @@ _10Q_SECTIONS = [
 # FinBERT context = 512 tokens ≈ 2000 chars.  We chunk at this boundary.
 _CHUNK_MAX_CHARS = 1800
 
+# Minimum chars for a valid filing section (below this → likely TOC reference).
+# A genuine MD&A is typically 5,000-50,000 chars; 2,000 chars ≈ 300 words.
+_MIN_SECTION_CHARS = 2000
+
 # Event window (trading days) for matching news/filings to events
 _NEWS_WINDOW_DAYS = 30       # calendar days around event for news
 _FILING_WINDOW_DAYS = 180    # calendar days before event for filings
 
-# SEC EDGAR rate limit (seconds between requests)
-_SEC_REQUEST_DELAY = 0.15
-
 
 # ── Data Classes ──────────────────────────────────────────────────────
 
+# NOTE: FilingSentiment and EventNLPResult are part of the public API
+# (exported in __init__.py) for typed consumers.  Internal pipeline code
+# uses dicts/DataFrames for flexibility, but external callers may
+# construct these for type-safe interop.
 @dataclass
 class FilingSentiment:
     """FinBERT sentiment for a single SEC filing section."""
@@ -105,8 +146,9 @@ class FilingSentiment:
     form_type: str              # '10-K' or '10-Q'
     filing_date: pd.Timestamp
     section: str                # 'MDA' or 'RISK_FACTORS'
+    section_header: str         # original Item header text (excluded from scoring)
     n_chunks: int               # number of text chunks scored
-    sent_mean: float            # mean weighted sentiment across chunks
+    sent_mean: float            # confidence-weighted mean sentiment across chunks
     sent_std: float             # std of chunk sentiments
     pct_positive: float
     pct_negative: float
@@ -161,19 +203,24 @@ def _clean_html_to_text(html: str) -> str:
     return text
 
 
-def _extract_section(text: str, start_pattern: str, stop_patterns: List[str]) -> str:
+def _extract_section(text: str, start_pattern: str, stop_patterns: List[str]) -> Tuple[str, str]:
     """
     Extract a section from filing plain text using regex boundaries.
 
     Finds the start pattern, then reads until the first stop pattern
-    or end of text.  Returns empty string if section not found.
+    or end of text.  Returns (section_body, section_header) tuple.
+    The header (e.g. "ITEM 7. MANAGEMENT'S DISCUSSION...") is excluded
+    from the body to avoid skewing FinBERT scores with boilerplate
+    regulatory language.  Returns ('', '') if section not found.
     """
     # Find section start
     start_match = re.search(start_pattern, text, re.IGNORECASE)
     if start_match is None:
-        return ''
+        return ('', '')
 
-    section_start = start_match.start()
+    # Start body after the header to avoid FinBERT scoring boilerplate
+    section_header = text[start_match.start():start_match.end()].strip()
+    section_body_start = start_match.end()
 
     # Find section end (next Item header)
     section_end = len(text)
@@ -183,17 +230,18 @@ def _extract_section(text: str, start_pattern: str, stop_patterns: List[str]) ->
             candidate = start_match.end() + stop_match.start()
             section_end = min(section_end, candidate)
 
-    section = text[section_start:section_end].strip()
+    section = text[section_body_start:section_end].strip()
 
     # Skip if too short (likely a table of contents reference, not the actual section).
-    # A genuine MD&A is typically 5,000-50,000 chars; 2,000 chars ≈ 300 words minimum.
-    _MIN_SECTION_CHARS = 2000
+    # Dual-TOC filings can cause stop_pattern matches close to section_body_start,
+    # producing near-empty sections — log the header for post-hoc diagnosis.
     if len(section) < _MIN_SECTION_CHARS:
-        logger.debug("Section '%s' too short (%d chars), likely TOC reference",
-                     start_pattern[:30], len(section))
-        return ''
+        logger.debug("Section '%s' too short (%d chars, header='%s'), "
+                     "likely TOC reference or dual-TOC collision",
+                     start_pattern[:30], len(section), section_header)
+        return ('', '')
 
-    return section
+    return (section, section_header)
 
 
 def _chunk_text(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> List[str]:
@@ -227,7 +275,15 @@ def _chunk_text(text: str, max_chars: int = _CHUNK_MAX_CHARS) -> List[str]:
     if current.strip():
         chunks.append(current.strip())
 
-    return chunks
+    # Drop very short trailing chunks (<100 chars) that would have outsized
+    # influence on SENT_STD.  Log the drop so we can audit chunk distributions.
+    _MIN_CHUNK_CHARS = 100
+    filtered = [c for c in chunks if len(c) >= _MIN_CHUNK_CHARS]
+    n_dropped = len(chunks) - len(filtered)
+    if n_dropped > 0:
+        logger.debug("Dropped %d short chunk(s) (<%d chars) from %d total",
+                     n_dropped, _MIN_CHUNK_CHARS, len(chunks))
+    return filtered if filtered else chunks  # keep at least one chunk
 
 
 def download_and_parse_filings(
@@ -299,7 +355,7 @@ def download_and_parse_filings(
 
             # Extract each section
             for section_name, start_pat, stop_pats in section_defs:
-                section_text = _extract_section(plain_text, start_pat, stop_pats)
+                section_text, section_header = _extract_section(plain_text, start_pat, stop_pats)
                 if not section_text:
                     continue
 
@@ -309,6 +365,7 @@ def download_and_parse_filings(
                     'FILING_DATE': filing_date,
                     'SECTION': section_name,
                     'TEXT': section_text,
+                    'SECTION_HEADER': section_header,
                     'TEXT_LENGTH': len(section_text),
                 })
 
@@ -376,7 +433,8 @@ def score_news_sentiment(
         return df
 
     logger.info("Scoring %d news articles with FinBERT...", len(df))
-    scores = _score_finbert(df['TEXT'].tolist(), pipe=finbert_pipeline)
+    pipe = _get_finbert_pipeline(finbert_pipeline)
+    scores = _score_finbert(df['TEXT'].tolist(), pipe=pipe)
 
     df['FINBERT_LABEL'] = [s['label'] for s in scores]
     df['FINBERT_CONF'] = [s['score'] for s in scores]
@@ -415,11 +473,24 @@ def score_filing_sentiment(
     Returns
     -------
     pd.DataFrame with columns: TICKER, FORM_TYPE, FILING_DATE, SECTION,
-        N_CHUNKS, SENT_MEAN, SENT_STD, PCT_POSITIVE, PCT_NEGATIVE,
-        PCT_NEUTRAL, TEXT_LENGTH.
+        N_CHUNKS, SENT_CONF_WEIGHTED_MEAN, SENT_STD, PCT_POSITIVE,
+        PCT_NEGATIVE, PCT_NEUTRAL, TEXT_LENGTH.
+
+    Notes
+    -----
+    SENT_CONF_WEIGHTED_MEAN is the mean of (sentiment_direction * confidence)
+    across chunks, where sentiment_direction is +1/0/-1 from the FinBERT
+    label.  This downweights low-confidence predictions but differs from
+    the unweighted sentiment means in Loughran & McDonald (2011).  The DiD
+    coefficient on filing tone should be interpreted as the effect of
+    confidence-weighted filing sentiment, not raw directional tone.
     """
     if filings_df.empty:
         return pd.DataFrame()
+
+    # Reset index to ensure chunk_index mapping is positionally consistent,
+    # even if filings_df was passed with a non-default index (e.g. after merge/groupby).
+    filings_df = filings_df.reset_index(drop=True)
 
     results = []
     all_chunks = []
@@ -438,7 +509,8 @@ def score_filing_sentiment(
     logger.info("Scoring %d filing chunks (%d sections) with FinBERT...",
                 len(all_chunks), len(filings_df))
 
-    scores = _score_finbert(all_chunks, pipe=finbert_pipeline)
+    pipe = _get_finbert_pipeline(finbert_pipeline)
+    scores = _score_finbert(all_chunks, pipe=pipe)
 
     # Map scores back to filing sections
     chunk_sentiments = {}  # idx -> list of weighted sentiments
@@ -465,13 +537,18 @@ def score_filing_sentiment(
             continue
 
         n = len(sentiments)
+        # Flag single-chunk sections — sentiment is used but has no variance measure
+        if n == 1:
+            logger.debug("Single-chunk section %s/%s/%s — SENT_STD will be 0.0, "
+                         "mean may be unreliable",
+                         row['TICKER'], row['SECTION'], row.get('FILING_DATE', ''))
         results.append({
             'TICKER': row['TICKER'],
             'FORM_TYPE': row['FORM_TYPE'],
             'FILING_DATE': row['FILING_DATE'],
             'SECTION': row['SECTION'],
             'N_CHUNKS': n,
-            'SENT_MEAN': np.mean(sentiments),
+            'SENT_CONF_WEIGHTED_MEAN': np.mean(sentiments),
             'SENT_STD': np.std(sentiments) if n > 1 else 0.0,
             'PCT_POSITIVE': sum(1 for l in labels if l == 'positive') / n,
             'PCT_NEGATIVE': sum(1 for l in labels if l == 'negative') / n,
@@ -528,8 +605,24 @@ def build_event_nlp_panel(
     """
     events_df = store.read_table('CULTURE_WAR_COMPANIES')
     if events_df.empty:
-        # Fall back to events attribute
-        events_df = store.events.copy() if not store.events.empty else pd.DataFrame()
+        # Fall back to events attribute — warn because it may have different schema
+        if hasattr(store, 'events') and not store.events.empty:
+            store_cols = {c.upper() for c in store.events.columns}
+            has_ticker = 'TICKER' in store_cols
+            has_date = bool({'EVENT_DATE', 'DATE'} & store_cols)
+            if not has_ticker or not has_date:
+                logger.error(
+                    "store.events fallback lacks required columns "
+                    "(need TICKER + EVENT_DATE/DATE, has: %s) — "
+                    "cannot build NLP panel", store_cols)
+                return pd.DataFrame()
+            logger.warning(
+                "CULTURE_WAR_COMPANIES table empty — falling back to "
+                "store.events (%d rows). Verify schema compatibility.",
+                len(store.events))
+            events_df = store.events.copy()
+        else:
+            events_df = pd.DataFrame()
     if events_df.empty:
         logger.error("No events found for NLP panel construction")
         return pd.DataFrame()
@@ -606,28 +699,28 @@ def build_event_nlp_panel(
                     logger.debug("%s: filing fallback used (most recent = %s)",
                                  ticker, ticker_filings.iloc[0]['FILING_DATE'])
 
-            has_sent = 'SENT_MEAN' in ticker_filings.columns
+            has_sent = 'SENT_CONF_WEIGHTED_MEAN' in ticker_filings.columns
 
             # Most recent MDA
             mda_sections = ['MDA', 'Item 7 - MD&A', 'Item 2 - MD&A']
             mda = ticker_filings[ticker_filings['SECTION'].isin(mda_sections)]
             if not mda.empty:
                 latest_mda = mda.iloc[0]
-                row['FILING_MDA_TONE'] = latest_mda['SENT_MEAN'] if has_sent else np.nan
+                row['FILING_MDA_TONE'] = latest_mda['SENT_CONF_WEIGHTED_MEAN'] if has_sent else np.nan
                 row['FILING_FORM_TYPE'] = latest_mda['FORM_TYPE']
                 row['FILING_DATE'] = latest_mda['FILING_DATE']
 
                 if has_sent and len(mda) >= 2:
-                    row['FILING_MDA_CHANGE'] = mda.iloc[0]['SENT_MEAN'] - mda.iloc[1]['SENT_MEAN']
+                    row['FILING_MDA_CHANGE'] = mda.iloc[0]['SENT_CONF_WEIGHTED_MEAN'] - mda.iloc[1]['SENT_CONF_WEIGHTED_MEAN']
 
             # Most recent Risk Factors
             risk_sections = ['RISK_FACTORS', 'Item 1A - Risk Factors']
             risk = ticker_filings[ticker_filings['SECTION'].isin(risk_sections)]
             if not risk.empty:
-                row['FILING_RISK_TONE'] = risk.iloc[0]['SENT_MEAN'] if has_sent else np.nan
+                row['FILING_RISK_TONE'] = risk.iloc[0]['SENT_CONF_WEIGHTED_MEAN'] if has_sent else np.nan
 
                 if has_sent and len(risk) >= 2:
-                    row['FILING_RISK_CHANGE'] = risk.iloc[0]['SENT_MEAN'] - risk.iloc[1]['SENT_MEAN']
+                    row['FILING_RISK_CHANGE'] = risk.iloc[0]['SENT_CONF_WEIGHTED_MEAN'] - risk.iloc[1]['SENT_CONF_WEIGHTED_MEAN']
 
         rows.append(row)
 
@@ -782,7 +875,11 @@ def save_nlp_results(
     timestamp = pd.Timestamp.now().isoformat()
 
     if not result.news_sentiment.empty:
-        # Save summary (not full text) to keep table size manageable
+        # Save summary (not full text) to keep table size manageable.
+        # WARNING: TEXT column is intentionally stripped here.  If you later
+        # load ESSAY2_NEWS_SENTIMENT and pass it to compute_political_alignment,
+        # the alignment pipeline requires TEXT for corpus construction.  In that
+        # case, reload from the original news source, not this persisted table.
         news_summary = result.news_sentiment[[
             c for c in result.news_sentiment.columns if c != 'TEXT'
         ]].copy()
@@ -813,7 +910,15 @@ def save_nlp_results(
 # Articles must contain at least one of these in TITLE or SNIPPET.
 # Deliberately excludes overly broad terms ('brand', 'campaign', 'ban',
 # 'political') that match non-culture-war articles.
-_CULTURE_WAR_TERMS = [
+#
+# Some entries are intentional stems for substring matching:
+#   'polariz' → matches polarize, polarizing, polarization
+#   'ideolog' → matches ideology, ideological, ideologue
+# Full phrases (e.g. 'cancel culture') require exact substring match.
+#
+# Immutable: _RELEVANCE_PATTERN is compiled once at import time from these.
+# If you change these, _RELEVANCE_PATTERN must be rebuilt.
+_CULTURE_WAR_TERMS = (
     'boycott', 'buycott', 'backlash', 'controversy', 'protest',
     'cancel culture', 'woke', 'political stance', 'diversity equity',
     'pride month', 'conservative backlash', 'liberal backlash',
@@ -824,12 +929,12 @@ _CULTURE_WAR_TERMS = [
     'inclusion initiative', 'equity initiative', 'lgbtq', 'blm',
     'immigration', 'gun control', 'abortion', 'censorship',
     'free speech', 'critical race', 'anti-woke',
-]
+)
 
 # Terms requiring word-boundary markers to avoid substring false positives
-_CULTURE_WAR_BOUNDARY_TERMS = {
+_CULTURE_WAR_BOUNDARY_TERMS = frozenset({
     'protest', 'outrage', 'abortion', 'transgender', 'censorship',
-}
+})
 
 
 def _build_relevance_pattern() -> str:
@@ -974,6 +1079,10 @@ class PoliticalAlignmentResult:
     agreement_rate: float = np.nan   # computed vs hand-coded agreement
     conservative_threshold: float = 0.05
     liberal_threshold: float = -0.05
+    # Effective weights (after renormalization if stance unavailable)
+    w_distinctive: float = _W_DISTINCTIVE
+    w_stance: float = _W_STANCE
+    w_cosine: float = _W_COSINE
 
 
 def load_platform_corpus(
@@ -1023,18 +1132,25 @@ def _nearest_platform_years(event_year: int, n: int = 2) -> List[int]:
     """Return the n nearest prior platform years to smooth temporal bias.
 
     For events before the first available platform year, uses the
-    earliest available platform with a look-ahead warning.
+    earliest n available platforms with a look-ahead warning.  Always
+    returns exactly min(n, len(_PLATFORM_YEARS)) years so that the
+    averaging loop processes a consistent number of years per ticker.
     """
     prior = sorted([y for y in _PLATFORM_YEARS if y <= event_year], reverse=True)
     if prior:
-        return prior[:n]
+        result = prior[:n]
+        if len(result) < n:
+            logger.debug("Event year %d: only %d prior platform year(s) available %s "
+                         "(requested %d)", event_year, len(result), result, n)
+        return result
     # Pre-platform era: use earliest available, flag look-ahead
-    earliest = min(_PLATFORM_YEARS)
+    earliest_n = sorted(_PLATFORM_YEARS)[:n]
     logger.warning(
         "Event year %d predates earliest platform (%d) — "
-        "look-ahead bias possible in alignment score", event_year, earliest
+        "look-ahead bias possible in alignment score (using %s)",
+        event_year, earliest_n[0], earliest_n,
     )
-    return [earliest]
+    return earliest_n
 
 
 # ── Signal 1: Distinctive Phrases ────────────────────────────────────
@@ -1219,8 +1335,16 @@ def _build_weighted_company_corpus(
     all_tickers = set(news_corpus.keys()) | set(filing_corpus.keys())
     combined = {}
 
-    # Repeat ratio: how many times to replicate filing text relative to news
+    # Repeat ratio: how many times to replicate filing text relative to news.
+    # Note: integer repetition is a coarse proxy for continuous weighting in
+    # TF-IDF space.  E.g. filing_weight=1.5 rounds to 2x, not 1.5x.
+    # For more precise weighting, consider corpus-level IDF adjustment.
     repeat_count = max(1, int(round(filing_weight / news_weight)))
+    if abs(filing_weight / news_weight - repeat_count) > 0.1:
+        logger.debug("Filing repeat_count=%d approximates requested weight "
+                     "ratio %.2f (error=%.2f)",
+                     repeat_count, filing_weight / news_weight,
+                     abs(filing_weight / news_weight - repeat_count))
 
     for ticker in all_tickers:
         parts = []
@@ -1327,13 +1451,15 @@ def compute_stance_scores(
         logger.warning("No topic windows found in company text")
         return {}
 
-    # Log phrase coverage
-    r_in_corpus = sum(1 for p in r_phrases
-                      if any(p.lower() in t.lower() for t in company_corpus.values()))
-    d_in_corpus = sum(1 for p in d_phrases
-                      if any(p.lower() in t.lower() for t in company_corpus.values()))
-    logger.info("Phrase coverage: R %d/%d, D %d/%d found in corpus",
-                r_in_corpus, len(r_phrases), d_in_corpus, len(d_phrases))
+    # Log phrase coverage (derived from already-collected windows to avoid O(n×m) scan)
+    n_r_windows = sum(1 for _, party, _ in all_windows if party == 'Republican')
+    n_d_windows = sum(1 for _, party, _ in all_windows if party == 'Democratic')
+    r_tickers = len(set(t for t, party, _ in all_windows if party == 'Republican'))
+    d_tickers = len(set(t for t, party, _ in all_windows if party == 'Democratic'))
+    logger.info("Phrase coverage: %d R windows across %d/%d companies, "
+                "%d D windows across %d/%d companies",
+                n_r_windows, r_tickers, len(company_corpus),
+                n_d_windows, d_tickers, len(company_corpus))
 
     logger.info("Stance detection: %d topic windows across %d companies",
                 len(all_windows), len(company_corpus))
@@ -1344,7 +1470,8 @@ def compute_stance_scores(
     # Truncate long windows for FinBERT
     window_texts = [t[:1800] for t in window_texts]
 
-    scores = _score_finbert(window_texts, pipe=finbert_pipeline)
+    pipe = _get_finbert_pipeline(finbert_pipeline)
+    scores = _score_finbert(window_texts, pipe=pipe)
 
     # Aggregate per company per party
     ticker_party_sents = {}  # (ticker, party) -> list of sentiments
@@ -1490,6 +1617,13 @@ def compute_political_alignment(
     phrases_df, disc_vectorizer = extract_distinctive_phrases(platforms)
 
     # Step 3: Build weighted company corpus
+    # Guard: news_scored must have TEXT column for corpus construction.
+    # If loaded from ESSAY2_NEWS_SENTIMENT (which strips TEXT), warn early.
+    if news_scored is not None and not news_scored.empty and 'TEXT' not in news_scored.columns:
+        logger.warning(
+            "news_scored is missing TEXT column — was it loaded from "
+            "ESSAY2_NEWS_SENTIMENT (which strips TEXT to save space)? "
+            "Alignment pipeline needs TEXT. News corpus will be empty.")
     logger.info("Step 2: Building source-weighted company corpus...")
     combined_corpus, news_corpus, filing_corpus = _build_weighted_company_corpus(
         store, news_df=news_scored, filing_sections=filing_sections)
@@ -1507,25 +1641,33 @@ def compute_political_alignment(
         max_df=0.95,
         sublinear_tf=True,
     )
+    platforms = platforms.reset_index(drop=True)
     platform_texts = platforms['TEXT'].tolist()
     cosine_vectorizer.fit(platform_texts)
     platform_vectors = cosine_vectorizer.transform(platform_texts)
 
     # Step 5: Get event years per ticker
-    events_df = store.events.copy() if not store.events.empty else pd.DataFrame()
+    events_df = store.read_table('CULTURE_WAR_COMPANIES')
+    if events_df.empty:
+        logger.error("CULTURE_WAR_COMPANIES table empty — cannot determine event years. "
+                     "Alignment scores require event dates to select the correct "
+                     "platform years. Populate the table before running alignment.")
+        return None
     events_df.columns = [c.upper() for c in events_df.columns]
+    if 'EVENT_DATE' not in events_df.columns and 'DATE' not in events_df.columns:
+        logger.error("CULTURE_WAR_COMPANIES table missing date column "
+                     "(need EVENT_DATE or DATE, have: %s)", list(events_df.columns))
+        return None
     date_col = 'EVENT_DATE' if 'EVENT_DATE' in events_df.columns else 'DATE'
 
-    ticker_years = {}
-    if not events_df.empty and date_col in events_df.columns:
-        events_df[date_col] = pd.to_datetime(events_df[date_col], errors='coerce')
-        ticker_years = (
-            events_df.dropna(subset=[date_col])
-            .groupby('TICKER')[date_col]
-            .first()
-            .dt.year
-            .to_dict()
-        )
+    events_df[date_col] = pd.to_datetime(events_df[date_col], errors='coerce')
+    ticker_years = (
+        events_df.dropna(subset=[date_col])
+        .groupby('TICKER')[date_col]
+        .first()
+        .dt.year
+        .to_dict()
+    )
 
     # Step 6: Stance detection (optional)
     stance_scores = {}
@@ -1549,18 +1691,28 @@ def compute_political_alignment(
         w_distinctive = w_distinctive / total if total > 0 else 0.5
         w_cosine = w_cosine / total if total > 0 else 0.5
         w_stance = 0.0
-        logger.info("Stance unavailable — reweighted: distinctive=%.2f, cosine=%.2f",
+        logger.info("Stance unavailable — reweighted: distinctive=%.3f, cosine=%.3f",
                      w_distinctive, w_cosine)
+
+    # Log effective weights (always, for audit trail in DiD interpretation)
+    logger.info("Composite alignment weights: distinctive=%.3f, stance=%.3f, cosine=%.3f "
+                "(sum=%.3f)", w_distinctive, w_stance, w_cosine,
+                w_distinctive + w_stance + w_cosine)
 
     # Step 7: Score each company
     logger.info("Step 4: Computing composite alignment scores...")
     company_rows = []
+    _n_default_year = 0
 
     for ticker, text in combined_corpus.items():
         if len(text.split()) < 50:
             continue
 
-        event_year = ticker_years.get(ticker, 2020)
+        event_year = ticker_years.get(ticker, None)
+        if event_year is None:
+            event_year = 2020
+            _n_default_year += 1
+            logger.debug("%s: no event year found, defaulting to 2020", ticker)
         # Average across two nearest platform years to reduce temporal bias
         years = _nearest_platform_years(event_year, n=2)
 
@@ -1613,6 +1765,11 @@ def compute_political_alignment(
             'HAS_NEWS': ticker in news_corpus,
         })
 
+    if _n_default_year > 0:
+        logger.warning("%d/%d tickers had no event year in CULTURE_WAR_COMPANIES "
+                       "and defaulted to 2020 platform years (likely control-only "
+                       "tickers)", _n_default_year, len(combined_corpus))
+
     company_df = pd.DataFrame(company_rows)
 
     if company_df.empty:
@@ -1620,19 +1777,28 @@ def compute_political_alignment(
         return None
 
     # ── Normalize each signal to [-1, +1] using 5th/95th percentile ──
-    def _normalize_signal(series: pd.Series) -> pd.Series:
+    def _normalize_signal(series: pd.Series, signal_name: str = '') -> pd.Series:
         p05 = series.quantile(0.05)
         p95 = series.quantile(0.95)
+        logger.info("Normalization '%s' (n=%d): p05=%.4f, p95=%.4f, "
+                     "min=%.4f, max=%.4f, mean=%.4f, std=%.4f",
+                     signal_name, len(series), p05, p95,
+                     series.min(), series.max(), series.mean(), series.std())
         if p95 == p05:
+            logger.warning("Normalization '%s': p05==p95 (%.4f), returning zeros",
+                           signal_name, p05)
             return pd.Series(0.0, index=series.index)
         return (2 * (series - p05) / (p95 - p05) - 1).clip(-1, 1)
 
-    company_df['DISTINCTIVE_ALIGN_NORM'] = _normalize_signal(company_df['DISTINCTIVE_ALIGN'])
+    company_df['DISTINCTIVE_ALIGN_NORM'] = _normalize_signal(
+        company_df['DISTINCTIVE_ALIGN'], 'DISTINCTIVE_ALIGN')
     if has_stance:
-        company_df['STANCE_ALIGN_NORM'] = _normalize_signal(company_df['STANCE_ALIGN'])
+        company_df['STANCE_ALIGN_NORM'] = _normalize_signal(
+            company_df['STANCE_ALIGN'], 'STANCE_ALIGN')
     else:
         company_df['STANCE_ALIGN_NORM'] = 0.0
-    company_df['COSINE_ALIGN_NORM'] = _normalize_signal(company_df['COSINE_ALIGN'])
+    company_df['COSINE_ALIGN_NORM'] = _normalize_signal(
+        company_df['COSINE_ALIGN'], 'COSINE_ALIGN')
 
     # Composite score from normalized signals
     company_df['ALIGNMENT_SCORE'] = (
@@ -1739,6 +1905,9 @@ def compute_political_alignment(
         agreement_rate=_agreement_rate,
         conservative_threshold=conservative_threshold,
         liberal_threshold=liberal_threshold,
+        w_distinctive=w_distinctive,
+        w_stance=w_stance,
+        w_cosine=w_cosine,
     )
 
 
@@ -1755,6 +1924,9 @@ def save_alignment_results(
         'CONSERVATIVE_THRESHOLD': result.conservative_threshold,
         'LIBERAL_THRESHOLD': result.liberal_threshold,
         'AGREEMENT_RATE': result.agreement_rate,
+        'W_DISTINCTIVE': result.w_distinctive,
+        'W_STANCE': result.w_stance,
+        'W_COSINE': result.w_cosine,
         'N_CONSERVATIVE': (result.company_scores['COMPUTED_LEANING'] == 'Conservative').sum()
             if 'COMPUTED_LEANING' in result.company_scores.columns else 0,
         'N_LIBERAL': (result.company_scores['COMPUTED_LEANING'] == 'Liberal').sum()
@@ -1963,6 +2135,11 @@ def factor_model(
     elif model == 'FF5+MOM':
         factor_cols = ['MKT_RF', 'SMB', 'HML', 'RMW', 'CMA', 'MOM']
         fdata = store.factors.copy()
+        missing = [c for c in factor_cols if c not in fdata.columns]
+        if missing:
+            logger.error("FF5+MOM model requires columns %s but store.factors "
+                         "is missing %s", factor_cols, missing)
+            return None
     else:
         raise ValueError(f"Unknown model: {model}. Use 'FF3', 'FF5', or 'FF5+MOM'.")
 
@@ -2176,13 +2353,29 @@ if __name__ == '__main__':
                 n_m = len(cs) - n_c - n_l
                 print(f"    ±{t:.2f}: C={n_c:>3}, L={n_l:>3}, M={n_m:>3}")
 
-            # Skew detection: suggest asymmetric thresholds if needed
+            # Skew detection: suggest asymmetric thresholds if needed.
+            # NOTE: The confusion matrix and agreement rate above were computed
+            # with the thresholds passed to this run.  If the distribution is
+            # skewed, rerun with the suggested asymmetric thresholds.
             median_score = cs['ALIGNMENT_SCORE'].median()
-            print(f"\n  Distribution median: {median_score:+.4f}")
+            logger.info("Alignment distribution median: %+.4f (n=%d)",
+                        median_score, len(cs))
             if abs(median_score) > 0.05:
-                print(f"  NOTE: Distribution skewed — consider asymmetric thresholds")
-                print(f"  Suggested: Conservative > {0.05 + median_score:+.3f}, "
-                      f"Liberal < {-0.05 + median_score:+.3f}")
+                suggested_c = args.conservative_threshold + median_score
+                suggested_l = args.liberal_threshold + median_score
+                logger.warning(
+                    "Alignment distribution skewed (median=%+.4f, p05=%.4f, p95=%.4f) "
+                    "— consider asymmetric thresholds: Conservative > %+.3f, "
+                    "Liberal < %+.3f",
+                    median_score,
+                    cs['ALIGNMENT_SCORE'].quantile(0.05),
+                    cs['ALIGNMENT_SCORE'].quantile(0.95),
+                    suggested_c, suggested_l)
+                print(f"\n  ⚠ Distribution skewed (median={median_score:+.4f}). "
+                      f"Confusion matrix above used symmetric thresholds "
+                      f"(±{args.conservative_threshold}).")
+                print(f"  Re-run with: --conservative-threshold {suggested_c:+.3f} "
+                      f"--liberal-threshold {suggested_l:+.3f}")
 
         # Event-level scores
         if not alignment_result.event_scores.empty:

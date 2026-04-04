@@ -240,6 +240,319 @@ TABLE_MAP = {
         'extract_mode': 'dataframe',
         'description': 'Consumer Sentiment, Housing Starts, Home Prices, Dollar Index',
     },
+
+    # --- SEC Filings ---
+    'form4data': {
+        'table': 'FORM4_TRANSACTIONS',
+        'extract_mode': 'dataframe',
+        'description': 'SEC Form 4 insider trading filings for culture war companies',
+    },
+    'controlcompanies': {
+        'table': 'CONTROL_COMPANIES',
+        'extract_mode': 'dataframe',
+        'description': 'Industry-matched control companies for treatment firms',
+    },
+
+    # --- Essay 1 — Volatility Regimes & FF5 ---
+    'essay1_regime_summary': {
+        'table': 'ESSAY1_REGIME_SUMMARY',
+        'extract_mode': 'dataframe',
+        'description': 'VIX regime summary statistics (means, durations, counts)',
+    },
+    'essay1_model_selection': {
+        'table': 'ESSAY1_MODEL_SELECTION',
+        'extract_mode': 'dataframe',
+        'description': 'Markov-switching model selection (BIC, AIC by n_regimes)',
+    },
+    'essay1_transition_matrix': {
+        'table': 'ESSAY1_TRANSITION_MATRIX',
+        'extract_mode': 'dataframe',
+        'description': 'Regime transition probabilities',
+    },
+    'essay1_lr_tests': {
+        'table': 'ESSAY1_LR_TESTS',
+        'extract_mode': 'dataframe',
+        'description': 'Likelihood-ratio tests for number of regimes',
+    },
+    'essay1_coefficients': {
+        'table': 'ESSAY1_COEFFICIENTS',
+        'extract_mode': 'dataframe',
+        'description': 'Regime-conditional factor model coefficients',
+    },
+    'essay1_interaction': {
+        'table': 'ESSAY1_INTERACTION',
+        'extract_mode': 'dataframe',
+        'description': 'Regime × factor interaction terms',
+    },
+    'essay1_ff5_coefficients': {
+        'table': 'ESSAY1_FF5_COEFFICIENTS',
+        'extract_mode': 'dataframe',
+        'description': 'FF5 model coefficients by regime',
+    },
+    'essay1_factor_premia': {
+        'table': 'ESSAY1_FACTOR_PREMIA',
+        'extract_mode': 'dataframe',
+        'description': 'Factor premia comparison across regimes',
+    },
+    'essay1_chow_test': {
+        'table': 'ESSAY1_CHOW_TEST',
+        'extract_mode': 'dataframe',
+        'description': 'Chow structural break test for regime shifts',
+    },
+    'essay1_cw_stock_results': {
+        'table': 'ESSAY1_CW_STOCK_RESULTS',
+        'extract_mode': 'dataframe',
+        'description': 'Culture war stock-level regime analysis results',
+    },
+    'essay1_cw_regime_aggregates': {
+        'table': 'ESSAY1_CW_REGIME_AGGREGATES',
+        'extract_mode': 'dataframe',
+        'description': 'Culture war aggregate statistics by regime',
+    },
+    'essay1_cw_vs_market': {
+        'table': 'ESSAY1_CW_VS_MARKET',
+        'extract_mode': 'dataframe',
+        'description': 'Culture war portfolio vs market comparison by regime',
+    },
+    'essay1_ctrl_coefficients': {
+        'table': 'ESSAY1_CTRL_COEFFICIENTS',
+        'extract_mode': 'dataframe',
+        'description': 'Control firm regime-conditional coefficients',
+    },
+    'essay1_ctrl_cw_stock_results': {
+        'table': 'ESSAY1_CTRL_CW_STOCK_RESULTS',
+        'extract_mode': 'dataframe',
+        'description': 'Control firm stock-level regime results',
+    },
+    'essay1_ctrl_cw_aggregates': {
+        'table': 'ESSAY1_CTRL_CW_AGGREGATES',
+        'extract_mode': 'dataframe',
+        'description': 'Control firm aggregate statistics by regime',
+    },
+    'essay1_ctrl_interaction': {
+        'table': 'ESSAY1_CTRL_INTERACTION',
+        'extract_mode': 'dataframe',
+        'description': 'Control firm regime × factor interaction terms',
+    },
+    'essay1_sentiment_daily': {
+        'table': 'ESSAY1_SENTIMENT_DAILY',
+        'extract_mode': 'dataframe',
+        'description': 'Daily sentiment scores by regime',
+    },
+    'essay1_fomo_by_regime': {
+        'table': 'ESSAY1_FOMO_BY_REGIME',
+        'extract_mode': 'dataframe',
+        'description': 'Fear-of-missing-out metric by regime',
+    },
+    'essay1_matched_coverage': {
+        'table': 'ESSAY1_MATCHED_COVERAGE',
+        'extract_mode': 'dataframe',
+        'description': 'Matched control analysis coverage per stock',
+    },
+    'essay1_matched_ttest': {
+        'table': 'ESSAY1_MATCHED_TTEST',
+        'extract_mode': 'dataframe',
+        'description': 'Matched control paired t-tests by regime × factor',
+    },
+    'essay1_matched_deltas': {
+        'table': 'ESSAY1_MATCHED_DELTAS',
+        'extract_mode': 'dataframe',
+        'description': 'Treatment minus control deltas per stock × regime',
+    },
+    'essay1_matched_sign': {
+        'table': 'ESSAY1_MATCHED_SIGN',
+        'extract_mode': 'dataframe',
+        'description': 'Binomial sign test for matched pair direction',
+    },
+    'essay1_matched_amplification': {
+        'table': 'ESSAY1_MATCHED_AMPLIFICATION',
+        'extract_mode': 'dataframe',
+        'description': 'Treatment amplification ratio vs matched controls',
+    },
+
+    # --- Essay 2 — NLP, Political Alignment & Event DiD ---
+    'essay2_news_sentiment': {
+        'table': 'ESSAY2_NEWS_SENTIMENT',
+        'extract_mode': 'dataframe',
+        'description': 'FinBERT-scored news sentiment per article',
+    },
+    'essay2_filing_sentiment': {
+        'table': 'ESSAY2_FILING_SENTIMENT',
+        'extract_mode': 'dataframe',
+        'description': 'SEC filing MDA/risk section sentiment scores',
+    },
+    'essay2_event_nlp': {
+        'table': 'ESSAY2_EVENT_NLP',
+        'extract_mode': 'dataframe',
+        'description': 'Event-level NLP panel (news + filing sentiment around events)',
+    },
+    'essay2_distinctive_phrases': {
+        'table': 'ESSAY2_DISTINCTIVE_PHRASES',
+        'extract_mode': 'dataframe',
+        'description': 'Partisan distinctive phrases from party platforms',
+    },
+    'essay2_political_alignment': {
+        'table': 'ESSAY2_POLITICAL_ALIGNMENT',
+        'extract_mode': 'dataframe',
+        'description': 'Computed political alignment scores per firm',
+    },
+    'essay2_event_alignment': {
+        'table': 'ESSAY2_EVENT_ALIGNMENT',
+        'extract_mode': 'dataframe',
+        'description': 'Event-level political alignment classification',
+    },
+    'essay2_alignment_validation': {
+        'table': 'ESSAY2_ALIGNMENT_VALIDATION',
+        'extract_mode': 'dataframe',
+        'description': 'Political alignment validation metrics',
+    },
+    'essay2_car_panel': {
+        'table': 'ESSAY2_CAR_PANEL',
+        'extract_mode': 'dataframe',
+        'description': 'Cumulative abnormal returns panel per event',
+    },
+    'essay2_did_coefficients': {
+        'table': 'ESSAY2_DID_COEFFICIENTS',
+        'extract_mode': 'dataframe',
+        'description': 'Difference-in-differences regression coefficients',
+    },
+    'essay2_parallel_trends': {
+        'table': 'ESSAY2_PARALLEL_TRENDS',
+        'extract_mode': 'dataframe',
+        'description': 'Parallel trends pre-treatment test results',
+    },
+    'essay2_peer_parallel_trends': {
+        'table': 'ESSAY2_PEER_PARALLEL_TRENDS',
+        'extract_mode': 'dataframe',
+        'description': 'Peer firm parallel trends test results',
+    },
+    'essay2_multi_window_panel': {
+        'table': 'ESSAY2_MULTI_WINDOW_PANEL',
+        'extract_mode': 'dataframe',
+        'description': 'Multi-window CAR panel (1d to 60d)',
+    },
+    'essay2_multi_window_summary': {
+        'table': 'ESSAY2_MULTI_WINDOW_SUMMARY',
+        'extract_mode': 'dataframe',
+        'description': 'Multi-window CAR summary statistics',
+    },
+    'essay2_multi_window_by_lean': {
+        'table': 'ESSAY2_MULTI_WINDOW_BY_LEAN',
+        'extract_mode': 'dataframe',
+        'description': 'Multi-window CARs by political leaning',
+    },
+    'essay2_multi_window_treat_vs_ctrl': {
+        'table': 'ESSAY2_MULTI_WINDOW_TREAT_VS_CTRL',
+        'extract_mode': 'dataframe',
+        'description': 'Multi-window treatment vs control comparison',
+    },
+    'essay2_contagion_panel': {
+        'table': 'ESSAY2_CONTAGION_PANEL',
+        'extract_mode': 'dataframe',
+        'description': 'Industry contagion spillover panel',
+    },
+    'essay2_contagion_summary': {
+        'table': 'ESSAY2_CONTAGION_SUMMARY',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion effect summary by window',
+    },
+    'essay2_contagion_by_lean': {
+        'table': 'ESSAY2_CONTAGION_BY_LEAN',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion effects by political leaning',
+    },
+    'essay2_contagion_by_facing': {
+        'table': 'ESSAY2_CONTAGION_BY_FACING',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion effects by consumer-facing status',
+    },
+    'essay2_contagion_peer_vs_nonpeer': {
+        'table': 'ESSAY2_CONTAGION_PEER_VS_NONPEER',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion peer vs non-peer comparison',
+    },
+    'essay2_contagion_cons_vs_b2b': {
+        'table': 'ESSAY2_CONTAGION_CONS_VS_B2B',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion consumer vs B2B comparison',
+    },
+    'essay2_contagion_lean_pairwise': {
+        'table': 'ESSAY2_CONTAGION_LEAN_PAIRWISE',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion pairwise leaning comparisons',
+    },
+    'essay2_contagion_lean_mech': {
+        'table': 'ESSAY2_CONTAGION_LEAN_MECH',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion leaning mechanism analysis',
+    },
+    'essay2_contagion_tight_diff': {
+        'table': 'ESSAY2_CONTAGION_TIGHT_DIFF',
+        'extract_mode': 'dataframe',
+        'description': 'Contagion tight vs diffuse event comparison',
+    },
+    'essay2_enhanced_contagion_panel': {
+        'table': 'ESSAY2_ENHANCED_CONTAGION_PANEL',
+        'extract_mode': 'dataframe',
+        'description': 'Enhanced contagion panel with additional controls',
+    },
+
+    # --- Essay 3 — Insider Trading & Political Controversies ---
+    'essay3_insider_panel': {
+        'table': 'ESSAY3_INSIDER_PANEL',
+        'extract_mode': 'dataframe',
+        'description': 'Event-insider panel with Form 4 metrics per window',
+    },
+    'essay3_window_summary': {
+        'table': 'ESSAY3_WINDOW_SUMMARY',
+        'extract_mode': 'dataframe',
+        'description': 'Aggregate insider trading stats per window',
+    },
+    'essay3_abnormal_selling': {
+        'table': 'ESSAY3_ABNORMAL_SELLING',
+        'extract_mode': 'dataframe',
+        'description': 'Pre-event vs benchmark abnormal selling tests',
+    },
+    'essay3_car_insider_regression': {
+        'table': 'ESSAY3_CAR_INSIDER_REGRESSION',
+        'extract_mode': 'dataframe',
+        'description': 'Cross-sectional CAR ~ insider selling regression',
+    },
+    'essay3_leaning_analysis': {
+        'table': 'ESSAY3_LEANING_ANALYSIS',
+        'extract_mode': 'dataframe',
+        'description': 'Insider trading by political alignment group',
+    },
+    'essay3_treatment_vs_control': {
+        'table': 'ESSAY3_TREATMENT_VS_CONTROL',
+        'extract_mode': 'dataframe',
+        'description': 'DiD: insider selling in treatment vs control firms',
+    },
+    'essay3_routine_vs_opportunistic': {
+        'table': 'ESSAY3_ROUTINE_VS_OPPORTUNISTIC',
+        'extract_mode': 'dataframe',
+        'description': 'Cohen et al routine vs opportunistic trade decomposition',
+    },
+    'essay3_regime_interaction': {
+        'table': 'ESSAY3_REGIME_INTERACTION',
+        'extract_mode': 'dataframe',
+        'description': 'VIX regime × insider trading interaction',
+    },
+    'essay3_placebo_test': {
+        'table': 'ESSAY3_PLACEBO_TEST',
+        'extract_mode': 'dataframe',
+        'description': 'Placebo permutation test with random pseudo-event dates',
+    },
+    'essay3_acceleration_test': {
+        'table': 'ESSAY3_ACCELERATION_TEST',
+        'extract_mode': 'dataframe',
+        'description': 'Jonckheere-Terpstra trend test across pre-event windows',
+    },
+    'essay3_information_gradient': {
+        'table': 'ESSAY3_INFORMATION_GRADIENT',
+        'extract_mode': 'dataframe',
+        'description': 'CAR magnitude × insider selling information gradient',
+    },
 }
 
 

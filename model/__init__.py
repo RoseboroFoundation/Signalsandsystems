@@ -85,11 +85,12 @@ from .essay2_did import (
     save_did_results,
 )
 
-# ── Essay 3 — Systematic Risk (in progress) ────────────────────────────
-# TODO: add save_essay3_results once macro regime analysis is implemented
+# ── Essay 3 — Insider Trading ─────────────────────────────────────────
 
 from .essay3 import (
     classify_inflation_regime,
+    run_essay3,
+    save_essay3_results,
 )
 
 # ── Reporting ───────────────────────────────────────────────────────────

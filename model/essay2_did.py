@@ -41,6 +41,7 @@ Kolari, J.W. & Pynnonen, S. (2010). Event study testing with
 
 import logging
 import warnings
+from collections import namedtuple
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -48,6 +49,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats
+from scipy.linalg import qr as _qr
 
 from .datastore import DataStore
 from .essay1 import (
@@ -135,7 +137,7 @@ class DiDResult:
     n_control_firms: int = 0
     n_observations: int = 0
     coefficient_table: pd.DataFrame = field(default_factory=pd.DataFrame)
-    diagnostics: Optional['DiagnosticResults'] = None
+    diagnostics: Optional["DiagnosticResults"] = None
 
 
 @dataclass
@@ -153,12 +155,24 @@ class DiagnosticResults:
     n_bootstrap_iterations: int = 1000
 
 
+# Named tuple for normal-return estimation results.
+# Avoids monkey-patching internal attributes on statsmodels fit objects.
+# NOTE: Each instance holds a full DataFrame (event_data) and index (event_idx).
+# For very large runs, callers could extract only the needed columns/slice
+# to reduce memory, but in practice the per-estimate footprint is small
+# relative to the factor/return DataFrames already in memory.
+NormalReturnEstimate = namedtuple('NormalReturnEstimate', ['fit', 'event_data', 'event_idx'])
+
+
 # =========================================================================
 # CAR COMPUTATION
 # =========================================================================
 
 def _lookup_regime(event_date: pd.Timestamp, regime_dates: pd.DataFrame) -> str:
     """Return the regime label for the nearest trading day to event_date."""
+    if regime_dates.empty:
+        logger.warning("_lookup_regime: empty regime_dates — defaulting to 'Unknown'")
+        return 'Unknown'
     match = regime_dates[regime_dates['DATE'] == event_date]
     if not match.empty:
         return match.iloc[0]['REGIME_LABEL']
@@ -171,7 +185,7 @@ def _estimate_normal_returns(
     store: DataStore,
     event_date: pd.Timestamp,
     estimation_window: Tuple[int, int] = _ESTIMATION_WINDOW,
-) -> Optional[sm.regression.linear_model.RegressionResultsWrapper]:
+) -> Optional[NormalReturnEstimate]:
     """
     Estimate FF5 normal-return model over the estimation window.
 
@@ -225,11 +239,7 @@ def _estimate_normal_returns(
         warnings.simplefilter("ignore")
         fit = sm.OLS(y, X).fit()
 
-    # Attach the full merged data for later AR computation
-    fit._event_data = merged
-    fit._event_idx = event_idx
-
-    return fit
+    return NormalReturnEstimate(fit=fit, event_data=merged, event_idx=event_idx)
 
 
 def compute_car(
@@ -249,11 +259,12 @@ def compute_car(
     expected returns, then cumulates abnormal returns over the pre and
     post event windows.
     """
-    fit = _estimate_normal_returns(ticker, store, event_date)
-    if fit is None:
+    estimate = _estimate_normal_returns(ticker, store, event_date)
+    if estimate is None:
         return None
 
-    merged = fit._event_data
+    merged = estimate.event_data
+    ols_fit = estimate.fit
     full_window = (pre_window[0], post_window[1])
 
     event_obs = merged[
@@ -267,7 +278,7 @@ def compute_car(
 
     # Compute abnormal returns
     X_event = sm.add_constant(event_obs[_FF5_ALL])
-    expected = fit.predict(X_event)
+    expected = ols_fit.predict(X_event)
     event_obs['AR'] = event_obs['EXCESS_RETURN'] - expected.values
 
     # CARs by sub-window
@@ -293,10 +304,10 @@ def compute_car(
         car_pre=car_pre,
         car_post=car_post,
         car_full=car_full,
-        n_estimation_obs=int(fit.nobs),
+        n_estimation_obs=int(ols_fit.nobs),
         n_event_obs=len(event_obs),
-        alpha=fit.params['const'],
-        r_squared=fit.rsquared,
+        alpha=ols_fit.params['const'],
+        r_squared=ols_fit.rsquared,
     )
 
 
@@ -341,11 +352,12 @@ def compute_multi_window_car(
     if windows is None:
         windows = _MULTI_WINDOWS
 
-    fit = _estimate_normal_returns(ticker, store, event_date)
-    if fit is None:
+    estimate = _estimate_normal_returns(ticker, store, event_date)
+    if estimate is None:
         return None
 
-    merged = fit._event_data
+    merged = estimate.event_data
+    ols_fit = estimate.fit
     max_window = max(windows)
 
     # Full range needed: day -1 to day +max_window
@@ -354,6 +366,9 @@ def compute_multi_window_car(
         (merged['TD_OFFSET'] <= max_window)
     ].copy()
 
+    # NOTE: min-obs threshold is 3 here (vs 5 in compute_car) because the
+    # per-window 50% fill check below (line ~380) provides window-level QC.
+    # compute_car checks the full [-10,+10] range so needs a higher floor.
     if len(event_obs) < 3:
         logger.debug("%s: only %d obs for multi-window (need >=3) at %s",
                      ticker, len(event_obs), event_date.date())
@@ -361,7 +376,7 @@ def compute_multi_window_car(
 
     # Compute abnormal returns once for the full range
     X_event = sm.add_constant(event_obs[_FF5_ALL])
-    expected = fit.predict(X_event)
+    expected = ols_fit.predict(X_event)
     event_obs['AR'] = event_obs['EXCESS_RETURN'] - expected.values
 
     # Slice CARs for each window
@@ -386,9 +401,9 @@ def compute_multi_window_car(
         regime=regime,
         lean=lean,
         cars=cars,
-        n_estimation_obs=int(fit.nobs),
-        alpha=fit.params['const'],
-        r_squared=fit.rsquared,
+        n_estimation_obs=int(ols_fit.nobs),
+        alpha=ols_fit.params['const'],
+        r_squared=ols_fit.rsquared,
     )
 
 
@@ -428,6 +443,9 @@ def build_multi_window_panel(
             controls_df['TREATMENT_TICKER'],
             controls_df['CONTROL_TICKER'],
         ))
+    if not control_map:
+        logger.warning("build_multi_window_panel: no matched controls — "
+                        "panel will contain treatment firms only")
 
     # Regime assignments
     if regime_result is None:
@@ -731,11 +749,12 @@ def _compute_peer_cars(
     if windows is None:
         windows = _MULTI_WINDOWS
 
-    fit = _estimate_normal_returns(ticker, store, event_date)
-    if fit is None:
+    estimate = _estimate_normal_returns(ticker, store, event_date)
+    if estimate is None:
         return None
 
-    merged = fit._event_data
+    merged = estimate.event_data
+    ols_fit = estimate.fit
     max_window = max(windows)
 
     event_obs = merged[
@@ -747,7 +766,7 @@ def _compute_peer_cars(
         return None
 
     X_event = sm.add_constant(event_obs[_FF5_ALL])
-    expected = fit.predict(X_event)
+    expected = ols_fit.predict(X_event)
     event_obs['AR'] = event_obs['EXCESS_RETURN'] - expected.values
 
     rows = []
@@ -771,8 +790,8 @@ def _compute_peer_cars(
             'EVENT_LEAN': event_lean,
             'WINDOW': w,
             'CAR': car_val,
-            'N_EST_OBS': int(fit.nobs),
-            'EST_R2': fit.rsquared,
+            'N_EST_OBS': int(ols_fit.nobs),
+            'EST_R2': ols_fit.rsquared,
         })
 
     return rows
@@ -840,7 +859,8 @@ def run_contagion_test(
     if not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
         alignment_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
 
-    # Regime assignments
+    # Regime assignments — callers should pass regime_result to avoid
+    # redundant Markov-switching estimation (which is deterministic but slow).
     if regime_result is None:
         regime_result = estimate_vix_regimes(store)
         if regime_result is None:
@@ -1175,6 +1195,13 @@ def run_enhanced_contagion(
             }
 
     all_tickers = list(ticker_meta.keys())
+
+    # Log industry classification distribution (UNCLASSIFIED firms excluded
+    # from consumer-vs-B2B heterogeneity analysis)
+    n_unclassified = sum(1 for m in ticker_meta.values() if m['FACING'] == 'UNCLASSIFIED')
+    if n_unclassified > 0:
+        logger.info("Enhanced contagion: %d/%d firms UNCLASSIFIED (excluded from "
+                     "consumer-vs-B2B analysis)", n_unclassified, len(ticker_meta))
 
     # Fall back to computed alignment if events table lacks lean
     alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
@@ -1586,10 +1613,12 @@ def build_car_panel(
     rows = []
     n_events = 0
     n_skipped = 0
+    _event_seq = 0
 
     for _, event in events_df.iterrows():
         event_date = event[date_col]
-        event_id = event[id_col] if id_col else f"event_{n_events}"
+        event_id = event[id_col] if id_col else f"event_{_event_seq}"
+        _event_seq += 1
         event_ticker = event.get('TICKER', None)
 
         if event_ticker is None:
@@ -1687,6 +1716,22 @@ def _run_did_regression(
 
     y = sub[dep_var]
     X = sm.add_constant(sub[regressors])
+
+    # Check for near-singular design matrix (common with many event dummies).
+    # Drop collinear columns so OLS and the downstream F-test stay reliable.
+    rank = np.linalg.matrix_rank(X.values)
+    if rank < X.shape[1]:
+        n_drop = X.shape[1] - rank
+        logger.warning("Design matrix is rank-deficient: rank=%d, cols=%d — "
+                       "dropping %d collinear columns.", rank, X.shape[1], n_drop)
+        _, _, pivot = _qr(X.values, pivoting=True)
+        keep_idx = sorted(pivot[:rank])
+        dropped = [X.columns[i] for i in range(X.shape[1]) if i not in keep_idx]
+        logger.warning("Dropped collinear columns: %s", dropped)
+        if 'const' in dropped:
+            logger.warning("Intercept ('const') was dropped — regression proceeds "
+                           "without an intercept; coefficient interpretation changes.")
+        X = X.iloc[:, keep_idx]
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -1804,11 +1849,11 @@ def parallel_trends_test(
             continue
 
         for ticker, is_treat in [(treat_ticker, True), (ctrl_ticker, False)]:
-            fit = _estimate_normal_returns(ticker, store, event_date)
-            if fit is None:
+            estimate = _estimate_normal_returns(ticker, store, event_date)
+            if estimate is None:
                 continue
 
-            merged = fit._event_data
+            merged = estimate.event_data
             pre_obs = merged[
                 (merged['TD_OFFSET'] >= pre_window[0]) &
                 (merged['TD_OFFSET'] <= pre_window[1])
@@ -1819,12 +1864,13 @@ def parallel_trends_test(
 
             # Compute abnormal returns
             X_pre = sm.add_constant(pre_obs[_FF5_ALL])
-            expected = fit.predict(X_pre)
+            expected = estimate.fit.predict(X_pre)
             pre_obs['AR'] = pre_obs['EXCESS_RETURN'] - expected.values
             pre_obs['TREAT'] = int(is_treat)
             pre_obs['EVENT_DATE'] = event_date
+            pre_obs['TICKER'] = ticker
 
-            all_rows.append(pre_obs[['TD_OFFSET', 'AR', 'TREAT', 'EVENT_DATE']])
+            all_rows.append(pre_obs[['TD_OFFSET', 'AR', 'TREAT', 'EVENT_DATE', 'TICKER']])
 
     if not all_rows:
         logger.error("Parallel trends: no pre-event data collected")
@@ -1867,9 +1913,17 @@ def parallel_trends_test(
     y = sub['AR'].astype(float)
     X = sm.add_constant(sub[regressors].astype(float))
 
+    # Cluster by TICKER to match DiD regressions (stacked pre/post observations
+    # from the same firm are correlated; HC1 would understate uncertainty).
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        fit = sm.OLS(y, X).fit(cov_type='HC1')
+        if 'TICKER' in sub.columns and sub['TICKER'].nunique() > 1:
+            fit = sm.OLS(y, X).fit(
+                cov_type='cluster',
+                cov_kwds={'groups': sub['TICKER']},
+            )
+        else:
+            fit = sm.OLS(y, X).fit(cov_type='HC1')
 
     # Extract Treat x Day coefficients
     coeff_rows = []
@@ -1893,6 +1947,14 @@ def parallel_trends_test(
         if col_name in fit.params.index:
             j = list(fit.params.index).index(col_name)
             r_matrix[i, j] = 1.0
+
+    # Drop all-zero rows (interaction terms absent from fit) to avoid degenerate F-test
+    nonzero_mask = r_matrix.any(axis=1)
+    if not nonzero_mask.all():
+        n_missing = int((~nonzero_mask).sum())
+        logger.warning("Parallel trends: %d/%d interact terms missing from fit — "
+                       "F-test covers fewer constraints", n_missing, len(interact_cols))
+        r_matrix = r_matrix[nonzero_mask]
 
     try:
         f_test = fit.f_test(r_matrix)
@@ -1985,11 +2047,11 @@ def peer_parallel_trends_test(
 
         # Collect pre-event ARs for event firm (is_event=1) and peers (is_event=0)
         for ticker, is_event in [(event_ticker, True)] + [(p, False) for p in peers]:
-            fit = _estimate_normal_returns(ticker, store, event_date)
-            if fit is None:
+            estimate = _estimate_normal_returns(ticker, store, event_date)
+            if estimate is None:
                 continue
 
-            merged = fit._event_data
+            merged = estimate.event_data
             pre_obs = merged[
                 (merged['TD_OFFSET'] >= pre_window[0]) &
                 (merged['TD_OFFSET'] <= pre_window[1])
@@ -1999,7 +2061,7 @@ def peer_parallel_trends_test(
                 continue
 
             X_pre = sm.add_constant(pre_obs[_FF5_ALL])
-            expected = fit.predict(X_pre)
+            expected = estimate.fit.predict(X_pre)
             pre_obs['AR'] = pre_obs['EXCESS_RETURN'] - expected.values
             pre_obs['EVENT_FIRM'] = int(is_event)
             pre_obs['EVENT_DATE'] = event_date
@@ -2049,7 +2111,13 @@ def peer_parallel_trends_test(
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        fit = sm.OLS(y, X).fit(cov_type='HC1')
+        if sub['EVENT_DATE'].nunique() > 1:
+            fit = sm.OLS(y, X).fit(
+                cov_type='cluster',
+                cov_kwds={'groups': sub['EVENT_DATE']},
+            )
+        else:
+            fit = sm.OLS(y, X).fit(cov_type='HC1')
 
     # Extract EventFirm x Day coefficients
     coeff_rows = []
@@ -2072,6 +2140,14 @@ def peer_parallel_trends_test(
         if col_name in fit.params.index:
             j = list(fit.params.index).index(col_name)
             r_matrix[i, j] = 1.0
+
+    # Drop all-zero rows (interaction terms absent from fit) to avoid degenerate F-test
+    nonzero_mask = r_matrix.any(axis=1)
+    if not nonzero_mask.all():
+        n_missing = int((~nonzero_mask).sum())
+        logger.warning("Peer parallel trends: %d/%d interact terms missing from fit — "
+                       "F-test covers fewer constraints", n_missing, len(interact_cols))
+        r_matrix = r_matrix[nonzero_mask]
 
     try:
         f_test = fit.f_test(r_matrix)
@@ -2165,21 +2241,35 @@ def run_did(
     stacked = pd.concat([pre, post], ignore_index=True)
     stacked['TREAT_x_POST'] = stacked['TREAT'] * stacked['POST']
 
+    # All specs use firm-clustered SEs because stacked pre/post observations
+    # from the same firm are mechanically correlated.  HC1 would understate
+    # uncertainty.  See Lambert review note on cross-sectional design.
+    _cluster = 'TICKER'
+
     # Spec 1: Basic DiD
     did_basic = _run_did_regression(
         stacked, 'CAR', ['TREAT', 'POST', 'TREAT_x_POST'],
+        cluster_var=_cluster,
     )
 
     # Spec 2: With political lean interaction
     did_with_lean = None
     if 'LEAN' in stacked.columns and stacked['LEAN'].notna().sum() > 10:
-        stacked['TREAT_x_POST_x_LEAN'] = (
-            stacked['TREAT_x_POST'] * stacked['LEAN']
-        )
-        did_with_lean = _run_did_regression(
-            stacked, 'CAR',
-            ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'],
-        )
+        # LEAN must be numeric for interaction terms. If categorical strings
+        # (e.g. 'Liberal', 'Conservative') were loaded, skip the lean spec.
+        if not pd.api.types.is_numeric_dtype(stacked['LEAN']):
+            logger.warning("LEAN column is categorical (%s) — skipping lean interaction. "
+                           "Use ALIGNMENT_SCORE (numeric) for DiD lean interactions.",
+                           stacked['LEAN'].dtype)
+        else:
+            stacked['TREAT_x_POST_x_LEAN'] = (
+                stacked['TREAT_x_POST'] * stacked['LEAN']
+            )
+            did_with_lean = _run_did_regression(
+                stacked, 'CAR',
+                ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'],
+                cluster_var=_cluster,
+            )
 
     # Spec 3: Full model with FOMO z-score
     did_with_fomo = None
@@ -2190,7 +2280,9 @@ def run_did(
                 'TREAT', 'POST', 'TREAT_x_POST', 'LEAN',
                 'TREAT_x_POST_x_LEAN', 'FOMO_Z',
             ]
-        did_with_fomo = _run_did_regression(stacked, 'CAR', fomo_regressors)
+        did_with_fomo = _run_did_regression(
+            stacked, 'CAR', fomo_regressors, cluster_var=_cluster,
+        )
 
     # Coefficient table
     fits = {
@@ -2267,19 +2359,30 @@ def run_placebo_test(
             stacked['TREAT_x_POST'] = stacked['TREAT'] * stacked['POST']
             return stacked
 
-        # Actual regression
+        # Actual regression — use firm-clustered SEs (consistent with run_did)
         stacked_actual = _stack_panel(panel)
         sub = stacked_actual.dropna(subset=['CAR'])
         y = sub['CAR']
         X = sm.add_constant(sub[['TREAT', 'POST', 'TREAT_x_POST']])
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            actual_fit = sm.OLS(y, X).fit(cov_type='HC1')
+            actual_fit = sm.OLS(y, X).fit(
+                cov_type='cluster',
+                cov_kwds={'groups': sub['TICKER']},
+            )
 
         actual_coeff = actual_fit.params.get('TREAT_x_POST', np.nan)
         actual_t = actual_fit.tvalues.get('TREAT_x_POST', np.nan)
 
         # Placebo iterations — permute at firm level (treatment is a firm characteristic)
+        # Verify panel is wide-format (one row per firm per event) before permutation
+        _expected_firm_rows = panel.groupby(['TICKER', 'EVENT_ID']).size()
+        if not (_expected_firm_rows == 1).all():
+            n_dups = int((_expected_firm_rows > 1).sum())
+            logger.error(
+                "Placebo permutation expects wide-format panel (one row per "
+                "firm×event), but found %d duplicates — aborting", n_dups)
+            return pd.DataFrame()
         rows = []
         for i in range(n_iterations):
             p_shuffled = panel.copy()
@@ -2294,7 +2397,10 @@ def run_placebo_test(
             X = sm.add_constant(sub[['TREAT', 'POST', 'TREAT_x_POST']])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                fit = sm.OLS(y, X).fit(cov_type='HC1')
+                fit = sm.OLS(y, X).fit(
+                    cov_type='cluster',
+                    cov_kwds={'groups': sub['TICKER']},
+                )
             rows.append({
                 'ITERATION': i + 1,
                 'PLACEBO_COEFF': fit.params.get('TREAT_x_POST', np.nan),
@@ -2410,10 +2516,11 @@ def run_cluster_robust_did(
     fits: Dict[str, object],
 ) -> pd.DataFrame:
     """
-    Re-run DiD specifications with cluster-robust SEs by TICKER.
+    Compare cluster-by-TICKER SEs (primary) with cluster-by-EVENT_ID SEs.
 
-    Compares cluster-by-event SEs (the primary inference used in main
-    regressions) with cluster-by-firm SEs to assess within-firm correlation.
+    The main DiD regressions cluster by TICKER (firm-level correlation).
+    This diagnostic re-runs with cluster-by-EVENT_ID to assess how much
+    the clustering dimension matters for inference.
 
     Parameters
     ----------
@@ -2421,13 +2528,13 @@ def run_cluster_robust_did(
         Wide CAR panel.
     fits : dict
         {'basic': fit, 'with_lean': fit, 'with_fomo': fit}
-        These fits already use cluster-by-EVENT_ID SEs.
+        These fits already use cluster-by-TICKER SEs.
 
     Returns
     -------
     pd.DataFrame
-        Columns: SPECIFICATION, VARIABLE, COEFF, SE_CLUSTER_EVENT,
-                 SE_CLUSTER_FIRM, T_CLUSTER_EVENT, T_CLUSTER_FIRM
+        Columns: SPECIFICATION, VARIABLE, COEFF, SE_CLUSTER_FIRM,
+                 SE_CLUSTER_EVENT, T_CLUSTER_FIRM, T_CLUSTER_EVENT
     """
     try:
         panel = car_panel.copy()
@@ -2444,19 +2551,31 @@ def run_cluster_robust_did(
         post = post.rename(columns={'CAR_POST': 'CAR'})
         stacked = pd.concat([pre, post], ignore_index=True)
         stacked['TREAT_x_POST'] = stacked['TREAT'] * stacked['POST']
-        if 'LEAN' in stacked.columns and stacked['LEAN'].notna().sum() > 10:
+        if ('LEAN' in stacked.columns
+                and pd.api.types.is_numeric_dtype(stacked['LEAN'])
+                and stacked['LEAN'].notna().sum() > 10):
             stacked['TREAT_x_POST_x_LEAN'] = stacked['TREAT_x_POST'] * stacked['LEAN']
 
-        # Spec -> regressors
-        spec_regressors = {
-            'basic': ['TREAT', 'POST', 'TREAT_x_POST'],
-            'with_lean': ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'],
-            'with_fomo': ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN', 'FOMO_Z'],
-        }
+        # Spec -> regressors (only include LEAN terms if numeric)
+        _lean_avail = ('LEAN' in stacked.columns
+                       and pd.api.types.is_numeric_dtype(stacked['LEAN'])
+                       and 'TREAT_x_POST_x_LEAN' in stacked.columns)
+        if _lean_avail:
+            spec_regressors = {
+                'basic': ['TREAT', 'POST', 'TREAT_x_POST'],
+                'with_lean': ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'],
+                'with_fomo': ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN', 'FOMO_Z'],
+            }
+        else:
+            spec_regressors = {
+                'basic': ['TREAT', 'POST', 'TREAT_x_POST'],
+                'with_lean': ['TREAT', 'POST', 'TREAT_x_POST'],
+                'with_fomo': ['TREAT', 'POST', 'TREAT_x_POST', 'FOMO_Z'],
+            }
 
         rows = []
-        for spec_name, hc1_fit in fits.items():
-            if hc1_fit is None:
+        for spec_name, firm_fit in fits.items():
+            if firm_fit is None:
                 continue
             regressors = spec_regressors.get(spec_name, [])
             available = [r for r in regressors if r in stacked.columns]
@@ -2467,23 +2586,28 @@ def run_cluster_robust_did(
             y = sub['CAR']
             X = sm.add_constant(sub[available])
 
+            # Re-run with cluster-by-EVENT_ID for comparison
+            # (the passed-in fits already cluster by TICKER)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                cluster_fit = sm.OLS(y, X).fit(
-                    cov_type='cluster',
-                    cov_kwds={'groups': sub['TICKER']},
-                )
+                if 'EVENT_ID' in sub.columns and sub['EVENT_ID'].nunique() > 1:
+                    event_cluster_fit = sm.OLS(y, X).fit(
+                        cov_type='cluster',
+                        cov_kwds={'groups': sub['EVENT_ID']},
+                    )
+                else:
+                    event_cluster_fit = sm.OLS(y, X).fit(cov_type='HC1')
 
-            for var in hc1_fit.params.index:
-                if var in cluster_fit.params.index:
+            for var in firm_fit.params.index:
+                if var in event_cluster_fit.params.index:
                     rows.append({
                         'SPECIFICATION': spec_name,
                         'VARIABLE': var,
-                        'COEFF': hc1_fit.params[var],
-                        'SE_CLUSTER_EVENT': hc1_fit.bse[var],
-                        'SE_CLUSTER_FIRM': cluster_fit.bse[var],
-                        'T_CLUSTER_EVENT': hc1_fit.tvalues[var],
-                        'T_CLUSTER_FIRM': cluster_fit.tvalues[var],
+                        'COEFF': firm_fit.params[var],
+                        'SE_CLUSTER_FIRM': firm_fit.bse[var],
+                        'SE_CLUSTER_EVENT': event_cluster_fit.bse[var],
+                        'T_CLUSTER_FIRM': firm_fit.tvalues[var],
+                        'T_CLUSTER_EVENT': event_cluster_fit.tvalues[var],
                     })
 
         logger.info("Cluster-robust SEs: %d coefficient rows", len(rows))
@@ -2628,7 +2752,9 @@ def compute_vif(
         post = post.rename(columns={'CAR_POST': 'CAR'})
         stacked = pd.concat([pre, post], ignore_index=True)
         stacked['TREAT_x_POST'] = stacked['TREAT'] * stacked['POST']
-        if 'LEAN' in stacked.columns and stacked['LEAN'].notna().sum() > 10:
+        if ('LEAN' in stacked.columns
+                and pd.api.types.is_numeric_dtype(stacked['LEAN'])
+                and stacked['LEAN'].notna().sum() > 10):
             stacked['TREAT_x_POST_x_LEAN'] = stacked['TREAT_x_POST'] * stacked['LEAN']
 
         rows = []
@@ -2753,6 +2879,10 @@ def run_autocorrelation_test(
             if fit is None:
                 continue
             dw = durbin_watson(fit.resid)
+            # NOTE: Fixed thresholds (1.5/2.5) are conventional approximations.
+            # Exact critical values depend on n and k (Durbin-Watson tables),
+            # but the cross-sectional DiD residuals are large-sample (n >> k),
+            # so the approximation is adequate for a diagnostic flag.
             if dw < 1.5:
                 interp = 'Positive autocorrelation'
             elif dw > 2.5:
@@ -2822,21 +2952,29 @@ def run_diagnostics(
         post = post.rename(columns={'CAR_POST': 'CAR'})
         stacked = pd.concat([pre, post], ignore_index=True)
         stacked['TREAT_x_POST'] = stacked['TREAT'] * stacked['POST']
-        if 'LEAN' in stacked.columns and stacked['LEAN'].notna().sum() > 10:
+        _lean_numeric = ('LEAN' in stacked.columns
+                         and stacked['LEAN'].notna().sum() > 10
+                         and pd.api.types.is_numeric_dtype(stacked['LEAN']))
+        if _lean_numeric:
             stacked['TREAT_x_POST_x_LEAN'] = stacked['TREAT_x_POST'] * stacked['LEAN']
 
+        # Cluster by TICKER — consistent with run_did()
+        _cluster = 'TICKER'
         fits['basic'] = _run_did_regression(
-            stacked, 'CAR', ['TREAT', 'POST', 'TREAT_x_POST'])
-        if 'LEAN' in stacked.columns and stacked['LEAN'].notna().sum() > 10:
+            stacked, 'CAR', ['TREAT', 'POST', 'TREAT_x_POST'],
+            cluster_var=_cluster)
+        if _lean_numeric:
             fits['with_lean'] = _run_did_regression(
                 stacked, 'CAR',
-                ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'])
+                ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN', 'TREAT_x_POST_x_LEAN'],
+                cluster_var=_cluster)
         if 'FOMO_Z' in stacked.columns and stacked['FOMO_Z'].notna().sum() > 10:
             fomo_regs = ['TREAT', 'POST', 'TREAT_x_POST', 'FOMO_Z']
-            if fits['with_lean'] is not None:
+            if _lean_numeric:
                 fomo_regs = ['TREAT', 'POST', 'TREAT_x_POST', 'LEAN',
                              'TREAT_x_POST_x_LEAN', 'FOMO_Z']
-            fits['with_fomo'] = _run_did_regression(stacked, 'CAR', fomo_regs)
+            fits['with_fomo'] = _run_did_regression(
+                stacked, 'CAR', fomo_regs, cluster_var=_cluster)
 
     # Regressor sets for VIF
     regressor_sets = {
@@ -3448,7 +3586,12 @@ if __name__ == '__main__':
     # --- 8b: Event firm vs peers parallel trends ---
     print()
     print("  (b) Event Firm vs Industry Peers — pre-event window [-10, -1]")
-    peer_pt = peer_parallel_trends_test(store)
+    # Only run peer parallel trends if contagion data was available
+    peer_pt = None
+    if contagion_result is not None:
+        peer_pt = peer_parallel_trends_test(store)
+    else:
+        logger.info("Skipping peer parallel trends — no contagion results")
     if peer_pt is not None:
         verdict = "PASS" if peer_pt.passes else "FAIL"
         print(f"      Joint F = {peer_pt.joint_f_stat:.3f},  p = {peer_pt.joint_p_value:.4f}  "
