@@ -4,7 +4,6 @@ import os
 from datetime import datetime
 
 import pandas as pd
-import pandas_datareader as pdr
 import yfinance as yf
 from fredapi import Fred
 
@@ -195,6 +194,8 @@ def download_fama_french_factors(
 
     results = {}
 
+    import pandas_datareader as pdr
+
     try:
         # Download 3-Factor Model
         logger.info("Downloading Fama-French 3-Factor Model...")
@@ -286,6 +287,8 @@ def download_industry_portfolios(
 
     freq_suffix = '_daily' if frequency == 'daily' else ''
     dataset_name = f'{num_industries}_Industry_Portfolios{freq_suffix}'
+
+    import pandas_datareader as pdr
 
     try:
         logger.info("Downloading %s Industry Portfolios...", num_industries)
