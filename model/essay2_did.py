@@ -180,6 +180,9 @@ def _lookup_regime(event_date: pd.Timestamp, regime_dates: pd.DataFrame) -> str:
     return regime_dates.loc[diffs.idxmin(), 'REGIME_LABEL']
 
 
+_normal_return_cache: Dict[Tuple[str, str], Optional[NormalReturnEstimate]] = {}
+
+
 def _estimate_normal_returns(
     ticker: str,
     store: DataStore,
@@ -190,9 +193,15 @@ def _estimate_normal_returns(
     Estimate FF5 normal-return model over the estimation window.
 
     Returns the fitted OLS model, or None if insufficient data.
+    Results are cached by (ticker, event_date) to avoid redundant
+    factor model re-estimation in contagion and parallel-trends loops.
     """
+    cache_key = (ticker, str(event_date))
+    if cache_key in _normal_return_cache:
+        return _normal_return_cache[cache_key]
     returns = store.get_ticker_returns(ticker)
     if returns.empty or 'RETURN' not in returns.columns:
+        _normal_return_cache[cache_key] = None
         return None
 
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
@@ -216,6 +225,7 @@ def _estimate_normal_returns(
     event_date_np = np.datetime64(pd.Timestamp(event_date))
     event_idx = np.searchsorted(all_dates, event_date_np)
     if event_idx == 0 or event_idx >= len(merged):
+        _normal_return_cache[cache_key] = None
         return None
 
     # Map calendar dates to trading-day offsets
@@ -230,6 +240,7 @@ def _estimate_normal_returns(
     if len(est) < _MIN_ESTIMATION_OBS:
         logger.debug("%s: only %d estimation obs (need %d) for event %s",
                      ticker, len(est), _MIN_ESTIMATION_OBS, event_date.date())
+        _normal_return_cache[cache_key] = None
         return None
 
     y = est['EXCESS_RETURN']
@@ -239,7 +250,9 @@ def _estimate_normal_returns(
         warnings.simplefilter("ignore")
         fit = sm.OLS(y, X).fit()
 
-    return NormalReturnEstimate(fit=fit, event_data=merged, event_idx=event_idx)
+    result = NormalReturnEstimate(fit=fit, event_data=merged, event_idx=event_idx)
+    _normal_return_cache[cache_key] = result
+    return result
 
 
 def compute_car(
@@ -2109,6 +2122,11 @@ def peer_parallel_trends_test(
     y = sub['AR'].astype(float)
     X = sm.add_constant(sub[regressors].astype(float))
 
+    # Cluster by EVENT_DATE (not TICKER as in DiD parallel_trends_test) because
+    # the peer test pools observations across event-firm and peer-firm pairs —
+    # there is no unique firm identifier in the pooled panel.  The "treatment"
+    # (being an event-firm's peer) varies at the event-date level, so clustering
+    # on EVENT_DATE accounts for within-event correlation across peer firms.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         if sub['EVENT_DATE'].nunique() > 1:
@@ -2475,7 +2493,7 @@ def run_bootstrap_car_ci(
 
         for _ in range(n_bootstrap):
             idx = rng.choice(n_fe, size=n_fe, replace=True)
-            sampled_fe = firm_events.iloc[idx]
+            sampled_fe = firm_events.iloc[idx].reset_index(drop=True)
             boot_panel = sampled_fe.merge(panel, on=['TICKER', 'EVENT_DATE'], how='left')
             b_treat = boot_panel[boot_panel['IS_TREATMENT']]['CAR_POST']
             b_ctrl = boot_panel[~boot_panel['IS_TREATMENT']]['CAR_POST']
