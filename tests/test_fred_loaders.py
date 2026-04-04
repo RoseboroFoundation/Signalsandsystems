@@ -37,7 +37,7 @@ class TestDownloadFredSeries:
             return mock_fred_data[code]
 
         with patch("clean.config.API_KEY", "test_key"):
-            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+            with patch("pandas_datareader.DataReader", side_effect=side_effect):
                 result = _download_fred_series(
                     {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
                     "2020-01-01",
@@ -55,7 +55,7 @@ class TestDownloadFredSeries:
             return mock_fred_data[code]
 
         with patch("clean.config.API_KEY", "test_key"):
-            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+            with patch("pandas_datareader.DataReader", side_effect=side_effect):
                 result = _download_fred_series(
                     {"CPI": "CPIAUCSL", "Core_CPI": "CPILFESL"},
                     "2020-01-01",
@@ -86,7 +86,7 @@ class TestInflationDataStructure:
             return pd.DataFrame({code: mock_df[code]})
 
         with patch("clean.config.API_KEY", "test_key"):
-            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+            with patch("pandas_datareader.DataReader", side_effect=side_effect):
                 from clean.fred_loaders import load_inflation_data
 
                 result = load_inflation_data(
@@ -111,7 +111,7 @@ class TestInflationDataStructure:
             return pd.DataFrame({code: mock_df[code]})
 
         with patch("clean.config.API_KEY", "test_key"):
-            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+            with patch("pandas_datareader.DataReader", side_effect=side_effect):
                 from clean.fred_loaders import load_inflation_data
 
                 result = load_inflation_data(
@@ -151,7 +151,7 @@ class TestInflationMathCorrectness:
         }
 
         with patch("clean.config.API_KEY", "test_key"):
-            with patch("clean.config.pdr.DataReader", side_effect=side_effect):
+            with patch("pandas_datareader.DataReader", side_effect=side_effect):
                 from clean.fred_loaders import load_inflation_data
 
                 return load_inflation_data(

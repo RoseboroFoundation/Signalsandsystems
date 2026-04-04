@@ -15,26 +15,24 @@ class TestParseForm4XML:
     """
 
     def _parse_with_xml(self, xml_string):
-        """Mock both HTTP calls (index page → XML link → XML doc) and parse."""
+        """Mock HTTP calls and parse.
+
+        parse_form4_xml first tries to parse the response directly as XML.
+        When it finds an ownershipDocument, it uses it immediately (1 call).
+        When it doesn't, it falls back to fetching the index page and
+        finding the raw XML link (2-3 calls).
+
+        We provide the XML document directly so the first call succeeds.
+        """
         downloader = Form4Downloader(output_dir="/tmp/test_form4")
-
-        index_html = (
-            '<html><body><table>'
-            '<tr><td><a href="/Archives/edgar/data/123/filing.xml">filing.xml</a></td></tr>'
-            '</table></body></html>'
-        )
-
-        index_response = MagicMock()
-        index_response.status_code = 200
-        index_response.text = index_html
 
         xml_response = MagicMock()
         xml_response.status_code = 200
         xml_response.content = xml_string.encode("utf-8")
 
-        with patch("clean.sec_form4.requests.get", side_effect=[index_response, xml_response]):
+        with patch("clean.sec_form4.requests.get", return_value=xml_response):
             return downloader.parse_form4_xml(
-                "https://www.sec.gov/Archives/edgar/data/123/0001234567-24-000001-index.htm"
+                "https://www.sec.gov/Archives/edgar/data/123/filing.xml"
             )
 
     def test_parses_two_transactions(self, form4_xml):
@@ -115,9 +113,11 @@ class TestParseForm4XMLIntegration:
     def test_returns_empty_when_no_xml_link(self):
         downloader = Form4Downloader(output_dir="/tmp/test_form4")
 
+        html = "<html><body><p>No links here</p></body></html>"
         response = MagicMock()
         response.status_code = 200
-        response.text = "<html><body><p>No links here</p></body></html>"
+        response.text = html
+        response.content = html.encode("utf-8")
 
         with patch("clean.sec_form4.requests.get", return_value=response):
             txns = downloader.parse_form4_xml("https://www.sec.gov/some/filing")
