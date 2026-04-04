@@ -529,8 +529,8 @@ def load_figure_blob(figure_name):
             )
             if not df.empty:
                 return df.iloc[0]["IMAGE_DATA"]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Figure load failed for '%s': %s", figure_name, exc)
     # Fallback to SQLite if Athena didn't have it
     if DB_BACKEND == "athena":
         try:
@@ -540,8 +540,8 @@ def load_figure_blob(figure_name):
                 )
                 if not df.empty:
                     return df.iloc[0]["IMAGE_DATA"]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("SQLite fallback failed for '%s': %s", figure_name, exc)
     return None
 
 

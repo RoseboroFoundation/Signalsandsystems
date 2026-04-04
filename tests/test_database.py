@@ -262,7 +262,7 @@ class TestAthenaReadTableCoercion:
         assert pd.api.types.is_datetime64_any_dtype(result['date'])
         assert pd.api.types.is_float_dtype(result['price'])
         assert result['volume'].dtype.name == 'Int64'
-        assert result['ticker'].dtype in (object, pd.StringDtype())
+        assert pd.api.types.is_string_dtype(result['ticker'])
 
 
 # =============================================================================
