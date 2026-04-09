@@ -996,6 +996,23 @@ def _sentiment_to_numeric(label: str) -> float:
     return 0.0
 
 
+def compute_fomo_z(sent_mean, regime_mean, regime_std):
+    """Compute FOMO z-score: how extreme sentiment is vs the regime norm.
+
+    Returns NaN when regime_std == 0 (avoids conflating undefined z-scores
+    with "perfectly average" sentiment).
+
+    Parameters
+    ----------
+    sent_mean, regime_mean, regime_std : float or array-like
+    """
+    return np.where(
+        regime_std > 0,
+        (sent_mean - regime_mean) / regime_std,
+        np.nan,
+    )
+
+
 def sentiment_by_regime(
     store: DataStore,
     regime_result: RegimeResult = None,
@@ -1121,12 +1138,8 @@ def sentiment_by_regime(
     )
 
     # Z-score: how extreme is today's sentiment vs the regime norm
-    # NaN when std=0 (all sentiment identical in regime) — avoids conflating
-    # undefined z-scores with "perfectly average" sentiment.
-    daily['FOMO_Z'] = np.where(
-        daily['REGIME_SENT_STD'] > 0,
-        (daily['SENT_MEAN'] - daily['REGIME_SENT_MEAN']) / daily['REGIME_SENT_STD'],
-        np.nan,
+    daily['FOMO_Z'] = compute_fomo_z(
+        daily['SENT_MEAN'], daily['REGIME_SENT_MEAN'], daily['REGIME_SENT_STD']
     )
 
     # FOMO summary by regime
@@ -1386,6 +1399,53 @@ if __name__ == '__main__':
         print(f"  Saved {len(saved)} tables")
     else:
         print("  Nothing to save (no results produced)")
+
+    # ── Step 9: Upload results to AWS (S3 + Glue) ──
+    print()
+    print("=" * 60)
+    print("  Step 9: Upload results to AWS")
+    print("=" * 60)
+
+    # Collect in-memory DataFrames for AWS upload
+    _aws_tables = {}
+    if ff5_analysis is not None:
+        if not ff5_analysis.coefficient_comparison.empty:
+            _aws_tables['ESSAY1_FF5_COEFFICIENTS'] = ff5_analysis.coefficient_comparison
+        if not ff5_analysis.factor_premia_comparison.empty:
+            _aws_tables['ESSAY1_FACTOR_PREMIA'] = ff5_analysis.factor_premia_comparison
+        if ff5_analysis.chow_test:
+            _aws_tables['ESSAY1_CHOW_TEST'] = pd.DataFrame([ff5_analysis.chow_test])
+    if cw is not None and not cw.summary.empty:
+        _aws_tables['ESSAY1_CW_STOCK_RESULTS'] = cw.summary
+    if sentiment is not None:
+        if not sentiment.sentiment_daily.empty:
+            _aws_tables['ESSAY1_SENTIMENT_DAILY'] = sentiment.sentiment_daily
+        if not sentiment.fomo_by_regime.empty:
+            _aws_tables['ESSAY1_FOMO_BY_REGIME'] = sentiment.fomo_by_regime
+
+    if _aws_tables:
+        try:
+            from Database import AthenaLoader
+            aws_loader = AthenaLoader()
+            aws_loader.connect()
+            print(f"  Connected to AWS ({aws_loader.database} / {aws_loader.s3_bucket})")
+
+            for table_name, df in _aws_tables.items():
+                try:
+                    res = aws_loader.write_table(df, table_name, replace=True)
+                    status = res.get('status', 'UNKNOWN')
+                    rows = res.get('rows', len(df))
+                    print(f"    {table_name}: {status} ({rows} rows)")
+                except Exception as e:
+                    print(f"    {table_name}: FAILED — {e}")
+
+            aws_loader.close()
+            print(f"  Uploaded {len(_aws_tables)} tables to AWS")
+        except Exception as e:
+            print(f"  AWS upload failed: {e}")
+            print("  Results are saved locally in SQLite. Rerun with AWS credentials to upload.")
+    else:
+        print("  No results to upload")
 
     store.close()
     print()

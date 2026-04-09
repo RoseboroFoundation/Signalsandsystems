@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta
 
 import pandas as pd
-import pandas_datareader as pdr
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -43,6 +42,8 @@ def _validate_fred_api_key():
 
 def _download_fred_series(series_dict, start_date, end_date):
     """Download multiple FRED series into a DataFrame."""
+    import pandas_datareader as pdr
+
     _validate_fred_api_key()
     data = {}
     for name, code in series_dict.items():

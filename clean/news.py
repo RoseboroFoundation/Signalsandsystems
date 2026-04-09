@@ -1,15 +1,17 @@
 """News data: Guardian, NYT, Reddit aggregation for culture war events."""
 
 import os
+import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-from dataclasses import dataclass
 
 import pandas as pd
 import requests
 import praw
+from bs4 import BeautifulSoup
 
 from .config import logger, import_culture_war_data
 
@@ -29,6 +31,7 @@ class NewsArticle:
     author: Optional[str] = None
     section: Optional[str] = None
     word_count: Optional[int] = None
+    body_text: Optional[str] = None
 
 
 class CompanyNewsAggregator:
@@ -191,7 +194,7 @@ class CompanyNewsAggregator:
                         'to-date': end_date.strftime('%Y-%m-%d'),
                         'page': page,
                         'page-size': 50,
-                        'show-fields': 'headline,trailText,wordcount,byline',
+                        'show-fields': 'headline,trailText,wordcount,byline,bodyText',
                         'show-tags': 'all',
                         'api-key': self.guardian_api_key
                     }
@@ -226,7 +229,8 @@ class CompanyNewsAggregator:
                                         search_query=query,
                                         author=fields.get('byline'),
                                         section=item.get('sectionName'),
-                                        word_count=fields.get('wordcount')
+                                        word_count=fields.get('wordcount'),
+                                        body_text=fields.get('bodyText', '')
                                     )
                                     articles.append(article)
                                     query_articles += 1
@@ -357,7 +361,8 @@ class CompanyNewsAggregator:
                                         search_query=query,
                                         author=author,
                                         section=doc.get('section_name'),
-                                        word_count=doc.get('word_count')
+                                        word_count=doc.get('word_count'),
+                                        body_text=doc.get('lead_paragraph', '')
                                     )
                                     articles.append(article)
                                     query_articles += 1
@@ -491,6 +496,11 @@ class CompanyNewsAggregator:
                                         str(submission.author)
                                         if submission.author
                                         else None
+                                    ),
+                                    body_text=(
+                                        submission.selftext
+                                        if submission.selftext
+                                        else None
                                     )
                                 )
                                 articles.append(article)
@@ -514,6 +524,96 @@ class CompanyNewsAggregator:
 
         logger.info("  Reddit total: %d posts", len(articles))
         return articles
+
+    def fetch_article_text(self, url: str) -> Optional[str]:
+        """
+        Fetch full article text from a URL using BeautifulSoup.
+
+        Scrapes the article body from the page HTML. Looks for common
+        article body selectors (<article>, .article-body, .story-body,
+        .content-body, etc.) and falls back to <p> tags within the page.
+
+        Args:
+            url: The article URL to fetch.
+
+        Returns:
+            Cleaned article body text, or None on failure.
+        """
+        try:
+            headers = {
+                'User-Agent': (
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/120.0.0.0 Safari/537.36'
+                ),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Remove script, style, nav, header, footer elements
+            for tag in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+                tag.decompose()
+
+            # Try common article body selectors in order of specificity
+            body_element = None
+            selectors = [
+                'article [class*="article-body"]',
+                'article [class*="story-body"]',
+                'article [class*="content-body"]',
+                '[class*="article-body"]',
+                '[class*="story-body"]',
+                '[class*="content-body"]',
+                '[class*="article__body"]',
+                '[class*="story__body"]',
+                '[class*="post-content"]',
+                '[class*="entry-content"]',
+                '[itemprop="articleBody"]',
+                'article',
+            ]
+
+            for selector in selectors:
+                body_element = soup.select_one(selector)
+                if body_element:
+                    break
+
+            if body_element:
+                # Extract text from paragraphs within the body element
+                paragraphs = body_element.find_all('p')
+                if paragraphs:
+                    text = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
+                else:
+                    text = body_element.get_text(separator='\n', strip=True)
+            else:
+                # Fallback: collect all <p> tags from the page
+                paragraphs = soup.find_all('p')
+                if not paragraphs:
+                    return None
+                text = '\n\n'.join(p.get_text(strip=True) for p in paragraphs)
+
+            # Clean whitespace: collapse runs of whitespace, strip lines
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            text = text.strip()
+
+            # Only return if we got meaningful content (more than a sentence)
+            if len(text) < 50:
+                return None
+
+            return text
+
+        except requests.exceptions.RequestException as e:
+            logger.debug("Failed to fetch article text from %s: %s", url, e)
+            return None
+        except Exception as e:
+            logger.debug("Error parsing article text from %s: %s", url, e)
+            return None
+        finally:
+            # Rate limit: 1 request per second
+            time.sleep(1)
 
     def aggregate_culture_war_news(
         self,
@@ -888,3 +988,124 @@ def scrape_culture_war_news(
         logger.warning("No articles found. Check API keys and try again.")
 
     return news_df
+
+
+def enrich_news_with_text(
+    news_csv: str = './news_data/culture_war_news.csv',
+    output_csv: str = './news_data/culture_war_news_fulltext.csv',
+    checkpoint_interval: int = 100,
+    max_per_ticker: int = 50,
+) -> pd.DataFrame:
+    """
+    Enrich existing news CSV with full article body text.
+
+    Fetches article text from URLs for articles that don't have body_text.
+    Saves checkpoint every checkpoint_interval articles.
+    Limits to max_per_ticker articles per company (most relevant first).
+
+    Args:
+        news_csv: Path to the input news CSV file.
+        output_csv: Path to save the enriched output CSV file.
+        checkpoint_interval: Save checkpoint every N articles fetched.
+        max_per_ticker: Maximum articles to enrich per ticker symbol.
+
+    Returns:
+        DataFrame with body_text column populated where possible.
+    """
+    logger.info("Loading news data from %s", news_csv)
+    df = pd.read_csv(news_csv)
+    df['published_date'] = pd.to_datetime(df['published_date'], errors='coerce')
+    logger.info("Loaded %d articles", len(df))
+
+    # Add body_text column if it doesn't exist
+    if 'body_text' not in df.columns:
+        df['body_text'] = None
+
+    # If output file exists, load it to resume from checkpoint
+    output_path = Path(output_csv)
+    if output_path.exists():
+        logger.info("Loading existing output for resume: %s", output_csv)
+        existing = pd.read_csv(output_csv)
+        existing['published_date'] = pd.to_datetime(
+            existing['published_date'], errors='coerce'
+        )
+        # Merge body_text from existing output into current df
+        if 'body_text' in existing.columns:
+            existing_text = existing.set_index('url')['body_text'].dropna().to_dict()
+            for url, text in existing_text.items():
+                mask = df['url'] == url
+                df.loc[mask, 'body_text'] = text
+            logger.info(
+                "Resumed with %d articles already having body_text",
+                df['body_text'].notna().sum()
+            )
+
+    # Identify articles that need body_text fetching
+    needs_text = df[
+        df['body_text'].isna() | (df['body_text'] == '')
+    ].copy()
+    logger.info("Articles needing body_text: %d", len(needs_text))
+
+    # Limit per ticker: prioritize by source reliability
+    # Guardian > NYT > Reddit (Guardian API already gives body, so those
+    # should already be populated; focus on NYT and Reddit URLs)
+    source_priority = {'The Guardian': 0, 'New York Times': 1}
+    needs_text['_source_priority'] = needs_text['source'].map(
+        lambda s: source_priority.get(s, 2)
+    )
+    needs_text = needs_text.sort_values('_source_priority')
+
+    # Limit per ticker
+    selected = needs_text.groupby('ticker').head(max_per_ticker)
+    logger.info(
+        "Selected %d articles to fetch (%d tickers, max %d each)",
+        len(selected), selected['ticker'].nunique(), max_per_ticker
+    )
+
+    # Initialize aggregator for fetch_article_text method
+    aggregator = CompanyNewsAggregator()
+
+    fetched_count = 0
+    success_count = 0
+
+    for idx, row in selected.iterrows():
+        url = row.get('url', '')
+        if not url or pd.isna(url):
+            continue
+
+        # Skip Reddit self-posts (no article to scrape)
+        if 'reddit.com' in str(url):
+            continue
+
+        logger.debug("Fetching [%d/%d]: %s", fetched_count + 1, len(selected), url)
+        text = aggregator.fetch_article_text(url)
+
+        if text:
+            df.at[idx, 'body_text'] = text
+            success_count += 1
+
+        fetched_count += 1
+
+        # Checkpoint
+        if fetched_count % checkpoint_interval == 0:
+            df.to_csv(output_csv, index=False)
+            logger.info(
+                "Checkpoint: %d/%d fetched, %d successful, saved to %s",
+                fetched_count, len(selected), success_count, output_csv
+            )
+
+    # Final save
+    df.to_csv(output_csv, index=False)
+
+    total_with_text = df['body_text'].notna().sum()
+    total_empty = df['body_text'].isna().sum()
+    logger.info("=" * 60)
+    logger.info("Enrichment complete.")
+    logger.info("  Total articles: %d", len(df))
+    logger.info("  With body_text: %d (%.1f%%)", total_with_text, 100 * total_with_text / len(df))
+    logger.info("  Without body_text: %d", total_empty)
+    logger.info("  Newly fetched: %d attempted, %d successful", fetched_count, success_count)
+    logger.info("  Saved to: %s", output_csv)
+    logger.info("=" * 60)
+
+    return df

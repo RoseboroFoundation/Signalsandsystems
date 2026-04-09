@@ -10,6 +10,9 @@ import numpy as np
 from pathlib import Path
 from io import BytesIO
 import logging
+import os
+import subprocess
+import sys
 
 from Database import AthenaLoader, SQLiteLoader
 
@@ -308,7 +311,7 @@ def fmt_pval(p):
     return f"{p:.4f}"
 
 
-def render_figure(png_data, caption="", filename="figure.png"):
+def render_figure(png_data, caption="", filename="figure.png", key_prefix="dl_fig"):
     """Display a PNG BLOB via st.image with download button."""
     if png_data:
         st.image(BytesIO(png_data), caption=caption, use_container_width=True)
@@ -317,7 +320,7 @@ def render_figure(png_data, caption="", filename="figure.png"):
             data=png_data,
             file_name=filename,
             mime="image/png",
-            key=f"dl_fig_{filename}",
+            key=f"{key_prefix}_{filename}",
         )
 
 
@@ -326,7 +329,11 @@ def render_df(df, label, key, height=None):
     kwargs = dict(use_container_width=True, hide_index=True)
     if height:
         kwargs["height"] = height
-    st.dataframe(df, **kwargs)
+    try:
+        st.dataframe(df, **kwargs)
+    except TypeError:
+        kwargs.pop("hide_index", None)
+        st.dataframe(df, **kwargs)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
         f"Download {label}",
@@ -335,6 +342,135 @@ def render_df(df, label, key, height=None):
         mime="text/csv",
         key=f"dl_{key}",
     )
+
+
+def render_chart_gallery(chart_list, expanded=False, gallery_id="gallery"):
+    """Render a 2-column gallery of figures from the FIGURES table."""
+    label = f"Chart Gallery ({len(chart_list)} figures)"
+    with st.expander(label, expanded=expanded):
+        for i in range(0, len(chart_list), 2):
+            cols = st.columns(2)
+            for j, col in enumerate(cols):
+                idx = i + j
+                if idx < len(chart_list):
+                    name, description = chart_list[idx]
+                    with col:
+                        fig_data = load_figure_blob(name)
+                        if fig_data:
+                            render_figure(fig_data, caption=description,
+                                          filename=f"{name}.png",
+                                          key_prefix=f"{gallery_id}_{name}")
+                        else:
+                            st.caption(f"{name}: not generated yet")
+
+
+# Chart name lists (from visual.py)
+E1_CHARTS = [
+    ('e1_01_factor_premia_by_regime', 'Factor premia by regime'),
+    ('e1_02_alpha_by_regime', 'Alpha by regime'),
+    ('e1_03_beta_heatmap', 'Factor beta heatmap'),
+    ('e1_04_tstat_heatmap', 't-statistic heatmap'),
+    ('e1_05_chow_test', 'Chow structural break test'),
+    ('e1_06_rsquared_by_regime', 'R-squared by regime'),
+    ('e1_07_factor_premia_dot', 'Factor premia dot plot'),
+    ('e1_08_cw_alpha_boxplot', 'CW stock alpha boxplot'),
+    ('e1_09_cw_alpha_hist', 'CW stock alpha histogram'),
+    ('e1_10_cw_rsquared', 'CW stock R-squared by regime'),
+    ('e1_11_cw_mkt_beta', 'CW stock market beta'),
+    ('e1_12_cw_hml_beta', 'CW stock HML beta'),
+    ('e1_13_cw_alpha_significance', 'CW alpha BH significance'),
+    ('e1_14_cw_mean_betas_by_regime', 'Mean betas by regime'),
+    ('e1_15_fomo_by_regime', 'FOMO by regime'),
+    ('e1_16_euphoria_panic', 'Euphoria vs panic days'),
+    ('e1_17_sentiment_by_regime', 'Sentiment by regime'),
+    ('e1_18_sentiment_timeseries', 'Sentiment time series'),
+    ('e1_19_matched_ttest_forest', 'Matched t-test forest plot'),
+    ('e1_20_matched_sign_consistency', 'Sign consistency'),
+    ('e1_21_matched_amplification', 'Regime amplification'),
+    ('e1_22_matched_delta_dist', 'Delta distribution'),
+    ('e1_23_matched_delta_heatmap', 'Delta heatmap'),
+    ('e1_24_matched_coverage', 'Matched coverage'),
+    ('e1_25_cw_stock_count', 'CW stock count by regime'),
+    ('e1_26_alpha_vs_rsq', 'Alpha vs R-squared'),
+    ('e1_27_matched_n_firms', 'Matched N firms'),
+    ('e1_28_matched_pvalue_dist', 'Matched p-value distribution'),
+    ('e1_29_vix_distribution', 'VIX regime distribution'),
+    ('e1_30_coefficient_table', 'Coefficient table'),
+    ('e1_31_matched_mkt_delta', 'Matched market delta'),
+    ('e1_32_matched_factor_deltas', 'Matched factor deltas'),
+    ('e1_33_summary_dashboard', 'Essay 1 summary dashboard'),
+]
+E2_CHARTS = [
+    ('e2_01_car_distribution', 'CAR distribution'),
+    ('e2_02_car_by_leaning', 'CAR by political leaning'),
+    ('e2_03_car_pre_vs_post', 'CAR pre vs post'),
+    ('e2_04_car_by_regime', 'CAR by regime'),
+    ('e2_05_car_treat_vs_ctrl', 'CAR treatment vs control'),
+    ('e2_06_did_coefficients', 'DiD coefficients'),
+    ('e2_07_parallel_trends', 'Parallel trends'),
+    ('e2_08_peer_parallel_trends', 'Peer parallel trends'),
+    ('e2_09_news_sentiment_dist', 'News sentiment distribution'),
+    ('e2_10_news_pre_vs_post', 'News pre vs post'),
+    ('e2_11_sentiment_change', 'Sentiment change'),
+    ('e2_12_filing_sentiment_sections', 'Filing sentiment sections'),
+    ('e2_13_filing_pct_breakdown', 'Filing pct breakdown'),
+    ('e2_14_alignment_distribution', 'Alignment distribution'),
+    ('e2_15_distinctive_phrases', 'Distinctive phrases'),
+    ('e2_16_alignment_validation', 'Alignment validation'),
+    ('e2_17_event_nlp_heatmap', 'Event NLP heatmap'),
+    ('e2_18_multiwindow_by_horizon', 'Multi-window by horizon'),
+    ('e2_19_multiwindow_by_lean', 'Multi-window by leaning'),
+    ('e2_20_multiwindow_tc', 'Multi-window treat/ctrl'),
+    ('e2_21_contagion_summary', 'Contagion summary'),
+    ('e2_22_contagion_by_lean', 'Contagion by leaning'),
+    ('e2_23_contagion_by_facing', 'Contagion by facing'),
+    ('e2_24_contagion_peer_vs_nonpeer', 'Contagion peer vs non-peer'),
+    ('e2_25_contagion_consumer_b2b', 'Contagion consumer vs B2B'),
+    ('e2_26_contagion_lean_pairwise', 'Contagion lean pairwise'),
+    ('e2_27_contagion_tight_diff', 'Contagion tight DiD'),
+    ('e2_28_mda_vs_risk_tone', 'MDA vs risk tone'),
+    ('e2_29_alignment_components', 'Alignment components'),
+    ('e2_30_car_lean_regime', 'CAR by lean and regime'),
+    ('e2_31_event_count_by_lean', 'Event count by leaning'),
+    ('e2_32_contagion_mechanism', 'Contagion mechanism'),
+    ('e2_33_summary_dashboard', 'Essay 2 summary dashboard'),
+]
+E3_CHARTS = [
+    ('e3_01_window_net_dollar', 'Net dollar sold by window'),
+    ('e3_02_window_sell_ratio', 'Net sell ratio by window'),
+    ('e3_03_window_transactions', 'Transaction volume by window'),
+    ('e3_04_window_opportunistic', 'Opportunistic trades by window'),
+    ('e3_05_abnormal_selling', 'Abnormal selling pre vs benchmark'),
+    ('e3_06_abnormal_diff', 'Abnormal selling effect size'),
+    ('e3_07_treat_vs_ctrl', 'Treatment vs control histogram'),
+    ('e3_08_treat_ctrl_box', 'Treatment vs control box plot'),
+    ('e3_09_leaning_net_dollar', 'Net dollar sold by leaning'),
+    ('e3_10_leaning_median', 'Median selling by leaning'),
+    ('e3_11_leaning_variability', 'Selling variability by leaning'),
+    ('e3_12_regime_net_sell', 'Net sell daily by regime'),
+    ('e3_13_regime_significance', 'Regime significance heatmap'),
+    ('e3_14_regime_sample_size', 'Sample size by regime'),
+    ('e3_15_rvo_comparison', 'Routine vs opportunistic paired'),
+    ('e3_16_rvo_effect_size', 'RVO effect size'),
+    ('e3_17_placebo_dist', 'Placebo distribution'),
+    ('e3_18_placebo_percentile', 'Placebo percentile gauge'),
+    ('e3_19_accel_jt_stats', 'Acceleration JT statistics'),
+    ('e3_20_accel_monotonic', 'Acceleration monotonic check'),
+    ('e3_21_accel_window_gradient', 'Acceleration window gradient'),
+    ('e3_22_panel_distribution', 'Insider selling distribution'),
+    ('e3_23_panel_abnormal_flag', 'Abnormal selling classification'),
+    ('e3_24_panel_coverage', 'Data sufficiency coverage'),
+    ('e3_25_car_vs_selling', 'CAR vs insider selling scatter'),
+    ('e3_26_panel_lean_box', 'Selling by leaning box plot'),
+    ('e3_27_panel_windows', 'Pre-event sub-window comparison'),
+    ('e3_28_panel_opp_routine', 'Opportunistic vs routine stacked'),
+    ('e3_29_panel_insiders', 'Unique insiders by window'),
+    ('e3_30_abnormal_pvalues', 'Abnormal t vs Wilcoxon p-values'),
+    ('e3_31_sell_ratio_by_treatment', 'Sell ratio by treatment'),
+    ('e3_32_regime_t_stats', 'Regime t-statistics'),
+    ('e3_33_post_event_selling', 'Post-event selling distribution'),
+    ('e3_34_summary_dashboard', 'Essay 3 summary dashboard'),
+]
 
 
 # =============================================================================
@@ -358,35 +494,55 @@ def load_table(table_name):
 
     Model-result tables (written by Model.py, not the ETL pipeline) only exist
     in SQLite, so we fall back automatically when Athena raises an error.
+
+    Returns pd.DataFrame() on failure. Use the sidebar Refresh button to clear
+    cached failures.
     """
     try:
         with _get_loader() as db:
-            return db.read_table(table_name)
+            df = db.read_table(table_name)
+            if df is not None and not df.empty:
+                return df
+            return pd.DataFrame()
     except Exception:
-        # Table may only exist in SQLite (model results, figures, etc.)
-        if DB_BACKEND == "athena":
-            try:
-                with SQLiteLoader(db_path=str(DB_PATH)) as db:
-                    return db.read_table(table_name)
-            except Exception as e:
-                logging.warning("load_table(%s) failed on both backends: %s", table_name, e)
-                return pd.DataFrame()
-        return pd.DataFrame()
+        pass
+    # Table may only exist in SQLite (model results, figures, etc.)
+    if DB_BACKEND == "athena":
+        try:
+            with SQLiteLoader(db_path=str(DB_PATH)) as db:
+                df = db.read_table(table_name)
+                if df is not None and not df.empty:
+                    return df
+        except Exception as e:
+            logging.warning("load_table(%s) failed on both backends: %s", table_name, e)
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_figure_blob(figure_name):
-    """Load a figure's PNG bytes from the FIGURES table (SQLite only)."""
+    """Load a figure's PNG bytes from the FIGURES table."""
+    safe_name = figure_name.replace("'", "''")
     try:
-        with SQLiteLoader(db_path=str(DB_PATH)) as db:
+        with _get_loader() as db:
             df = db.run_query(
-                f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{figure_name}'"
+                f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{safe_name}'"
             )
             if not df.empty:
                 return df.iloc[0]["IMAGE_DATA"]
-        return None
-    except Exception:
-        return None
+    except Exception as exc:
+        logger.debug("Figure load failed for '%s': %s", figure_name, exc)
+    # Fallback to SQLite if Athena didn't have it
+    if DB_BACKEND == "athena":
+        try:
+            with SQLiteLoader(db_path=str(DB_PATH)) as db:
+                df = db.run_query(
+                    f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{safe_name}'"
+                )
+                if not df.empty:
+                    return df.iloc[0]["IMAGE_DATA"]
+        except Exception as exc:
+            logger.debug("SQLite fallback failed for '%s': %s", figure_name, exc)
+    return None
 
 
 @st.cache_data(ttl=300)
@@ -414,24 +570,33 @@ def load_summary():
 # DATABASE CHECK
 # =============================================================================
 
+@st.cache_data(ttl=60)
 def database_has_data():
-    """Check if model results exist (these are always in SQLite)."""
-    if not DB_PATH.exists():
-        return False
-    try:
-        with SQLiteLoader(db_path=str(DB_PATH)) as db:
-            result = db.run_query("SELECT COUNT(*) as n FROM EVENT_STUDY_RESULTS")
-            return not result.empty and result.iloc[0]["n"] > 0
-    except Exception:
-        return False
+    """Check if model results exist in the active backend."""
+    _check_tables = [
+        "EVENT_STUDY_RESULTS",
+        "ESSAY1_FF5_COEFFICIENTS",
+        "ESSAY3_INSIDER_PANEL",
+    ]
+    for _tbl in _check_tables:
+        try:
+            with _get_loader() as db:
+                result = db.run_query(f"SELECT COUNT(*) as n FROM {_tbl}")
+                if not result.empty and result.iloc[0]["n"] > 0:
+                    return True
+        except Exception:
+            if DB_BACKEND == "athena" and DB_PATH.exists():
+                try:
+                    with SQLiteLoader(db_path=str(DB_PATH)) as db:
+                        result = db.run_query(f"SELECT COUNT(*) as n FROM {_tbl}")
+                        if not result.empty and result.iloc[0]["n"] > 0:
+                            return True
+                except Exception:
+                    pass
+    return False
 
 
-if not database_has_data():
-    st.error(
-        "No model results found. Run `python Model.py` first to generate "
-        "event study and DiD results, then reload this dashboard."
-    )
-    st.stop()
+_DATA_EXISTS = database_has_data()
 
 
 # =============================================================================
@@ -445,6 +610,10 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.caption("The Political Economy of Investor Sentiment and Financial Innovation")
+    st.divider()
+    if st.button("\u21ba Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
     st.markdown(
         f"<p style='font-size:0.8rem; line-height:1.5; margin-top:0.25rem; "
         f"color:rgba(255,255,255,0.75);'>"
@@ -506,6 +675,88 @@ with st.sidebar:
             f"<span style='color:{GOLD}; margin-right:0.4rem;'>&#8226;</span> {item}",
             unsafe_allow_html=True,
         )
+
+    st.divider()
+    st.markdown("#### Pipeline")
+
+    # --- Step 1: Clean (long-running, background) ---
+    _clean_log = BASE_DIR / "data" / "clean.log"
+    _clean_pid = BASE_DIR / "data" / "clean.pid"
+
+    _clean_running = False
+    if _clean_pid.exists():
+        try:
+            _pid = int(_clean_pid.read_text().strip())
+            os.kill(_pid, 0)  # check if alive
+            _clean_running = True
+        except (OSError, ValueError):
+            _clean_pid.unlink(missing_ok=True)
+
+    if _clean_running:
+        _progress_file = BASE_DIR / "data" / "clean_progress.txt"
+        _pct_label = ""
+        if _progress_file.exists():
+            try:
+                _parts = _progress_file.read_text().strip().split("|")
+                _step_info, _pct, _step_name = _parts[0], _parts[1], _parts[2]
+                _pct_label = f" — {_pct} ({_step_name})"
+                _pct_int = int(_pct.replace("%", ""))
+                st.progress(_pct_int / 100, text=f"Step 1: Cleaning{_pct_label}")
+            except Exception:
+                st.info(f"Step 1: Cleaning in progress (PID {_pid})")
+        else:
+            st.info(f"Step 1: Cleaning in progress (PID {_pid})")
+        if _clean_log.exists():
+            _tail = _clean_log.read_text().splitlines()[-5:]
+            st.caption("Last 5 lines:")
+            st.code("\n".join(_tail), language="text")
+    else:
+        if _clean_log.exists():
+            _last_line = _clean_log.read_text().splitlines()[-1:]
+            if _last_line:
+                st.caption(f"Last clean run: {_last_line[0][:120]}")
+
+        if st.button("Step 1: Clean Raw Data (~20h)", use_container_width=True):
+            _clean_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(_clean_log, "w") as _lf:
+                _proc = subprocess.Popen(
+                    [sys.executable, "-m", "clean.orchestration"],
+                    cwd=str(BASE_DIR),
+                    stdout=_lf, stderr=subprocess.STDOUT,
+                )
+            _clean_pid.write_text(str(_proc.pid))
+            st.success(f"Clean started in background (PID {_proc.pid}). Check back later.")
+            st.rerun()
+
+    # --- Steps 2-9: ETL through charts (foreground) ---
+    if st.button("Step 2: Run ETL → Models → Charts", use_container_width=True):
+        _steps = [
+            ("Running ETL", [sys.executable, "ETL.py"]),
+            ("Loading database", [sys.executable, "Database.py"]),
+            ("Essay 1: Regimes & FF5", [sys.executable, "-m", "model.essay1"]),
+            ("Essay 1: Matched Controls", [sys.executable, "-m", "model.essay1_matched"]),
+            ("Essay 2: NLP & Alignment", [sys.executable, "-m", "model.essay2"]),
+            ("Essay 2: DiD Analysis", [sys.executable, "-m", "model.essay2_did"]),
+            ("Essay 3: Insider Trading", [sys.executable, "-m", "model.essay3"]),
+            ("Generating charts", [sys.executable, "visual.py"]),
+        ]
+        with st.status("Running pipeline (ETL → charts)...", expanded=True) as _status:
+            _failed = False
+            for _i, (_label, _cmd) in enumerate(_steps):
+                st.write(f"Step {_i+1}/{len(_steps)}: {_label}...")
+                _result = subprocess.run(
+                    _cmd, cwd=str(BASE_DIR), capture_output=True, text=True,
+                    timeout=1800,
+                )
+                if _result.returncode != 0:
+                    st.error(f"Failed at: {_label}\n```\n{_result.stderr[-500:]}\n```")
+                    _status.update(label=f"Pipeline failed at: {_label}", state="error")
+                    _failed = True
+                    break
+            if not _failed:
+                _status.update(label="Pipeline complete!", state="complete")
+                st.cache_data.clear()
+                st.rerun()
 
     st.divider()
     _backend_label = "AWS Athena" if DB_BACKEND == "athena" else "Local SQLite"
@@ -763,7 +1014,10 @@ with tab_overview:
             "Essay 2",
         ],
     }
-    st.dataframe(pd.DataFrame(meth_data), use_container_width=True, hide_index=True)
+    try:
+        st.dataframe(pd.DataFrame(meth_data), use_container_width=True, hide_index=True)
+    except TypeError:
+        st.dataframe(pd.DataFrame(meth_data), use_container_width=True)
 
     st.markdown("##### 3.3 Event Study Design")
     st.markdown(
@@ -1075,6 +1329,37 @@ with tab_a1:
         "regressions are then estimated within each regime."
     )
 
+    # --- Model Selection (K=2,3,4) ---
+    model_sel = load_table("ESSAY1_MODEL_SELECTION")
+    if not model_sel.empty:
+        st.subheader("Regime Model Selection")
+        st.markdown(
+            "Comparing Markov regime-switching models across K = 2, 3, 4 regimes. "
+            "Lower AIC/BIC indicates better fit."
+        )
+
+        ms_display = model_sel.copy()
+        for col in ms_display.columns:
+            ms_display[col] = pd.to_numeric(ms_display[col], errors="coerce")
+
+        # Highlight best
+        best_aic_k = ms_display.loc[ms_display["AIC"].idxmin(), "K"] if "AIC" in ms_display.columns else None
+        best_bic_k = ms_display.loc[ms_display["BIC"].idxmin(), "K"] if "BIC" in ms_display.columns else None
+
+        if best_aic_k is not None:
+            st.markdown(
+                f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
+                f"padding:1rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
+                f"Best AIC: <strong>K = {int(best_aic_k)}</strong> &nbsp;|&nbsp; "
+                f"Best BIC: <strong>K = {int(best_bic_k)}</strong></div>",
+                unsafe_allow_html=True,
+            )
+
+        ms_display = ms_display.round({"AIC": 1, "BIC": 1, "LOG_LIKELIHOOD": 1})
+        render_df(ms_display, "Model Selection", "a1_model_selection")
+
+        st.divider()
+
     # --- Regime coefficients ---
     regime_coeff = load_table("ESSAY1_FF5_COEFFICIENTS")
     factor_premia = load_table("ESSAY1_FACTOR_PREMIA")
@@ -1118,6 +1403,22 @@ with tab_a1:
                 coeff_display[f"{factor}_SIG"] = coeff_display[pcol].apply(fmt_sig)
 
         render_df(coeff_display, "Regime Coefficients", "a1_regime_coeff")
+
+        # Chow test for structural break
+        chow_df = load_table("ESSAY1_CHOW_TEST")
+        if not chow_df.empty:
+            for col in ["f_stat", "p_value"]:
+                if col in chow_df.columns:
+                    chow_df[col] = pd.to_numeric(chow_df[col], errors="coerce")
+            f_stat = chow_df["f_stat"].iloc[0] if "f_stat" in chow_df.columns else None
+            p_val = chow_df["p_value"].iloc[0] if "p_value" in chow_df.columns else None
+            sig = chow_df.get("significant_005", chow_df.get("SIGNIFICANT_005", pd.Series([None]))).iloc[0]
+            if f_stat is not None:
+                verdict_color = "#2E7D32" if sig else "#C62828"
+                st.markdown(
+                    f"**Chow Test for Structural Break:** F = {f_stat:.2f}, p = {p_val:.4f} "
+                    f"{'**— significant at 5%** (regimes are structurally different)' if sig else '— not significant'}"
+                )
 
         st.divider()
 
@@ -1288,7 +1589,7 @@ with tab_a1:
                 render_df(cov_summary, "Coverage Summary", "a1_cov_summary")
             with c2:
                 total = len(cov)
-                ok_count = int(cov["HAS_RESULT"].sum())
+                ok_count = int(cov["HAS_RESULT"].astype(str).str.lower().isin(["true", "1"]).sum())
                 st.metric("Coverage Rate", f"{ok_count}/{total} ({ok_count/total:.0%})")
             render_df(cov, "Full Coverage", "a1_matched_coverage", height=400)
 
@@ -1354,6 +1655,7 @@ with tab_a1:
         fig.suptitle("FinBERT Daily Sentiment by Regime", fontsize=13, fontweight="bold")
         fig.tight_layout()
         st.pyplot(fig)
+        plt.close(fig)
 
         st.divider()
 
@@ -1378,6 +1680,7 @@ with tab_a1:
         fig2.suptitle("FOMO Z-Scores by Regime (Euphoria vs Panic Thresholds)", fontsize=13, fontweight="bold")
         fig2.tight_layout()
         st.pyplot(fig2)
+        plt.close(fig2)
 
         st.divider()
 
@@ -1412,6 +1715,9 @@ with tab_a1:
         with st.expander(f"Full Daily Sentiment Data ({len(sent_daily)} rows)", expanded=False):
             render_df(sent_daily.round(4), "Daily Sentiment", "a1_sent_daily", height=500)
 
+    # --- Chart Gallery ---
+    render_chart_gallery(E1_CHARTS, gallery_id="e1")
+
 
 # =============================================================================
 # TAB 2: ARTICLE 2 - Culture Wars and Capital Markets
@@ -1433,6 +1739,10 @@ with tab_a2:
     xs_df = load_table("CROSS_SECTIONAL_CAR")
     did_df = load_table("DID_RESULTS")
     cw_df_a2 = load_table("CULTURE_WAR_COMPANIES")
+    # Essay 2 DiD tables (from essay2_did.py)
+    e2_car_panel = load_table("ESSAY2_CAR_PANEL")
+    e2_did_coeff = load_table("ESSAY2_DID_COEFFICIENTS")
+    e2_pt = load_table("ESSAY2_PARALLEL_TRENDS")
     ok_a2 = event_df[event_df["STATUS"] == "OK"].copy() if not event_df.empty else pd.DataFrame()
 
     if ok_a2.empty:
@@ -1702,6 +2012,139 @@ with tab_a2:
 
         st.divider()
 
+        # ===== SECTION 8b: Essay 2 Cross-Sectional DiD (essay2_did.py) =====
+        st.subheader("Cross-Sectional DiD — Matched Treatment vs Control")
+        st.markdown(
+            "Formal DiD estimation from `essay2_did.py`: treatment (culture war) firms "
+            "vs industry-matched controls. The model stacks pre- and post-event CARs "
+            "into a panel and estimates:"
+        )
+        st.latex(
+            r"\text{CAR}_{i,e} = \alpha + \beta_1 \text{Treat}_i + \beta_2 \text{Post}_e "
+            r"+ \beta_3 (\text{Treat} \times \text{Post}) + \gamma \mathbf{X} + \varepsilon"
+        )
+
+        # --- Parallel Trends Pre-Test ---
+        if not e2_pt.empty:
+            st.markdown("**Parallel Trends Pre-Test**")
+            for col in ["COEFFICIENT", "STD_ERROR", "T_STAT", "P_VALUE",
+                         "JOINT_F_STAT", "JOINT_P_VALUE"]:
+                if col in e2_pt.columns:
+                    e2_pt[col] = pd.to_numeric(e2_pt[col], errors="coerce")
+
+            joint_f = e2_pt["JOINT_F_STAT"].iloc[0] if "JOINT_F_STAT" in e2_pt.columns else None
+            joint_p = e2_pt["JOINT_P_VALUE"].iloc[0] if "JOINT_P_VALUE" in e2_pt.columns else None
+            passes = e2_pt["PASSES"].iloc[0] if "PASSES" in e2_pt.columns else None
+
+            if joint_f is not None:
+                verdict = "PASS" if passes else "FAIL"
+                color = "#2E7D32" if passes else "#C62828"
+                st.markdown(
+                    f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {color}; "
+                    f"padding:1rem; border-radius:0 4px 4px 0;'>"
+                    f"<strong>Joint F-test:</strong> F = {joint_f:.2f}, p = {joint_p:.4f} "
+                    f"&mdash; <strong style='color:{color};'>{verdict}</strong><br>"
+                    f"<small>H₀: all Treat×Day coefficients = 0 in the pre-event window. "
+                    f"{'Parallel trends hold — DiD assumptions satisfied.' if passes else 'Parallel trends violated — interpret DiD with caution.'}"
+                    f"</small></div>",
+                    unsafe_allow_html=True,
+                )
+
+            # Day-by-day coefficients
+            pt_display = e2_pt[["DAY", "COEFFICIENT", "STD_ERROR", "T_STAT", "P_VALUE"]].copy()
+            pt_display = pt_display.round(4)
+            pt_display["Sig."] = pt_display["P_VALUE"].apply(fmt_sig)
+            with st.expander("Daily Treat × Day Coefficients", expanded=False):
+                render_df(pt_display, "Parallel Trends Coefficients", "e2_pt_daily")
+
+            st.divider()
+
+        # --- CAR Panel Summary ---
+        if not e2_car_panel.empty:
+            st.markdown("**CAR Panel Summary**")
+            for col in ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2", "LEAN", "FOMO_Z"]:
+                if col in e2_car_panel.columns:
+                    e2_car_panel[col] = pd.to_numeric(e2_car_panel[col], errors="coerce")
+
+            if "IS_TREATMENT" in e2_car_panel.columns:
+                e2_car_panel["IS_TREATMENT"] = e2_car_panel["IS_TREATMENT"].map(
+                    {True: True, False: False, 1: True, 0: False,
+                     "true": True, "false": False, "1": True, "0": False,
+                     "True": True, "False": False}
+                ).fillna(False)
+
+            treat = e2_car_panel[e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
+            ctrl = e2_car_panel[~e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Panel Rows", fmt_num(len(e2_car_panel)))
+            c2.metric("Events", fmt_num(e2_car_panel["EVENT_ID"].nunique()) if "EVENT_ID" in e2_car_panel.columns else "--")
+            if not treat.empty:
+                c3.metric("Mean CAR_POST (Treatment)", f"{treat['CAR_POST'].mean():.4f}")
+            if not ctrl.empty:
+                c4.metric("Mean CAR_POST (Control)", f"{ctrl['CAR_POST'].mean():.4f}")
+
+            # Treatment vs Control comparison
+            if not treat.empty and not ctrl.empty:
+                car_compare = pd.DataFrame({
+                    "Group": ["Treatment", "Control", "Difference"],
+                    "N Firms": [treat["TICKER"].nunique(), ctrl["TICKER"].nunique(), ""],
+                    "Mean CAR_PRE": [treat["CAR_PRE"].mean(), ctrl["CAR_PRE"].mean(),
+                                     treat["CAR_PRE"].mean() - ctrl["CAR_PRE"].mean()],
+                    "Mean CAR_POST": [treat["CAR_POST"].mean(), ctrl["CAR_POST"].mean(),
+                                      treat["CAR_POST"].mean() - ctrl["CAR_POST"].mean()],
+                    "Mean CAR_FULL": [treat["CAR_FULL"].mean(), ctrl["CAR_FULL"].mean(),
+                                      treat["CAR_FULL"].mean() - ctrl["CAR_FULL"].mean()],
+                    "Mean Est R²": [treat["EST_R2"].mean(), ctrl["EST_R2"].mean(),
+                                    treat["EST_R2"].mean() - ctrl["EST_R2"].mean()],
+                }).round(4)
+                render_df(car_compare, "Treatment vs Control CARs", "e2_car_compare")
+
+            with st.expander("Full CAR Panel", expanded=False):
+                car_cols = [c for c in ["TICKER", "EVENT_ID", "IS_TREATMENT", "REGIME",
+                                         "CAR_PRE", "CAR_POST", "CAR_FULL", "LEAN",
+                                         "FOMO_Z", "EST_R2"] if c in e2_car_panel.columns]
+                render_df(e2_car_panel[car_cols].round(4), "CAR Panel", "e2_car_panel_full", height=500)
+
+            st.divider()
+
+        # --- DiD Coefficient Table ---
+        if not e2_did_coeff.empty:
+            st.markdown("**DiD Regression Results — Three Specifications**")
+            for col in ["COEFFICIENT", "STD_ERROR", "T_STAT", "P_VALUE"]:
+                if col in e2_did_coeff.columns:
+                    e2_did_coeff[col] = pd.to_numeric(e2_did_coeff[col], errors="coerce")
+
+            specs = e2_did_coeff["SPECIFICATION"].unique() if "SPECIFICATION" in e2_did_coeff.columns else []
+
+            for spec in specs:
+                spec_df = e2_did_coeff[e2_did_coeff["SPECIFICATION"] == spec].copy()
+                label = {"basic": "Spec 1: Basic DiD",
+                         "with_lean": "Spec 2: + Political Lean",
+                         "with_fomo": "Spec 3: + FOMO Z-Score"}.get(spec, spec)
+
+                st.markdown(f"**{label}**")
+                display_cols = [c for c in ["VARIABLE", "COEFFICIENT", "STD_ERROR",
+                                            "T_STAT", "P_VALUE", "BH_SIGNIFICANT"]
+                                if c in spec_df.columns]
+                spec_display = spec_df[display_cols].copy().round(4)
+                if "P_VALUE" in spec_display.columns:
+                    spec_display["Sig."] = spec_display["P_VALUE"].apply(fmt_sig)
+                render_df(spec_display, f"DiD {spec}", f"e2_did_{spec}")
+
+                # Highlight the treatment effect (Treat x Post)
+                treat_row = spec_df[spec_df["VARIABLE"] == "TREAT_x_POST"]
+                if not treat_row.empty:
+                    coef = treat_row.iloc[0]["COEFFICIENT"]
+                    pval = treat_row.iloc[0]["P_VALUE"]
+                    sig_marker = fmt_sig(pval) if pval < 0.1 else " (n.s.)"
+                    st.caption(
+                        f"Treatment effect (Treat × Post): {coef:+.4f}{sig_marker}, "
+                        f"p = {pval:.4f}"
+                    )
+
+            st.divider()
+
         # ===== SECTION 9: Failed Studies =====
         failed_a2 = event_df[event_df["STATUS"] != "OK"] if not event_df.empty else pd.DataFrame()
         if not failed_a2.empty:
@@ -1724,6 +2167,9 @@ with tab_a2:
             display["Sig."] = display["CAR_P"].apply(fmt_sig)
             display = display.sort_values("CAR_P")
             render_df(display, "Event Study Results", "a2_full_results", height=500)
+
+    # --- Chart Gallery ---
+    render_chart_gallery(E2_CHARTS, gallery_id="e2")
 
 
 # =============================================================================
@@ -1748,7 +2194,7 @@ with tab_a3:
         "-- often have advance knowledge of planned political statements, marketing "
         "campaigns, and responses to emerging social controversies. Essay 2 establishes "
         "that culture war events generate significant abnormal returns (mean CAR = "
-        f"{summary.get('avg_car', -0.155):.2%}). "
+        f"{summary.get('avg_car', 0):.2%}). "
         "This raises a natural question: do insiders exploit this foreknowledge for "
         "personal gain?"
     )
@@ -1860,45 +2306,232 @@ with tab_a3:
 
     st.divider()
 
-    # --- Data Collection Progress ---
-    st.subheader("Data Collection Status")
+    # =====================================================================
+    # ESSAY 3 — MODEL RESULTS
+    # =====================================================================
 
-    sec_dir = BASE_DIR / "sec_form4_data"
-    sec_files = list(sec_dir.glob("*.csv")) if sec_dir.exists() else []
-    has_mapping = (sec_dir / "ticker_cik_mapping.json").exists() if sec_dir.exists() else False
+    # Load Essay 3 tables
+    e3_panel = load_table("ESSAY3_INSIDER_PANEL")
+    e3_window = load_table("ESSAY3_WINDOW_SUMMARY")
+    e3_abnormal = load_table("ESSAY3_ABNORMAL_SELLING")
+    e3_regression = load_table("ESSAY3_CAR_INSIDER_REGRESSION")
+    e3_leaning = load_table("ESSAY3_LEANING_ANALYSIS")
+    e3_treat_ctrl = load_table("ESSAY3_TREATMENT_VS_CONTROL")
+    e3_rvo = load_table("ESSAY3_ROUTINE_VS_OPPORTUNISTIC")
+    e3_regime = load_table("ESSAY3_REGIME_INTERACTION")
+    e3_placebo = load_table("ESSAY3_PLACEBO_TEST")
+    e3_accel = load_table("ESSAY3_ACCELERATION_TEST")
+    e3_gradient = load_table("ESSAY3_INFORMATION_GRADIENT")
 
-    prog_data = {
-        "Component": [
-            "Ticker-CIK Mapping",
-            "Form 4 Filing Downloads",
-            "Transaction Parsing",
-            "Routine/Opportunistic Classification",
-            "Benchmark Window Construction",
-            "Statistical Analysis",
-        ],
-        "Status": [
-            "Complete" if has_mapping else "Pending",
-            "In Progress" if sec_files else "Pending",
-            "Pending",
-            "Pending",
-            "Pending",
-            "Pending",
-        ],
-    }
-    prog_df = pd.DataFrame(prog_data)
-    render_df(prog_df, "Progress", "a3_progress")
+    _has_e3 = not e3_panel.empty or not e3_abnormal.empty
 
-    if has_mapping:
-        import json
-        mapping_path = sec_dir / "ticker_cik_mapping.json"
-        with open(mapping_path) as f:
-            cik_map = json.load(f)
-        st.markdown(f"**{len(cik_map):,} ticker-CIK mappings** loaded from EDGAR.")
+    if _has_e3:
+        # Coerce numeric columns
+        for _df in [e3_abnormal, e3_leaning, e3_rvo, e3_regime, e3_placebo,
+                     e3_accel, e3_window, e3_regression, e3_gradient]:
+            for col in _df.columns:
+                if col not in ("WINDOW", "TEST", "REGIME", "LEAN", "TICKER",
+                                "EVENT_ID", "EVENT_DATE", "IS_TREATMENT",
+                                "MONOTONIC_INCREASE", "BH_SIGNIFICANT",
+                                "ABNORMAL_SELLING", "HAS_SUFFICIENT_DATA",
+                                "T_BH_SIGNIFICANT", "WILCOXON_BH_SIGNIFICANT",
+                                "RUN_TIMESTAMP"):
+                    _df[col] = pd.to_numeric(_df[col], errors="coerce")
+
+        # --- Key finding callout ---
+        if not e3_abnormal.empty:
+            _pre = e3_abnormal["MEAN_PRE_DAILY"].mean()
+            _bench = e3_abnormal["MEAN_BENCH_DAILY"].mean()
+            _n_sig = e3_abnormal.get("T_BH_SIGNIFICANT", pd.Series()).sum()
+            st.markdown(
+                f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
+                f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
+                f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
+                f"Insider selling averages <strong>${_pre:,.0f}/day</strong> in the pre-event window "
+                f"vs <strong>${_bench:,.0f}/day</strong> in the benchmark period. "
+                f"<strong>{int(_n_sig)}</strong> of {len(e3_abnormal)} window comparisons show "
+                f"BH-significant abnormal selling.</div>",
+                unsafe_allow_html=True,
+            )
+
+        # Summary metrics
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Event-Firm Pairs", fmt_num(len(e3_panel)) if not e3_panel.empty else "--")
+        c2.metric("Windows Tested", fmt_num(len(e3_window)) if not e3_window.empty else "--")
+        c3.metric("Abnormal Tests", fmt_num(len(e3_abnormal)) if not e3_abnormal.empty else "--")
+        if not e3_panel.empty and "IS_TREATMENT" in e3_panel.columns:
+            _n_treat = e3_panel["IS_TREATMENT"].astype(str).str.lower().isin(["true", "1"]).sum()
+            c4.metric("Treatment Firms", fmt_num(_n_treat))
+        if not e3_placebo.empty:
+            _emp_p = e3_placebo.iloc[0].get("EMPIRICAL_P", None)
+            c5.metric("Placebo p-value", fmt_pval(_emp_p) if _emp_p is not None else "--")
+
+        st.divider()
+
+        # --- Window Summary ---
+        if not e3_window.empty:
+            st.subheader("Insider Trading by Window")
+            st.markdown(
+                "Aggregate insider trading metrics across pre-event sub-windows, "
+                "the full pre-event window, and the post-event window."
+            )
+            _win_display = e3_window.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _win_display = _win_display.round(2)
+            render_df(_win_display, "Window Summary", "a3_window_summary")
+            st.divider()
+
+        # --- Abnormal Selling Tests ---
+        if not e3_abnormal.empty:
+            st.subheader("Abnormal Selling Tests")
+            st.markdown(
+                "Paired t-tests and Wilcoxon signed-rank tests comparing pre-event "
+                "insider selling to the benchmark period. Both parametric and "
+                "non-parametric tests are reported with BH-FDR correction."
+            )
+            _abn_display = e3_abnormal.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _abn_display["Sig."] = _abn_display.get("T_PVALUE", pd.Series()).apply(fmt_sig)
+            _abn_display = _abn_display.round(4)
+            render_df(_abn_display, "Abnormal Selling", "a3_abnormal")
+            st.divider()
+
+        # --- Political Leaning Analysis ---
+        if not e3_leaning.empty:
+            st.subheader("Insider Trading by Political Leaning")
+            st.markdown(
+                "Do insiders at Conservative, Liberal, or Mixed-leaning firms "
+                "sell more aggressively before culture war events? Kruskal-Wallis "
+                "test for group differences."
+            )
+            _lean_display = e3_leaning.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _lean_display["Sig."] = _lean_display.get("P_VALUE_VS_ZERO", pd.Series()).apply(fmt_sig)
+            _lean_display = _lean_display.round(4)
+            render_df(_lean_display, "Leaning Analysis", "a3_leaning")
+            st.divider()
+
+        # --- Routine vs Opportunistic ---
+        if not e3_rvo.empty:
+            st.subheader("Routine vs Opportunistic Trades")
+            st.markdown(
+                "Cohen, Malloy, and Pomorski (2012) decomposition. Opportunistic "
+                "trades — irregular, information-motivated — should increase more "
+                "before culture war events if insiders are trading on foreknowledge."
+            )
+            _rvo_display = e3_rvo.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _rvo_display["Sig."] = _rvo_display.get("P_VALUE", pd.Series()).apply(fmt_sig)
+            _rvo_display = _rvo_display.round(4)
+            render_df(_rvo_display, "Routine vs Opportunistic", "a3_rvo")
+            st.divider()
+
+        # --- VIX Regime Interaction ---
+        if not e3_regime.empty:
+            st.subheader("Insider Trading by VIX Regime")
+            st.markdown(
+                "Does insider selling before culture war events intensify during "
+                "high-volatility regimes? Cross-tabulation of regime × test."
+            )
+            _reg_display = e3_regime.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _reg_display["Sig."] = _reg_display.get("P_VALUE", pd.Series()).apply(fmt_sig)
+            _reg_display = _reg_display.round(4)
+            render_df(_reg_display, "Regime Interaction", "a3_regime")
+            st.divider()
+
+        # --- Robustness: Placebo Test ---
+        if not e3_placebo.empty:
+            st.subheader("Placebo Test")
+            st.markdown(
+                "Permutation-based placebo test: random pseudo-event dates are assigned "
+                "and the test statistic is recomputed. If the observed statistic exceeds "
+                "95% of placebo values, the effect is unlikely to be spurious."
+            )
+            _plac = e3_placebo.iloc[0]
+            _plac_cols = ["TEST", "OBSERVED_STAT", "PLACEBO_MEAN", "PLACEBO_STD",
+                          "PERCENTILE", "EMPIRICAL_P", "N_ITERATIONS", "N_FIRMS"]
+            _plac_data = {c: _plac.get(c, "--") for c in _plac_cols if c in e3_placebo.columns}
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Observed Stat", f"{_plac.get('OBSERVED_STAT', 0):.4f}")
+            c2.metric("Placebo Mean", f"{_plac.get('PLACEBO_MEAN', 0):.4f}")
+            c3.metric("Percentile", f"{_plac.get('PERCENTILE', 0):.1f}")
+            c4.metric("Empirical p", fmt_pval(_plac.get("EMPIRICAL_P")))
+
+            _plac_display = e3_placebo.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+            render_df(_plac_display, "Placebo Test", "a3_placebo")
+            st.divider()
+
+        # --- Robustness: Acceleration Test ---
+        if not e3_accel.empty:
+            st.subheader("Acceleration Test (Jonckheere-Terpstra)")
+            st.markdown(
+                "Tests for a monotonic increase in insider selling as the event date "
+                "approaches: far window → mid window → near window. The JT test "
+                "detects ordered alternatives without assuming normality."
+            )
+            _acc_display = e3_accel.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _acc_display["Sig."] = _acc_display.get("JT_PVALUE", pd.Series()).apply(fmt_sig)
+            _acc_display = _acc_display.round(4)
+            render_df(_acc_display, "Acceleration Test", "a3_accel")
+            st.divider()
+
+        # --- CAR-Insider Regression ---
+        if not e3_regression.empty:
+            st.subheader("CAR-Insider Selling Regression")
+            st.markdown(
+                "Cross-sectional regression: does pre-event insider selling predict "
+                "post-event abnormal returns (CAR)?"
+            )
+            _reg_display = e3_regression.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _reg_display = _reg_display.round(4)
+            render_df(_reg_display, "CAR Regression", "a3_car_regression")
+            st.divider()
+
+        # --- Treatment vs Control ---
+        if not e3_treat_ctrl.empty:
+            st.subheader("Treatment vs Control Firms")
+            st.markdown(
+                "Comparing insider selling in culture war firms (treatment) vs "
+                "matched control firms."
+            )
+            _tc_display = e3_treat_ctrl.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _tc_display = _tc_display.round(4)
+            render_df(_tc_display, "Treatment vs Control", "a3_treat_ctrl")
+            st.divider()
+
+        # --- Information Gradient ---
+        if not e3_gradient.empty:
+            st.subheader("Information Gradient")
+            st.markdown(
+                "Tests whether insider selling is stronger before events "
+                "that produce larger subsequent CARs."
+            )
+            _grad_display = e3_gradient.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _grad_display = _grad_display.round(4)
+            render_df(_grad_display, "Information Gradient", "a3_gradient")
+            st.divider()
+
+        # --- Full Panel (expandable) ---
+        if not e3_panel.empty:
+            with st.expander(f"Full Insider Trading Panel ({len(e3_panel)} rows)", expanded=False):
+                _panel_cols = [c for c in [
+                    "TICKER", "EVENT_ID", "EVENT_DATE", "IS_TREATMENT", "LEAN",
+                    "ABNORMAL_SELLING", "HAS_SUFFICIENT_DATA", "CAR_POST",
+                    "PRE_FULL_NET_DOLLAR_SOLD", "PRE_FULL_NET_SELL_RATIO",
+                    "BENCHMARK_NET_DOLLAR_SOLD", "POST_NET_DOLLAR_SOLD",
+                ] if c in e3_panel.columns]
+                _panel_display = e3_panel[_panel_cols].copy()
+                for c in _panel_display.select_dtypes(include=[np.number]).columns:
+                    _panel_display[c] = _panel_display[c].round(4)
+                render_df(_panel_display, "Insider Panel", "a3_full_panel", height=500)
+
+    else:
+        st.info(
+            "No Essay 3 model results found. Click **Run Full Pipeline** in the "
+            "sidebar or run `python -m model.essay3` to generate results."
+        )
 
     st.divider()
 
     # --- Expected contribution ---
-    st.subheader("Expected Contribution")
+    st.subheader("Contribution to Literature")
     st.markdown(
         "This essay extends the insider trading literature (Seyhun, 1986; Lakonishok "
         "and Lee, 2001; Cohen et al., 2012) into the political economy domain. If "
@@ -1911,6 +2544,9 @@ with tab_a3:
         "- **Market efficiency** -- whether insider trading transmits political "
         "information into prices before public disclosure"
     )
+
+    # --- Chart Gallery ---
+    render_chart_gallery(E3_CHARTS, gallery_id="e3")
 
 
 # =============================================================================

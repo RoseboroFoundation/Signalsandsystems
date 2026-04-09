@@ -1,10 +1,19 @@
 """Shared fixtures for the test suite."""
 
 import os
+import sys
 import tempfile
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+
+# Inject a fake pandas_datareader into sys.modules BEFORE any test imports
+# trigger the real one.  The real package is broken on pandas 2.2+
+# (deprecate_kwarg signature change).  Individual tests that need DataReader
+# behaviour set side_effect on this mock's DataReader attribute.
+if "pandas_datareader" not in sys.modules:
+    sys.modules["pandas_datareader"] = MagicMock()
 
 
 @pytest.fixture

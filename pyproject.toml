@@ -22,6 +22,7 @@ dependencies = [
     "yfinance>=0.2.66",
     "boto3>=1.35.0",
     "statsmodels>=0.14.6",
+    "scikit-learn>=1.5.0",
     "scipy>=1.17.0",
     "streamlit>=1.40.0",
 ]

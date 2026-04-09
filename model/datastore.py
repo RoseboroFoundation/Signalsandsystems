@@ -93,8 +93,8 @@ class DataStore:
 
     def _connect_aws(self, database=None):
         """Connect to AWS (S3 + Glue + Athena)."""
-        from Database import AWSLoader
-        loader = AWSLoader(database=database)
+        from Database import AthenaLoader
+        loader = AthenaLoader(database=database)
         loader.connect()
         self._loader = loader
         self.backend = 'aws'

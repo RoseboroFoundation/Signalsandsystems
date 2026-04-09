@@ -329,6 +329,309 @@ class SECFilingDownloader:
             return None
         return resp.text
 
+    # ── Filing text section extraction ────────────────────────────────
+
+    # Regex patterns for common 10-K/10-Q section headers.
+    # These handle variations like "Item 1A.", "ITEM 1A -", "Item 1A:",
+    # as well as HTML anchors and bold/italic wrappers.
+    # Regex patterns for locating filing sections.
+    # Uses "last match" strategy to skip table-of-contents echoes.
+    # Two-tier matching: first try specific pattern (e.g. "Item 7. Management"),
+    # then fall back to bare item number (e.g. "ITEM 7.") for layouts that
+    # split the label across HTML cells.
+    _SECTION_PATTERNS = {
+        '10-K': {
+            'Item 1A - Risk Factors': (
+                [
+                    re.compile(
+                        r'Item\s+1A[\.\:\s,\-\—\–]+Risk\s+Factors',
+                        re.IGNORECASE,
+                    ),
+                    re.compile(r'Item\s+1A\b', re.IGNORECASE),
+                ],
+                re.compile(
+                    r'Item\s+(?:1B|1C|2)\b',
+                    re.IGNORECASE,
+                ),
+            ),
+            'Item 7 - MD&A': (
+                [
+                    re.compile(
+                        r'Item\s+7(?!A)[\.\:\s,\-\—\–]+(?:Management|MD)',
+                        re.IGNORECASE,
+                    ),
+                    re.compile(r'Item\s+7(?!A)\b', re.IGNORECASE),
+                ],
+                re.compile(r'Item\s+7A\b', re.IGNORECASE),
+            ),
+        },
+        '10-Q': {
+            'Item 2 - MD&A': (
+                [
+                    re.compile(
+                        r'Item\s+2(?!A)[\.\:\s,\-\—\–]+(?:Management|MD)',
+                        re.IGNORECASE,
+                    ),
+                    re.compile(r'Item\s+2(?!A)\b', re.IGNORECASE),
+                ],
+                re.compile(r'Item\s+3\b', re.IGNORECASE),
+            ),
+        },
+    }
+
+    # Map form types (including amendments) to pattern keys.
+    _FORM_TO_PATTERN_KEY = {}
+    for ft in FORM_TYPES_10K:
+        _FORM_TO_PATTERN_KEY[ft] = '10-K'
+    for ft in FORM_TYPES_10Q:
+        _FORM_TO_PATTERN_KEY[ft] = '10-Q'
+
+    _MAX_SECTION_CHARS = 50_000
+
+    def _extract_filing_sections(
+        self, html: str, form_type: str
+    ) -> List[Dict]:
+        """
+        Extract text sections from a filing HTML document.
+
+        Parameters
+        ----------
+        html : str
+            Raw HTML content of the filing.
+        form_type : str
+            e.g. '10-K', '10-Q', '10-K/A'.
+
+        Returns
+        -------
+        List[Dict]
+            Each dict has keys: ``section`` (str) and ``text`` (str).
+        """
+        pattern_key = self._FORM_TO_PATTERN_KEY.get(form_type)
+        if pattern_key is None:
+            return []
+
+        section_defs = self._SECTION_PATTERNS.get(pattern_key, {})
+        results = []
+
+        for section_name, (start_patterns, end_re) in section_defs.items():
+            # Two-tier matching: try specific patterns first, fall back to
+            # bare item number.  Use the *last* match for each pattern
+            # because the table of contents often repeats item names.
+            if not isinstance(start_patterns, list):
+                start_patterns = [start_patterns]
+
+            match_start = None
+            for pat in start_patterns:
+                starts = list(pat.finditer(html))
+                if starts:
+                    match_start = starts[-1]
+                    break
+
+            if match_start is None:
+                continue
+
+            start_pos = match_start.start()
+
+            # Find the end marker after the start position.
+            end_match = end_re.search(html, pos=start_pos + len(match_start.group()))
+            if end_match:
+                end_pos = end_match.start()
+            else:
+                # Fallback: take up to 500 KB from the start marker
+                end_pos = min(start_pos + 500_000, len(html))
+
+            raw_section = html[start_pos:end_pos]
+
+            # Strip HTML tags to get plain text.
+            soup = BeautifulSoup(raw_section, 'html.parser')
+
+            # Remove script/style elements.
+            for tag in soup.find_all(['script', 'style']):
+                tag.decompose()
+
+            text = soup.get_text(separator=' ')
+
+            # Clean up whitespace: collapse runs of whitespace but preserve
+            # paragraph breaks (double newlines).
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            text = text.strip()
+
+            if len(text) < 100:
+                # Likely a false positive (just the heading, no content).
+                continue
+
+            if len(text) > self._MAX_SECTION_CHARS:
+                text = text[: self._MAX_SECTION_CHARS]
+
+            results.append({
+                'section': section_name,
+                'text': text,
+            })
+
+        return results
+
+    def build_filing_text_dataset(
+        self,
+        tickers: List[str],
+        form_types: tuple = None,
+        start_date: str = '2000-01-01',
+        end_date: str = '2025-12-31',
+        max_filings_per_ticker: int = 10,
+        save_csv: bool = True,
+        checkpoint: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Build a dataset of extracted text sections (Risk Factors, MD&A)
+        from 10-K and 10-Q filings for a list of tickers.
+
+        Parameters
+        ----------
+        tickers : List[str]
+            Ticker symbols to process.
+        form_types : tuple, optional
+            Filing types. Default: 10-K + 10-Q (including amendments).
+        start_date, end_date : str
+            Date range (YYYY-MM-DD).
+        max_filings_per_ticker : int
+            Download the most recent N filings per ticker (default 10).
+        save_csv : bool
+            Write final results to CSV.
+        checkpoint : bool
+            Save progress after each ticker for resume capability.
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: TICKER, CIK, FORM_TYPE, FILING_DATE, SECTION, TEXT.
+        """
+        if form_types is None:
+            form_types = self.FORM_TYPES_10K + self.FORM_TYPES_10Q
+
+        checkpoint_file = os.path.join(
+            self.output_dir, 'filing_text_checkpoint.csv'
+        )
+        output_file = os.path.join(
+            self.output_dir,
+            f'sec_filing_text_{start_date}_to_{end_date}.csv',
+        )
+
+        # Load checkpoint if available.
+        rows_so_far: List[Dict] = []
+        processed_tickers: set = set()
+
+        if checkpoint and os.path.exists(checkpoint_file):
+            try:
+                ckpt_df = pd.read_csv(checkpoint_file)
+                rows_so_far = ckpt_df.to_dict('records')
+                processed_tickers = set(ckpt_df['TICKER'].unique())
+                logger.info(
+                    "Loaded checkpoint: %d rows, %d tickers already done",
+                    len(rows_so_far),
+                    len(processed_tickers),
+                )
+            except Exception as e:
+                logger.warning("Could not load checkpoint: %s", e)
+
+        failed = []
+
+        for i, ticker in enumerate(tickers, 1):
+            if ticker in processed_tickers:
+                logger.info(
+                    "[%d/%d] %s already in checkpoint — skipping",
+                    i, len(tickers), ticker,
+                )
+                continue
+
+            logger.info("[%d/%d] Processing %s...", i, len(tickers), ticker)
+
+            cik = self.get_company_cik(ticker)
+            if not cik:
+                logger.warning("  No CIK found for %s — skipping", ticker)
+                failed.append(ticker)
+                continue
+
+            # Get filing index (metadata).
+            filings = self.download_filing_index(
+                ticker, cik, form_types, start_date, end_date
+            )
+            if not filings:
+                logger.info("  %s: no filings found", ticker)
+                continue
+
+            # Sort by filing date descending, take most recent N.
+            filings.sort(key=lambda f: f['filing_date'], reverse=True)
+            filings = filings[:max_filings_per_ticker]
+
+            ticker_sections = 0
+            for filing in filings:
+                html = self.download_filing_text(filing['filing_url'])
+                if html is None:
+                    logger.debug(
+                        "  Could not download %s", filing['filing_url']
+                    )
+                    continue
+
+                sections = self._extract_filing_sections(
+                    html, filing['form_type']
+                )
+                for sec in sections:
+                    rows_so_far.append({
+                        'TICKER': ticker,
+                        'CIK': cik,
+                        'FORM_TYPE': filing['form_type'],
+                        'FILING_DATE': filing['filing_date'],
+                        'SECTION': sec['section'],
+                        'TEXT': sec['text'],
+                    })
+                    ticker_sections += 1
+
+            logger.info(
+                "  %s: %d filings, %d sections extracted",
+                ticker, len(filings), ticker_sections,
+            )
+
+            # Write checkpoint after each ticker.
+            if checkpoint and rows_so_far:
+                pd.DataFrame(rows_so_far).to_csv(
+                    checkpoint_file, index=False
+                )
+
+        if failed:
+            logger.warning(
+                "%d tickers failed CIK lookup: %s",
+                len(failed),
+                ', '.join(failed[:20]),
+            )
+
+        if not rows_so_far:
+            logger.warning("No text sections extracted for any ticker")
+            return pd.DataFrame()
+
+        result = pd.DataFrame(rows_so_far)
+        result['FILING_DATE'] = pd.to_datetime(
+            result['FILING_DATE'], errors='coerce'
+        )
+        result = result.sort_values(
+            ['TICKER', 'FILING_DATE']
+        ).reset_index(drop=True)
+
+        if save_csv:
+            result.to_csv(output_file, index=False)
+            logger.info(
+                "Saved %d rows (%d tickers) to %s",
+                len(result),
+                result['TICKER'].nunique(),
+                output_file,
+            )
+
+        # Clean up checkpoint after successful completion.
+        if checkpoint and os.path.exists(checkpoint_file):
+            os.remove(checkpoint_file)
+            logger.info("Removed checkpoint file")
+
+        return result
+
     # ── Batch pipeline ────────────────────────────────────────────────
 
     def build_fundamentals_dataset(

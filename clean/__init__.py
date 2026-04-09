@@ -43,6 +43,7 @@ from .news import (
     CompanyNewsAggregator,
     load_news_data,
     scrape_culture_war_news,
+    enrich_news_with_text,
 )
 
 # FRED macro loaders
