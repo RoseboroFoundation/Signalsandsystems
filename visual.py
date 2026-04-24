@@ -168,7 +168,11 @@ class ResultStore:
     def _read(self, table_name):
         try:
             df = self._loader.read_table(table_name)
-            return df if df is not None and not df.empty else pd.DataFrame()
+            if df is None or df.empty:
+                return pd.DataFrame()
+            # Athena returns lowercase columns; normalize to uppercase
+            df.columns = [c.upper() for c in df.columns]
+            return df
         except Exception:
             return pd.DataFrame()
 
@@ -228,6 +232,14 @@ class ResultStore:
         self.e3_placebo = self._read('ESSAY3_PLACEBO_TEST')
         self.e3_accel = self._read('ESSAY3_ACCELERATION_TEST')
         self.e3_gradient = self._read('ESSAY3_INFORMATION_GRADIENT')
+        self.e3_tost = self._read('ESSAY3_TOST_EQUIVALENCE')
+        self.e3_subgroup = self._read('ESSAY3_SUBGROUP_ANALYSIS')
+        self.e3_vol_shift = self._read('ESSAY3_VOL_SHIFT')
+        self.e3_tail_firms = self._read('ESSAY3_TAIL_FIRMS')
+        self.e3_tail_leaning = self._read('ESSAY3_TAIL_LEANING')
+        self.e3_tail_event_type = self._read('ESSAY3_TAIL_EVENT_TYPE')
+        self.e3_tail_interaction = self._read('ESSAY3_TAIL_INTERACTION')
+        self.e3_cons_planned = self._read('ESSAY3_CONS_PLANNED')
 
         logger.info('ResultStore ready')
 
@@ -275,8 +287,9 @@ class ResultStore:
                         pass
                 result = self._loader.write_table(df, 'FIGURES', replace=False)
             else:
-                # Athena/S3: append only — do not use replace=True (overwrites whole table)
-                result = self._loader.write_table(df, 'FIGURES', replace=False)
+                # Athena/S3: drop binary IMAGE_DATA (not Parquet-safe), append only
+                athena_df = df.drop(columns=['IMAGE_DATA'], errors='ignore')
+                result = self._loader.write_table(athena_df, 'FIGURES', replace=False)
             return result
         except Exception as e:
             logger.error('Failed to save figure %s: %s', name, e)
@@ -3016,6 +3029,481 @@ def e3_34_summary_dashboard(store):
     return fig
 
 
+def e3_35_tost_equivalence(store):
+    """TOST equivalence test results with 90% CIs vs equivalence bounds."""
+    with plt.rc_context(STYLE):
+        df = store.e3_tost
+        if df.empty:
+            return _empty_fig('No TOST data')
+        tost = df[df['TEST'] == 'TOST'].copy()
+        if tost.empty:
+            return _empty_fig('No TOST data')
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        y_pos = range(len(tost))
+        labels = tost['MARGIN_NAME'].values
+
+        for i, (_, row) in enumerate(tost.iterrows()):
+            delta = _safe_float(row['DELTA'])
+            ci_lo = _safe_float(row['CI90_LOWER'])
+            ci_hi = _safe_float(row['CI90_UPPER'])
+            diff = _safe_float(row['DIFF_MEAN'])
+            equiv = _safe_float(row.get('EQUIVALENT', 0))
+
+            color = '#27ae60' if equiv == 1 else '#e74c3c'
+            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=3, solid_capstyle='round')
+            ax.plot(diff, i, 'o', color=color, ms=8, zorder=5)
+            # Equivalence bounds
+            ax.plot([-delta, -delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
+            ax.plot([delta, delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
+
+        ax.axvline(0, color='black', lw=0.8, ls='-')
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(labels)
+        ax.set_xlabel('Difference (pre-event − benchmark daily selling)')
+        ax.set_title('TOST Equivalence Tests\n(green = equivalent within bounds, red = not)')
+
+        # Legend
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], color='#27ae60', lw=3, label='Equivalent (p < 0.05)'),
+            Line2D([0], [0], color='#e74c3c', lw=3, label='Not equivalent'),
+            Line2D([0], [0], color='grey', lw=1.5, ls='--', label='Equivalence bounds (±δ)'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
+        fig.tight_layout()
+    return fig
+
+
+def e3_36_power_analysis(store):
+    """Post-hoc power analysis and minimum detectable effect."""
+    with plt.rc_context(STYLE):
+        df = store.e3_tost
+        if df.empty:
+            return _empty_fig('No TOST data')
+
+        power_rows = df[df['TEST'] == 'POWER'].copy()
+        mde_rows = df[df['TEST'] == 'MDE'].copy()
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Left: power at various effect sizes
+        if not power_rows.empty:
+            labels = power_rows['MARGIN_NAME'].values
+            powers = power_rows['OBSERVED_D'].apply(_safe_float).values  # power stored here
+            colors = ['#3498db' if p >= 0.80 else '#e67e22' if p >= 0.50 else '#e74c3c'
+                      for p in powers]
+            bars = axes[0].barh(range(len(labels)), powers, color=colors)
+            axes[0].set_yticks(range(len(labels)))
+            axes[0].set_yticklabels(labels)
+            axes[0].axvline(0.80, color='#27ae60', ls='--', lw=1.5, label='80% power')
+            axes[0].set_xlabel('Statistical Power')
+            axes[0].set_title('Post-hoc Power Analysis')
+            axes[0].set_xlim(0, 1)
+            axes[0].legend(fontsize=8)
+            for bar, p in zip(bars, powers):
+                axes[0].text(bar.get_width() + 0.02, bar.get_y() + bar.get_height() / 2,
+                             f'{p:.1%}', va='center', fontsize=9)
+
+        # Right: MDE context
+        if not mde_rows.empty:
+            mde = mde_rows.iloc[0]
+            mde_d = _safe_float(mde['DELTA'])
+            mde_dollars = _safe_float(mde['DIFF_MEAN'])
+            obs_d = _safe_float(mde['OBSERVED_D'])
+
+            effect_sizes = [obs_d, 0.2, mde_d, 0.5]
+            labels = [f'Observed\nd={obs_d:.3f}', f'Small\nd=0.200',
+                      f'MDE (80%)\nd={mde_d:.3f}', f'Medium\nd=0.500']
+            colors = ['#e74c3c', '#f39c12', '#27ae60', '#3498db']
+            axes[1].barh(range(len(effect_sizes)), effect_sizes, color=colors)
+            axes[1].set_yticks(range(len(effect_sizes)))
+            axes[1].set_yticklabels(labels)
+            axes[1].set_xlabel("Cohen's d")
+            axes[1].set_title('Effect Size Context')
+            axes[1].axvline(mde_d, color='#27ae60', ls='--', lw=1, alpha=0.5)
+        else:
+            axes[1].text(0.5, 0.5, 'No MDE data', transform=axes[1].transAxes,
+                         ha='center', va='center', fontsize=12, color='#999')
+
+        fig.suptitle('Statistical Power & Minimum Detectable Effect', fontsize=13, fontweight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def e3_37_subgroup_forest(store):
+    """Forest plot of subgroup analyses with effect sizes and CIs."""
+    with plt.rc_context(STYLE):
+        df = store.e3_subgroup
+        if df.empty:
+            return _empty_fig('No subgroup data')
+
+        fig, ax = plt.subplots(figsize=(10, max(6, len(df) * 0.5 + 1)))
+        df = df.sort_values('COHEN_D', ascending=True).reset_index(drop=True)
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            d = _safe_float(row['COHEN_D'])
+            n = int(_safe_float(row['N_EVENTS']))
+            p = _safe_float(row.get('P_VALUE', 1))
+            sig = _safe_float(row.get('BH_SIGNIFICANT', 0))
+
+            # Approximate 95% CI: d ± 1.96 * sqrt(1/n + d²/(2n))
+            se_d = np.sqrt(1 / n + d ** 2 / (2 * n)) if n > 0 else 0
+            ci_lo = d - 1.96 * se_d
+            ci_hi = d + 1.96 * se_d
+
+            color = '#27ae60' if sig == 1 else ('#e67e22' if p < 0.05 else '#3498db')
+            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=2, solid_capstyle='round')
+            ax.plot(d, i, 's' if sig == 1 else 'o', color=color, ms=8, zorder=5)
+
+            label = row['SUBGROUP']
+            ax.text(ax.get_xlim()[0] if ax.get_xlim()[0] != 0 else -0.5, i + 0.15,
+                    f'{label} (n={n}, p={p:.3f})', fontsize=8, color='#333')
+
+        ax.axvline(0, color='black', lw=0.8)
+        ax.set_yticks(range(len(df)))
+        ax.set_yticklabels(df['SUBGROUP'].values, fontsize=8)
+        ax.set_xlabel("Cohen's d (pre-event − benchmark)")
+        ax.set_title('Subgroup Analysis: Forest Plot\n(BH-corrected significance)', fontsize=12)
+
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], marker='s', color='#27ae60', lw=0, ms=8, label='BH significant'),
+            Line2D([0], [0], marker='o', color='#e67e22', lw=0, ms=8, label='Nominally sig (p<0.05)'),
+            Line2D([0], [0], marker='o', color='#3498db', lw=0, ms=8, label='Not significant'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
+        fig.tight_layout()
+    return fig
+
+
+def e3_38_subgroup_effect_sizes(store):
+    """Bar chart of subgroup effect sizes (Cohen's d) with significance markers."""
+    with plt.rc_context(STYLE):
+        df = store.e3_subgroup
+        if df.empty:
+            return _empty_fig('No subgroup data')
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        df = df.sort_values('COHEN_D', ascending=False).reset_index(drop=True)
+        labels = df['SUBGROUP'].values
+        d_vals = df['COHEN_D'].apply(_safe_float).values
+        sig = df.get('BH_SIGNIFICANT', pd.Series([0] * len(df))).apply(_safe_float).values
+        pvals = df['P_VALUE'].apply(_safe_float).values
+
+        colors = []
+        for s, p in zip(sig, pvals):
+            if s == 1:
+                colors.append('#27ae60')
+            elif p < 0.05:
+                colors.append('#e67e22')
+            else:
+                colors.append('#3498db')
+
+        bars = ax.barh(range(len(labels)), d_vals, color=colors)
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=9)
+        ax.axvline(0, color='black', lw=0.8)
+        ax.axvline(0.2, color='grey', ls=':', lw=1, alpha=0.5)
+        ax.axvline(-0.2, color='grey', ls=':', lw=1, alpha=0.5)
+
+        # Annotate with p-values
+        for bar, p in zip(bars, pvals):
+            x = bar.get_width()
+            ax.text(x + 0.01 if x >= 0 else x - 0.01, bar.get_y() + bar.get_height() / 2,
+                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=8)
+
+        ax.set_xlabel("Cohen's d")
+        ax.set_title('Subgroup Effect Sizes\n(dashed lines = ±0.2 small effect threshold)')
+        fig.tight_layout()
+    return fig
+
+
+def e3_39_vol_shift_forest(store):
+    """Forest plot of volatility-shift analysis: CW-driven vs non-CW insider selling before vol spikes."""
+    with plt.rc_context(STYLE):
+        df = store.e3_vol_shift
+        if df.empty:
+            return _empty_fig('No volatility-shift data')
+
+        # Show the main one-sample and comparison tests (skip OLS rows)
+        show = df[~df['TEST'].str.startswith('OLS_')].copy()
+        show = show.sort_values('TEST').reset_index(drop=True)
+
+        fig, ax = plt.subplots(figsize=(10, max(5, len(show) * 0.7 + 1)))
+
+        for i, (_, row) in enumerate(show.iterrows()):
+            d = _safe_float(row.get('COHEN_D', 0))
+            n = int(_safe_float(row['N_SPIKES']))
+            p = _safe_float(row['P_VALUE'])
+            sig = _safe_float(row.get('BH_SIGNIFICANT', 0))
+
+            se_d = np.sqrt(1 / n + d ** 2 / (2 * n)) if n > 0 and not np.isnan(d) else 0.3
+            if np.isnan(d):
+                d = 0
+            ci_lo = d - 1.96 * se_d
+            ci_hi = d + 1.96 * se_d
+
+            color = '#27ae60' if sig == 1 else ('#e67e22' if p < 0.05 else '#3498db')
+            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=2, solid_capstyle='round')
+            ax.plot(d, i, 's' if sig == 1 else 'o', color=color, ms=8, zorder=5)
+
+        ax.axvline(0, color='black', lw=0.8)
+        ax.set_yticks(range(len(show)))
+        labels = [f"{row['TEST']} (n={int(row['N_SPIKES'])}, p={_safe_float(row['P_VALUE']):.4f})"
+                  for _, row in show.iterrows()]
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlabel("Cohen's d (pre-spike selling − benchmark)")
+        ax.set_title('Volatility-Shift Identification Strategy\nInsider Selling Before Vol Spikes: CW vs Non-CW', fontsize=12)
+
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], marker='s', color='#27ae60', lw=0, ms=8, label='BH significant'),
+            Line2D([0], [0], marker='o', color='#e67e22', lw=0, ms=8, label='Nominally sig (p<0.05)'),
+            Line2D([0], [0], marker='o', color='#3498db', lw=0, ms=8, label='Not significant'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
+        fig.tight_layout()
+    return fig
+
+
+def e3_40_vol_shift_ols(store):
+    """Bar chart of OLS regression coefficients from volatility-shift analysis."""
+    with plt.rc_context(STYLE):
+        df = store.e3_vol_shift
+        if df.empty:
+            return _empty_fig('No volatility-shift data')
+
+        ols = df[df['TEST'].str.startswith('OLS_')].copy()
+        if ols.empty:
+            return _empty_fig('No OLS results in vol-shift')
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        labels = ols['TEST'].str.replace('OLS_', '', regex=False).values
+        coefs = ols['MEAN_DIFF'].apply(_safe_float).values  # MEAN_DIFF holds coefficients for OLS
+        pvals = ols['P_VALUE'].apply(_safe_float).values
+
+        colors = ['#e67e22' if p < 0.05 else '#3498db' for p in pvals]
+        bars = ax.barh(range(len(labels)), coefs, color=colors)
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=10)
+        ax.axvline(0, color='black', lw=0.8)
+
+        for bar, p in zip(bars, pvals):
+            x = bar.get_width()
+            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
+                    bar.get_y() + bar.get_height() / 2,
+                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=9)
+
+        ax.set_xlabel('OLS Coefficient (DIFF ~ IS_CW + VOL_RATIO)')
+        ax.set_title('Volatility-Shift OLS Regression\nPredicting Pre-Spike Insider Selling Differential', fontsize=12)
+        fig.tight_layout()
+    return fig
+
+
+def e3_41_tail_leaning(store):
+    """Bar chart of abnormal selling by political leaning, with tail share."""
+    with plt.rc_context(STYLE):
+        df = store.e3_tail_leaning
+        if df.empty:
+            return _empty_fig('No tail leaning data')
+
+        lean_rows = df[df['TEST'].str.startswith('LEANING_')].copy()
+        if lean_rows.empty:
+            return _empty_fig('No leaning rows')
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        labels = lean_rows['TEST'].str.replace('LEANING_', '', regex=False).values
+        mean_abn = lean_rows['MEAN_ABN_SELL'].apply(_safe_float).values
+        pct_tail = lean_rows['PCT_IN_TAIL'].apply(_safe_float).values
+        pvals = lean_rows['P_VALUE'].apply(_safe_float).values
+
+        colors = ['#e74c3c' if 'CONSERVATIVE' in l else '#3498db' if 'LIBERAL' in l
+                  else '#95a5a6' for l in labels]
+
+        # Left: mean abnormal selling
+        bars1 = ax1.bar(range(len(labels)), mean_abn, color=colors)
+        ax1.set_xticks(range(len(labels)))
+        ax1.set_xticklabels(labels, fontsize=9)
+        ax1.axhline(0, color='black', lw=0.8)
+        ax1.set_ylabel('Mean Abnormal Selling ($/day)')
+        ax1.set_title('Abnormal Selling by Leaning')
+        for bar, p in zip(bars1, pvals):
+            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                     f'p={p:.3f}', ha='center', va='bottom', fontsize=8)
+
+        # Right: % in tail
+        bars2 = ax2.bar(range(len(labels)), pct_tail, color=colors)
+        ax2.set_xticks(range(len(labels)))
+        ax2.set_xticklabels(labels, fontsize=9)
+        ax2.axhline(20, color='grey', ls=':', lw=1, alpha=0.7, label='Expected 20%')
+        ax2.set_ylabel('% of Events in Top Quintile')
+        ax2.set_title('Tail Overrepresentation by Leaning')
+        ax2.legend(fontsize=8)
+        for bar, v in zip(bars2, pct_tail):
+            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                     f'{v:.1f}%', ha='center', va='bottom', fontsize=8)
+
+        fig.suptitle('Tail Diagnostic: Political Leaning in Abnormal Selling Distribution',
+                     fontsize=12, y=1.02)
+        fig.tight_layout()
+    return fig
+
+
+def e3_42_event_type_selling(store):
+    """Grouped bar chart: abnormal selling by event type (planned vs reactive)."""
+    with plt.rc_context(STYLE):
+        df = store.e3_tail_event_type
+        if df.empty:
+            return _empty_fig('No event type data')
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        labels = df['COMPARISON'].values
+        means = df['MEAN_A'].apply(_safe_float).values
+        pvals = df['T_PVALUE'].apply(_safe_float).values
+
+        type_colors = {'PLANNED_VS_REACTIVE': '#8e44ad',
+                       'PLANNED_VS_ZERO': '#2ecc71',
+                       'REACTIVE_VS_ZERO': '#e67e22',
+                       'AMBIGUOUS_VS_ZERO': '#95a5a6'}
+        colors = [type_colors.get(l, '#3498db') for l in labels]
+
+        bars = ax.barh(range(len(labels)), means, color=colors)
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=9)
+        ax.axvline(0, color='black', lw=0.8)
+
+        for bar, p in zip(bars, pvals):
+            x = bar.get_width()
+            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
+                    bar.get_y() + bar.get_height() / 2,
+                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=9)
+
+        ax.set_xlabel('Mean Abnormal Selling ($/day)')
+        ax.set_title('Planned vs Reactive Events: Insider Selling\n'
+                     '(PLANNED = corporate action, REACTIVE = external pressure)',
+                     fontsize=11)
+        fig.tight_layout()
+    return fig
+
+
+def e3_43_interaction_heatmap(store):
+    """Heatmap of Leaning × Event Type interaction cells."""
+    with plt.rc_context(STYLE):
+        df = store.e3_tail_interaction
+        if df.empty:
+            return _empty_fig('No interaction data')
+
+        cells = df[df['LEAN'] != 'INTERACTION'].copy()
+        if cells.empty:
+            return _empty_fig('No cell data')
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Pivot for heatmap: Cohen's d
+        cells['COHEN_D'] = pd.to_numeric(cells['COHEN_D'], errors='coerce')
+        cells['P_VALUE'] = pd.to_numeric(cells['P_VALUE'], errors='coerce')
+        cells['N'] = pd.to_numeric(cells['N'], errors='coerce')
+        pivot_d = cells.pivot_table(
+            index='LEAN', columns='EVENT_TYPE', values='COHEN_D', aggfunc='first')
+        pivot_p = cells.pivot_table(
+            index='LEAN', columns='EVENT_TYPE', values='P_VALUE', aggfunc='first')
+
+        import matplotlib.colors as mcolors
+        norm = mcolors.TwoSlopeNorm(vmin=-0.5, vcenter=0, vmax=0.8)
+
+        im1 = ax1.imshow(pivot_d.values.astype(float), cmap='RdYlGn', norm=norm, aspect='auto')
+        ax1.set_xticks(range(len(pivot_d.columns)))
+        ax1.set_xticklabels(pivot_d.columns, fontsize=9)
+        ax1.set_yticks(range(len(pivot_d.index)))
+        ax1.set_yticklabels(pivot_d.index, fontsize=9)
+        for i in range(len(pivot_d.index)):
+            for j in range(len(pivot_d.columns)):
+                v = pivot_d.values[i, j]
+                p = pivot_p.values[i, j] if pivot_p.values[i, j] == pivot_p.values[i, j] else 1
+                if v == v:  # not NaN
+                    ax1.text(j, i, f'd={v:.2f}\np={p:.3f}',
+                             ha='center', va='center', fontsize=8,
+                             fontweight='bold' if p < 0.05 else 'normal')
+        ax1.set_title("Cohen's d (abnormal selling)")
+        plt.colorbar(im1, ax=ax1, shrink=0.8)
+
+        # Right: sample sizes
+        pivot_n = cells.pivot_table(
+            index='LEAN', columns='EVENT_TYPE', values='N', aggfunc='first')
+        im2 = ax2.imshow(pivot_n.values.astype(float), cmap='Blues', aspect='auto')
+        ax2.set_xticks(range(len(pivot_n.columns)))
+        ax2.set_xticklabels(pivot_n.columns, fontsize=9)
+        ax2.set_yticks(range(len(pivot_n.index)))
+        ax2.set_yticklabels(pivot_n.index, fontsize=9)
+        for i in range(len(pivot_n.index)):
+            for j in range(len(pivot_n.columns)):
+                v = pivot_n.values[i, j]
+                if v == v:
+                    ax2.text(j, i, f'n={int(v)}', ha='center', va='center',
+                             fontsize=10, fontweight='bold')
+        ax2.set_title('Sample Size per Cell')
+        plt.colorbar(im2, ax=ax2, shrink=0.8)
+
+        fig.suptitle('Leaning × Event Type Interaction\n'
+                     '(Theory: Conservative × Planned = highest foreknowledge)',
+                     fontsize=12, y=1.02)
+        fig.tight_layout()
+    return fig
+
+
+def e3_44_cons_planned_cases(store):
+    """Case-study bar chart of Conservative × Planned events with power diagnostic."""
+    with plt.rc_context(STYLE):
+        df = store.e3_cons_planned
+        if df.empty:
+            return _empty_fig('No Conservative × Planned data')
+
+        # Separate case rows from power diagnostic
+        cases = df[df['TICKER'] != '_POWER_DIAGNOSTIC'].copy()
+        power = df[df['TICKER'] == '_POWER_DIAGNOSTIC']
+
+        if cases.empty:
+            return _empty_fig('No case events')
+
+        fig, ax = plt.subplots(figsize=(10, max(4, len(cases) * 1.2 + 2)))
+
+        labels = [f"{r['TICKER']} ({r['EVENT_DATE']})" for _, r in cases.iterrows()]
+        abn = cases['ABN_SELL_DAILY'].apply(_safe_float).values
+        n_trades = cases['N_PRE_TRADES'].apply(lambda x: int(_safe_float(x))).values
+        csuite = cases['CSUITE_PRESENT'].values
+
+        colors = ['#e74c3c' if v > 0 else '#3498db' for v in abn]
+        bars = ax.barh(range(len(labels)), abn, color=colors)
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=10)
+        ax.axvline(0, color='black', lw=0.8)
+
+        for i, (bar, nt, cs) in enumerate(zip(bars, n_trades, csuite)):
+            x = bar.get_width()
+            annot = f'{nt} trades'
+            if cs:
+                annot += ' (C-suite)'
+            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
+                    bar.get_y() + bar.get_height() / 2,
+                    annot, va='center', ha='left' if x >= 0 else 'right',
+                    fontsize=9, style='italic')
+
+        # Add power annotation
+        if not power.empty:
+            desc = power.iloc[0].get('EVENT_DESCRIPTION', '')
+            ax.text(0.02, -0.12, desc, transform=ax.transAxes,
+                    fontsize=9, style='italic', color='#666')
+
+        ax.set_xlabel('Abnormal Selling ($/day, pre-event − benchmark)')
+        ax.set_title('Conservative × Planned: Case-Study Events\n'
+                     '(d=0.751, underpowered — large effect, small cell)',
+                     fontsize=11)
+        fig.tight_layout()
+    return fig
+
+
 ESSAY3_CHARTS = [
     ('e3_01_window_net_dollar', e3_01_window_net_dollar, 'Net dollar sold by window'),
     ('e3_02_window_sell_ratio', e3_02_window_sell_ratio, 'Net sell ratio by window'),
@@ -3051,6 +3539,16 @@ ESSAY3_CHARTS = [
     ('e3_32_regime_t_stats', e3_32_regime_t_stats, 'Regime t-statistics'),
     ('e3_33_post_event_selling', e3_33_post_event_selling, 'Post-event selling distribution'),
     ('e3_34_summary_dashboard', e3_34_summary_dashboard, 'Essay 3 summary dashboard'),
+    ('e3_35_tost_equivalence', e3_35_tost_equivalence, 'TOST equivalence test bounds'),
+    ('e3_36_power_analysis', e3_36_power_analysis, 'Power analysis and MDE'),
+    ('e3_37_subgroup_forest', e3_37_subgroup_forest, 'Subgroup forest plot'),
+    ('e3_38_subgroup_effect_sizes', e3_38_subgroup_effect_sizes, 'Subgroup effect sizes'),
+    ('e3_39_vol_shift_forest', e3_39_vol_shift_forest, 'Volatility-shift CW vs non-CW'),
+    ('e3_40_vol_shift_ols', e3_40_vol_shift_ols, 'Volatility-shift OLS coefficients'),
+    ('e3_41_tail_leaning', e3_41_tail_leaning, 'Tail diagnostic: leaning distribution'),
+    ('e3_42_event_type_selling', e3_42_event_type_selling, 'Planned vs reactive event selling'),
+    ('e3_43_interaction_heatmap', e3_43_interaction_heatmap, 'Leaning × event type interaction'),
+    ('e3_44_cons_planned_cases', e3_44_cons_planned_cases, 'Conservative × Planned case studies'),
 ]
 
 ALL_CHARTS = ESSAY1_CHARTS + ESSAY2_CHARTS + ESSAY3_CHARTS
@@ -3176,6 +3674,7 @@ if __name__ == '__main__':
     # Parse args
     essays = None
     run_tests = False
+    backend = None
     for arg in sys.argv[1:]:
         if arg == '--test':
             run_tests = True
@@ -3184,12 +3683,17 @@ if __name__ == '__main__':
                 essays = [int(sys.argv[sys.argv.index(arg) + 1])]
             except (IndexError, ValueError):
                 pass
+        elif arg.startswith('--backend'):
+            try:
+                backend = sys.argv[sys.argv.index(arg) + 1]
+            except (IndexError, ValueError):
+                pass
 
     if run_tests:
         success = test_visuals()
         sys.exit(0 if success else 1)
 
-    store = ResultStore()
+    store = ResultStore(backend=backend)
     print(f'\nBackend: {store.backend}')
 
     results = generate_all(store, essays=essays)

@@ -470,6 +470,16 @@ E3_CHARTS = [
     ('e3_32_regime_t_stats', 'Regime t-statistics'),
     ('e3_33_post_event_selling', 'Post-event selling distribution'),
     ('e3_34_summary_dashboard', 'Essay 3 summary dashboard'),
+    ('e3_35_tost_equivalence', 'TOST equivalence test bounds'),
+    ('e3_36_power_analysis', 'Power analysis and MDE'),
+    ('e3_37_subgroup_forest', 'Subgroup forest plot'),
+    ('e3_38_subgroup_effect_sizes', 'Subgroup effect sizes'),
+    ('e3_39_vol_shift_forest', 'Volatility-shift CW vs non-CW'),
+    ('e3_40_vol_shift_ols', 'Volatility-shift OLS coefficients'),
+    ('e3_41_tail_leaning', 'Tail diagnostic: leaning distribution'),
+    ('e3_42_event_type_selling', 'Planned vs reactive event selling'),
+    ('e3_43_interaction_heatmap', 'Leaning × event type interaction'),
+    ('e3_44_cons_planned_cases', 'Conservative × Planned case studies'),
 ]
 
 
@@ -1734,53 +1744,55 @@ with tab_a2:
     )
     st.divider()
 
-    # Load all data
-    event_df = load_table("EVENT_STUDY_RESULTS")
-    xs_df = load_table("CROSS_SECTIONAL_CAR")
-    did_df = load_table("DID_RESULTS")
+    # Load all data (new pipeline tables only)
     cw_df_a2 = load_table("CULTURE_WAR_COMPANIES")
-    # Essay 2 DiD tables (from essay2_did.py)
     e2_car_panel = load_table("ESSAY2_CAR_PANEL")
     e2_did_coeff = load_table("ESSAY2_DID_COEFFICIENTS")
     e2_pt = load_table("ESSAY2_PARALLEL_TRENDS")
-    ok_a2 = event_df[event_df["STATUS"] == "OK"].copy() if not event_df.empty else pd.DataFrame()
 
-    if ok_a2.empty:
-        st.info("No event study results available. Run Model.py first.")
+    if e2_car_panel.empty:
+        st.info("No event study results available. Run the Essay 2 pipeline first.")
     else:
-        for col in ["CAR", "CAR_T", "CAR_P", "BHAR", "R_SQUARED"]:
-            if col in ok_a2.columns:
-                ok_a2[col] = pd.to_numeric(ok_a2[col], errors="coerce")
+        from scipy.stats import ttest_1samp
 
-        # Merge industry + year
-        if not cw_df_a2.empty and "TICKER" in cw_df_a2.columns:
-            ok_a2 = ok_a2.merge(
-                cw_df_a2[["TICKER", "INDUSTRY", "YEAR"]].drop_duplicates(subset=["TICKER"]),
-                on="TICKER", how="left",
-            )
+        # Coerce numeric columns
+        for col in ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2", "LEAN", "FOMO_Z"]:
+            if col in e2_car_panel.columns:
+                e2_car_panel[col] = pd.to_numeric(e2_car_panel[col], errors="coerce")
+
+        # Split treatment / control
+        _treat_all = e2_car_panel[e2_car_panel["TREAT"] == 1].copy()
+        _ctrl_all = e2_car_panel[e2_car_panel["TREAT"] == 0].copy()
+
+        # Merge political leaning from culture war companies
+        if not cw_df_a2.empty and "ESTIMATED_POLITICAL_LEANING" in cw_df_a2.columns:
+            _lean_map = cw_df_a2[["TICKER", "ESTIMATED_POLITICAL_LEANING", "COMPANY",
+                                   "CULTURE_WAR_EVENT", "INDUSTRY", "YEAR"]].drop_duplicates(subset=["TICKER"])
+            _treat_all = _treat_all.merge(_lean_map, on="TICKER", how="left")
 
         # --- Key finding callout ---
-        n_sig = (ok_a2["CAR_P"] < 0.05).sum()
+        _mean_car = _treat_all["CAR_POST"].mean()
+        _n_treat = len(_treat_all)
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
             f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
-            f"Culture war events generate a mean CAR of <strong>{ok_a2['CAR'].mean():.2%}</strong> "
-            f"across the [-30, +30] event window. <strong>{n_sig} of {len(ok_a2)}</strong> events "
-            f"({n_sig/len(ok_a2):.0%}) produce statistically significant abnormal returns at the "
-            f"5% level. All three political leaning groups show significant negative CARs "
-            f"(p &lt; 0.01), confirming that culture wars destroy shareholder value regardless "
-            f"of partisan alignment.</div>",
+            f"Culture war events generate a mean post-event CAR of "
+            f"<strong>{_mean_car:.2%}</strong> across {_n_treat} treatment-firm events. "
+            f"Treatment firms underperform matched controls by "
+            f"<strong>{_treat_all['CAR_POST'].mean() - _ctrl_all['CAR_POST'].mean():.2%}</strong> "
+            f"in the post-event window, consistent with culture wars destroying shareholder "
+            f"value.</div>",
             unsafe_allow_html=True,
         )
 
         # Summary metrics
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Completed Studies", fmt_num(len(ok_a2)))
-        c2.metric("Significant (p<.05)", fmt_num(n_sig))
-        c3.metric("Mean CAR", f"{ok_a2['CAR'].mean():.2%}")
-        c4.metric("Median CAR", f"{ok_a2['CAR'].median():.2%}")
-        c5.metric("Mean BHAR", f"{ok_a2['BHAR'].mean():.2%}" if "BHAR" in ok_a2.columns else "--")
+        c1.metric("Treatment Firms", fmt_num(_n_treat))
+        c2.metric("Control Firms", fmt_num(len(_ctrl_all)))
+        c3.metric("Mean CAR (Treat)", f"{_mean_car:.4f}")
+        c4.metric("Mean CAR (Control)", f"{_ctrl_all['CAR_POST'].mean():.4f}")
+        c5.metric("DiD Gap", f"{_treat_all['CAR_POST'].mean() - _ctrl_all['CAR_POST'].mean():.4f}")
 
         st.divider()
 
@@ -1791,7 +1803,6 @@ with tab_a2:
             "political leaning with 95% confidence interval error bars."
         )
 
-        # Show the figure from the database
         fig_data = load_figure_blob("car_by_political_leaning")
         if fig_data:
             render_figure(fig_data, caption="Mean CAR by Political Leaning (95% CI)",
@@ -1811,29 +1822,29 @@ with tab_a2:
             "within each political leaning group."
         )
 
-        if not xs_df.empty:
-            xs_display = xs_df.copy()
-            for col in ["MEAN_CAR", "STD_CAR", "T_STAT", "P_VALUE"]:
-                if col in xs_display.columns:
-                    xs_display[col] = pd.to_numeric(xs_display[col], errors="coerce")
-            if "P_VALUE" in xs_display.columns:
-                xs_display["Sig."] = xs_display["P_VALUE"].apply(fmt_sig)
-
-            xs_renamed = xs_display.rename(columns={
-                "POLITICAL_LEANING": "Group", "MEAN_CAR": "Mean CAR",
-                "STD_CAR": "Std Dev", "N": "N", "T_STAT": "t-stat",
-                "P_VALUE": "p-value",
-            })
-            num_cols = xs_renamed.select_dtypes(include=[np.number]).columns
-            xs_renamed[num_cols] = xs_renamed[num_cols].round(4)
-            render_df(xs_renamed, "Cross-Sectional CAR", "a2_xs_car")
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            _xs_rows = []
+            for _grp, _gdf in _treat_all.dropna(subset=["ESTIMATED_POLITICAL_LEANING", "CAR_POST"]).groupby("ESTIMATED_POLITICAL_LEANING"):
+                _vals = _gdf["CAR_POST"].values
+                _t, _p = ttest_1samp(_vals, 0)
+                _xs_rows.append({
+                    "Group": _grp, "Mean CAR": np.mean(_vals),
+                    "Std Dev": np.std(_vals, ddof=1), "N": len(_vals),
+                    "t-stat": _t, "p-value": _p,
+                })
+            if _xs_rows:
+                _xs_df = pd.DataFrame(_xs_rows)
+                _xs_df["Sig."] = _xs_df["p-value"].apply(fmt_sig)
+                _xs_num = _xs_df.select_dtypes(include=[np.number]).columns
+                _xs_df[_xs_num] = _xs_df[_xs_num].round(4)
+                render_df(_xs_df, "Cross-Sectional CAR", "a2_xs_car")
 
         st.divider()
 
         # ===== SECTION 3: CAR Distribution =====
         st.subheader("CAR Distribution by Political Leaning")
-        if "POLITICAL_LEANING" in ok_a2.columns:
-            car_dist = ok_a2.groupby("POLITICAL_LEANING")["CAR"].agg(
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            car_dist = _treat_all.groupby("ESTIMATED_POLITICAL_LEANING")["CAR_POST"].agg(
                 ["mean", "median", "std", "min", "max", "count"]
             ).reset_index()
             car_dist.columns = ["Political Leaning", "Mean", "Median", "Std Dev", "Min", "Max", "N"]
@@ -1846,35 +1857,41 @@ with tab_a2:
         st.subheader("Significance Breakdown")
         st.markdown(
             "How many events produce statistically significant abnormal returns at "
-            "various conventional thresholds?"
+            "various conventional thresholds? Significance is assessed via one-sample "
+            "t-tests on post-event CARs within each leaning group."
         )
 
-        if "POLITICAL_LEANING" in ok_a2.columns:
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
             sig_data = []
-            for leaning in sorted(ok_a2["POLITICAL_LEANING"].unique()):
-                subset = ok_a2[ok_a2["POLITICAL_LEANING"] == leaning]
+            _treat_valid = _treat_all.dropna(subset=["CAR_POST"])
+            for leaning in sorted(_treat_valid["ESTIMATED_POLITICAL_LEANING"].dropna().unique()):
+                subset = _treat_valid[_treat_valid["ESTIMATED_POLITICAL_LEANING"] == leaning]
                 n = len(subset)
-                sig_01 = (subset["CAR_P"] < 0.01).sum()
-                sig_05 = (subset["CAR_P"] < 0.05).sum()
-                sig_10 = (subset["CAR_P"] < 0.10).sum()
-                neg_car = (subset["CAR"] < 0).sum()
+                neg_car = (subset["CAR_POST"] < 0).sum()
+                # Per-group t-test
+                _t, _p = ttest_1samp(subset["CAR_POST"].values, 0)
                 sig_data.append({
                     "Political Leaning": leaning,
                     "N": n,
-                    "Sig. at 1%": f"{sig_01} ({sig_01/n:.0%})",
-                    "Sig. at 5%": f"{sig_05} ({sig_05/n:.0%})",
-                    "Sig. at 10%": f"{sig_10} ({sig_10/n:.0%})",
+                    "Mean CAR": f"{subset['CAR_POST'].mean():.4f}",
+                    "t-stat": f"{_t:.3f}",
+                    "p-value": f"{_p:.4f}",
+                    "Sig.": fmt_sig(_p),
                     "Negative CAR": f"{neg_car} ({neg_car/n:.0%})",
                 })
             # Add "All" row
-            n_all = len(ok_a2)
+            _all_vals = _treat_valid["CAR_POST"].values
+            _t_all, _p_all = ttest_1samp(_all_vals, 0)
+            n_all = len(_all_vals)
+            neg_all = (_all_vals < 0).sum()
             sig_data.append({
                 "Political Leaning": "All",
                 "N": n_all,
-                "Sig. at 1%": f"{(ok_a2['CAR_P'] < 0.01).sum()} ({(ok_a2['CAR_P'] < 0.01).mean():.0%})",
-                "Sig. at 5%": f"{(ok_a2['CAR_P'] < 0.05).sum()} ({(ok_a2['CAR_P'] < 0.05).mean():.0%})",
-                "Sig. at 10%": f"{(ok_a2['CAR_P'] < 0.10).sum()} ({(ok_a2['CAR_P'] < 0.10).mean():.0%})",
-                "Negative CAR": f"{(ok_a2['CAR'] < 0).sum()} ({(ok_a2['CAR'] < 0).mean():.0%})",
+                "Mean CAR": f"{np.mean(_all_vals):.4f}",
+                "t-stat": f"{_t_all:.3f}",
+                "p-value": f"{_p_all:.4f}",
+                "Sig.": fmt_sig(_p_all),
+                "Negative CAR": f"{neg_all} ({neg_all/n_all:.0%})",
             })
             render_df(pd.DataFrame(sig_data), "Significance", "a2_significance")
 
@@ -1883,69 +1900,66 @@ with tab_a2:
         # ===== SECTION 5: Most Impactful Events =====
         st.subheader("Most Impactful Culture War Events")
 
+        _display_cols = ["TICKER"]
+        if "COMPANY" in _treat_all.columns:
+            _display_cols.append("COMPANY")
+        _display_cols += ["EVENT_DATE"]
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            _display_cols.append("ESTIMATED_POLITICAL_LEANING")
+        _display_cols.append("CAR_POST")
+
         impact_col1, impact_col2 = st.columns(2)
         with impact_col1:
             st.markdown("**Largest Negative CARs (Shareholder Destruction)**")
-            worst_car = ok_a2.nsmallest(10, "CAR")[
-                ["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "CAR", "CAR_P"]
-            ].copy().round(4)
-            worst_car["Sig."] = worst_car["CAR_P"].apply(fmt_sig)
+            worst_car = _treat_all.nsmallest(10, "CAR_POST")[_display_cols].copy().round(4)
             render_df(worst_car, "Worst CARs", "a2_worst_car")
 
         with impact_col2:
             st.markdown("**Largest Positive CARs (Shareholder Gain)**")
-            best_car = ok_a2.nlargest(10, "CAR")[
-                ["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "CAR", "CAR_P"]
-            ].copy().round(4)
-            best_car["Sig."] = best_car["CAR_P"].apply(fmt_sig)
+            best_car = _treat_all.nlargest(10, "CAR_POST")[_display_cols].copy().round(4)
             render_df(best_car, "Best CARs", "a2_best_car")
 
         st.divider()
 
         # ===== SECTION 6: Event Timeline =====
-        if "YEAR" in ok_a2.columns:
+        if "YEAR" in _treat_all.columns:
             st.subheader("Events and Returns Over Time")
             st.markdown(
                 "How event frequency and average abnormal returns have evolved "
                 "as corporate culture wars intensified after 2015."
             )
 
-            year_agg = ok_a2.groupby("YEAR").agg(
-                n_events=("CAR", "count"),
-                mean_car=("CAR", "mean"),
-                median_car=("CAR", "median"),
-                pct_sig=("CAR_P", lambda x: (x < 0.05).mean()),
-                pct_negative=("CAR", lambda x: (x < 0).mean()),
+            year_agg = _treat_all.groupby("YEAR").agg(
+                n_events=("CAR_POST", "count"),
+                mean_car=("CAR_POST", "mean"),
+                median_car=("CAR_POST", "median"),
+                pct_negative=("CAR_POST", lambda x: (x < 0).mean()),
             ).reset_index()
-            year_agg.columns = ["Year", "Events", "Mean CAR", "Median CAR",
-                                "% Significant (p<.05)", "% Negative"]
+            year_agg.columns = ["Year", "Events", "Mean CAR", "Median CAR", "% Negative"]
             year_agg["Mean CAR"] = year_agg["Mean CAR"].round(4)
             year_agg["Median CAR"] = year_agg["Median CAR"].round(4)
-            year_agg["% Significant (p<.05)"] = year_agg["% Significant (p<.05)"].apply(lambda x: f"{x:.0%}")
             year_agg["% Negative"] = year_agg["% Negative"].apply(lambda x: f"{x:.0%}")
             render_df(year_agg, "Events by Year", "a2_events_year")
 
             st.divider()
 
         # ===== SECTION 7: Industry Analysis =====
-        if "INDUSTRY" in ok_a2.columns:
+        if "INDUSTRY" in _treat_all.columns:
             st.subheader("CAR by Industry")
             st.markdown(
                 "Cross-industry comparison of culture war impacts. Which sectors "
                 "are most vulnerable to politically-motivated sell-offs?"
             )
 
-            industry_car = ok_a2.groupby("INDUSTRY").agg(
-                mean_car=("CAR", "mean"),
-                median_car=("CAR", "median"),
-                pct_sig=("CAR_P", lambda x: (x < 0.05).mean()),
-                n=("CAR", "count"),
+            industry_car = _treat_all.groupby("INDUSTRY").agg(
+                mean_car=("CAR_POST", "mean"),
+                median_car=("CAR_POST", "median"),
+                n=("CAR_POST", "count"),
             ).reset_index()
-            industry_car.columns = ["Industry", "Mean CAR", "Median CAR", "% Significant", "N"]
+            industry_car.columns = ["Industry", "Mean CAR", "Median CAR", "N"]
             industry_car = industry_car[industry_car["N"] >= 2].sort_values("Mean CAR")
             industry_car["Mean CAR"] = industry_car["Mean CAR"].round(4)
             industry_car["Median CAR"] = industry_car["Median CAR"].round(4)
-            industry_car["% Significant"] = industry_car["% Significant"].apply(lambda x: f"{x:.0%}")
             render_df(industry_car, "CAR by Industry", "a2_car_industry")
 
             st.divider()
@@ -1954,69 +1968,7 @@ with tab_a2:
         st.subheader("Difference-in-Differences Analysis")
         st.markdown(
             "DiD estimation isolates the treatment effect by comparing culture war "
-            "firms to matched controls. A negative DiD coefficient indicates that the "
-            "treatment firm's returns diverged downward relative to its control during "
-            "the event window, beyond what common factors predict."
-        )
-
-        if not did_df.empty:
-            ok_did = did_df[did_df["STATUS"] == "OK"].copy()
-            for col in ["DID_COEF", "DID_T", "DID_P", "CI_LOWER", "CI_UPPER", "R_SQUARED"]:
-                if col in ok_did.columns:
-                    ok_did[col] = pd.to_numeric(ok_did[col], errors="coerce")
-
-            if not ok_did.empty:
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric("DiD Pairs Completed", fmt_num(len(ok_did)))
-                c2.metric("Significant (p<.05)", fmt_num((ok_did["DID_P"] < 0.05).sum()))
-                c3.metric("Mean DiD Coef", f"{ok_did['DID_COEF'].mean():.4f}")
-                c4.metric("Median DiD Coef", f"{ok_did['DID_COEF'].median():.4f}")
-                c5.metric("Negative Coef %", f"{(ok_did['DID_COEF'] < 0).mean():.0%}")
-
-                # DiD by leaning
-                if "POLITICAL_LEANING" in ok_did.columns:
-                    did_by_leaning = ok_did.groupby("POLITICAL_LEANING").agg(
-                        mean_coef=("DID_COEF", "mean"),
-                        median_coef=("DID_COEF", "median"),
-                        std=("DID_COEF", "std"),
-                        pct_negative=("DID_COEF", lambda x: (x < 0).mean()),
-                        pct_sig=("DID_P", lambda x: (x < 0.05).mean()),
-                        n=("DID_COEF", "count"),
-                    ).reset_index()
-                    did_by_leaning.columns = ["Political Leaning", "Mean Coef", "Median Coef",
-                                              "Std Dev", "% Negative", "% Sig. (p<.05)", "N"]
-                    did_by_leaning["% Negative"] = did_by_leaning["% Negative"].apply(lambda x: f"{x:.0%}")
-                    did_by_leaning["% Sig. (p<.05)"] = did_by_leaning["% Sig. (p<.05)"].apply(lambda x: f"{x:.0%}")
-                    did_by_leaning = did_by_leaning.round(4)
-                    render_df(did_by_leaning, "DiD by Leaning", "a2_did_leaning")
-
-                # Most significant DiD pairs
-                st.markdown("**Most Significant DiD Pairs**")
-                top_did = ok_did.nsmallest(10, "DID_P")[
-                    ["TICKER", "CONTROL_TICKER", "COMPANY", "POLITICAL_LEANING",
-                     "DID_COEF", "DID_T", "DID_P", "R_SQUARED"]
-                ].copy().round(4)
-                top_did["Sig."] = top_did["DID_P"].apply(fmt_sig)
-                render_df(top_did, "Top DiD Pairs", "a2_did_top")
-
-                with st.expander("Full DiD Results", expanded=False):
-                    did_display = ok_did[["TICKER", "CONTROL_TICKER", "COMPANY",
-                                          "POLITICAL_LEANING", "DID_COEF", "DID_T",
-                                          "DID_P", "R_SQUARED"]].copy()
-                    did_display = did_display.round(4)
-                    did_display["Sig."] = did_display["DID_P"].apply(fmt_sig)
-                    did_display = did_display.sort_values("DID_P")
-                    render_df(did_display, "DiD Results", "a2_did_full", height=500)
-        else:
-            st.info("No DiD results available.")
-
-        st.divider()
-
-        # ===== SECTION 8b: Essay 2 Cross-Sectional DiD (essay2_did.py) =====
-        st.subheader("Cross-Sectional DiD — Matched Treatment vs Control")
-        st.markdown(
-            "Formal DiD estimation from `essay2_did.py`: treatment (culture war) firms "
-            "vs industry-matched controls. The model stacks pre- and post-event CARs "
+            "firms to matched controls. The model stacks pre- and post-event CARs "
             "into a panel and estimates:"
         )
         st.latex(
@@ -2044,69 +1996,51 @@ with tab_a2:
                     f"padding:1rem; border-radius:0 4px 4px 0;'>"
                     f"<strong>Joint F-test:</strong> F = {joint_f:.2f}, p = {joint_p:.4f} "
                     f"&mdash; <strong style='color:{color};'>{verdict}</strong><br>"
-                    f"<small>H₀: all Treat×Day coefficients = 0 in the pre-event window. "
+                    f"<small>H&#x2080;: all Treat x Day coefficients = 0 in the pre-event window. "
                     f"{'Parallel trends hold — DiD assumptions satisfied.' if passes else 'Parallel trends violated — interpret DiD with caution.'}"
                     f"</small></div>",
                     unsafe_allow_html=True,
                 )
 
-            # Day-by-day coefficients
             pt_display = e2_pt[["DAY", "COEFFICIENT", "STD_ERROR", "T_STAT", "P_VALUE"]].copy()
             pt_display = pt_display.round(4)
             pt_display["Sig."] = pt_display["P_VALUE"].apply(fmt_sig)
-            with st.expander("Daily Treat × Day Coefficients", expanded=False):
+            with st.expander("Daily Treat x Day Coefficients", expanded=False):
                 render_df(pt_display, "Parallel Trends Coefficients", "e2_pt_daily")
 
             st.divider()
 
         # --- CAR Panel Summary ---
-        if not e2_car_panel.empty:
-            st.markdown("**CAR Panel Summary**")
-            for col in ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2", "LEAN", "FOMO_Z"]:
-                if col in e2_car_panel.columns:
-                    e2_car_panel[col] = pd.to_numeric(e2_car_panel[col], errors="coerce")
+        st.markdown("**CAR Panel Summary**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Panel Rows", fmt_num(len(e2_car_panel)))
+        c2.metric("Events", fmt_num(e2_car_panel["EVENT_ID"].nunique()) if "EVENT_ID" in e2_car_panel.columns else "--")
+        c3.metric("Mean CAR_POST (Treatment)", f"{_treat_all['CAR_POST'].mean():.4f}")
+        c4.metric("Mean CAR_POST (Control)", f"{_ctrl_all['CAR_POST'].mean():.4f}")
 
-            if "IS_TREATMENT" in e2_car_panel.columns:
-                e2_car_panel["IS_TREATMENT"] = e2_car_panel["IS_TREATMENT"].map(
-                    {True: True, False: False, 1: True, 0: False,
-                     "true": True, "false": False, "1": True, "0": False,
-                     "True": True, "False": False}
-                ).fillna(False)
+        # Treatment vs Control comparison
+        if not _treat_all.empty and not _ctrl_all.empty:
+            car_compare = pd.DataFrame({
+                "Group": ["Treatment", "Control", "Difference"],
+                "N Firms": [_treat_all["TICKER"].nunique(), _ctrl_all["TICKER"].nunique(), ""],
+                "Mean CAR_PRE": [_treat_all["CAR_PRE"].mean(), _ctrl_all["CAR_PRE"].mean(),
+                                 _treat_all["CAR_PRE"].mean() - _ctrl_all["CAR_PRE"].mean()],
+                "Mean CAR_POST": [_treat_all["CAR_POST"].mean(), _ctrl_all["CAR_POST"].mean(),
+                                  _treat_all["CAR_POST"].mean() - _ctrl_all["CAR_POST"].mean()],
+                "Mean CAR_FULL": [_treat_all["CAR_FULL"].mean(), _ctrl_all["CAR_FULL"].mean(),
+                                  _treat_all["CAR_FULL"].mean() - _ctrl_all["CAR_FULL"].mean()],
+                "Mean Est R2": [_treat_all["EST_R2"].mean(), _ctrl_all["EST_R2"].mean(),
+                                _treat_all["EST_R2"].mean() - _ctrl_all["EST_R2"].mean()],
+            }).round(4)
+            render_df(car_compare, "Treatment vs Control CARs", "e2_car_compare")
 
-            treat = e2_car_panel[e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
-            ctrl = e2_car_panel[~e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
+        with st.expander("Full CAR Panel", expanded=False):
+            car_cols = [c for c in ["TICKER", "EVENT_ID", "TREAT", "REGIME",
+                                     "CAR_PRE", "CAR_POST", "CAR_FULL", "LEAN",
+                                     "FOMO_Z", "EST_R2"] if c in e2_car_panel.columns]
+            render_df(e2_car_panel[car_cols].round(4), "CAR Panel", "e2_car_panel_full", height=500)
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Panel Rows", fmt_num(len(e2_car_panel)))
-            c2.metric("Events", fmt_num(e2_car_panel["EVENT_ID"].nunique()) if "EVENT_ID" in e2_car_panel.columns else "--")
-            if not treat.empty:
-                c3.metric("Mean CAR_POST (Treatment)", f"{treat['CAR_POST'].mean():.4f}")
-            if not ctrl.empty:
-                c4.metric("Mean CAR_POST (Control)", f"{ctrl['CAR_POST'].mean():.4f}")
-
-            # Treatment vs Control comparison
-            if not treat.empty and not ctrl.empty:
-                car_compare = pd.DataFrame({
-                    "Group": ["Treatment", "Control", "Difference"],
-                    "N Firms": [treat["TICKER"].nunique(), ctrl["TICKER"].nunique(), ""],
-                    "Mean CAR_PRE": [treat["CAR_PRE"].mean(), ctrl["CAR_PRE"].mean(),
-                                     treat["CAR_PRE"].mean() - ctrl["CAR_PRE"].mean()],
-                    "Mean CAR_POST": [treat["CAR_POST"].mean(), ctrl["CAR_POST"].mean(),
-                                      treat["CAR_POST"].mean() - ctrl["CAR_POST"].mean()],
-                    "Mean CAR_FULL": [treat["CAR_FULL"].mean(), ctrl["CAR_FULL"].mean(),
-                                      treat["CAR_FULL"].mean() - ctrl["CAR_FULL"].mean()],
-                    "Mean Est R²": [treat["EST_R2"].mean(), ctrl["EST_R2"].mean(),
-                                    treat["EST_R2"].mean() - ctrl["EST_R2"].mean()],
-                }).round(4)
-                render_df(car_compare, "Treatment vs Control CARs", "e2_car_compare")
-
-            with st.expander("Full CAR Panel", expanded=False):
-                car_cols = [c for c in ["TICKER", "EVENT_ID", "IS_TREATMENT", "REGIME",
-                                         "CAR_PRE", "CAR_POST", "CAR_FULL", "LEAN",
-                                         "FOMO_Z", "EST_R2"] if c in e2_car_panel.columns]
-                render_df(e2_car_panel[car_cols].round(4), "CAR Panel", "e2_car_panel_full", height=500)
-
-            st.divider()
+        st.divider()
 
         # --- DiD Coefficient Table ---
         if not e2_did_coeff.empty:
@@ -2132,41 +2066,33 @@ with tab_a2:
                     spec_display["Sig."] = spec_display["P_VALUE"].apply(fmt_sig)
                 render_df(spec_display, f"DiD {spec}", f"e2_did_{spec}")
 
-                # Highlight the treatment effect (Treat x Post)
                 treat_row = spec_df[spec_df["VARIABLE"] == "TREAT_x_POST"]
                 if not treat_row.empty:
                     coef = treat_row.iloc[0]["COEFFICIENT"]
                     pval = treat_row.iloc[0]["P_VALUE"]
                     sig_marker = fmt_sig(pval) if pval < 0.1 else " (n.s.)"
                     st.caption(
-                        f"Treatment effect (Treat × Post): {coef:+.4f}{sig_marker}, "
+                        f"Treatment effect (Treat x Post): {coef:+.4f}{sig_marker}, "
                         f"p = {pval:.4f}"
                     )
 
             st.divider()
 
-        # ===== SECTION 9: Failed Studies =====
-        failed_a2 = event_df[event_df["STATUS"] != "OK"] if not event_df.empty else pd.DataFrame()
-        if not failed_a2.empty:
-            with st.expander(f"Failed Event Studies ({len(failed_a2)} events)", expanded=False):
-                st.markdown(
-                    "Events that could not be analyzed, typically due to private firms "
-                    "(no stock data), delistings, or insufficient estimation window data."
-                )
-                render_df(
-                    failed_a2[["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "STATUS"]],
-                    "Failed Events", "a2_failed", height=400,
-                )
-
-        # Full event-level results
-        with st.expander("Full Event Study Results (All Completed)", expanded=False):
-            display = ok_a2[["TICKER", "COMPANY", "EVENT_DATE", "EVENT_DESCRIPTION",
-                             "POLITICAL_LEANING", "CAR", "CAR_T", "CAR_P",
-                             "BHAR"]].copy()
-            display = display.round(4)
-            display["Sig."] = display["CAR_P"].apply(fmt_sig)
-            display = display.sort_values("CAR_P")
-            render_df(display, "Event Study Results", "a2_full_results", height=500)
+        # ===== SECTION 9: Full Event-Level Results =====
+        with st.expander("Full Event Study Results (Treatment Firms)", expanded=False):
+            _full_cols = ["TICKER"]
+            if "COMPANY" in _treat_all.columns:
+                _full_cols.append("COMPANY")
+            _full_cols += ["EVENT_DATE"]
+            if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+                _full_cols.append("ESTIMATED_POLITICAL_LEANING")
+            if "CULTURE_WAR_EVENT" in _treat_all.columns:
+                _full_cols.append("CULTURE_WAR_EVENT")
+            _full_cols += ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2"]
+            _full_cols = [c for c in _full_cols if c in _treat_all.columns]
+            _full_display = _treat_all[_full_cols].copy().round(4)
+            _full_display = _full_display.sort_values("CAR_POST")
+            render_df(_full_display, "Event Study Results", "a2_full_results", height=500)
 
     # --- Chart Gallery ---
     render_chart_gallery(E2_CHARTS, gallery_id="e2")
@@ -2322,6 +2248,14 @@ with tab_a3:
     e3_placebo = load_table("ESSAY3_PLACEBO_TEST")
     e3_accel = load_table("ESSAY3_ACCELERATION_TEST")
     e3_gradient = load_table("ESSAY3_INFORMATION_GRADIENT")
+    e3_tost = load_table("ESSAY3_TOST_EQUIVALENCE")
+    e3_subgroup = load_table("ESSAY3_SUBGROUP_ANALYSIS")
+    e3_vol_shift = load_table("ESSAY3_VOL_SHIFT")
+    e3_tail_firms = load_table("ESSAY3_TAIL_FIRMS")
+    e3_tail_leaning = load_table("ESSAY3_TAIL_LEANING")
+    e3_tail_event_type = load_table("ESSAY3_TAIL_EVENT_TYPE")
+    e3_tail_interaction = load_table("ESSAY3_TAIL_INTERACTION")
+    e3_cons_planned = load_table("ESSAY3_CONS_PLANNED")
 
     _has_e3 = not e3_panel.empty or not e3_abnormal.empty
 
@@ -2506,6 +2440,193 @@ with tab_a3:
             _grad_display = e3_gradient.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
             _grad_display = _grad_display.round(4)
             render_df(_grad_display, "Information Gradient", "a3_gradient")
+            st.divider()
+
+        # --- TOST Equivalence Tests ---
+        if not e3_tost.empty:
+            st.subheader("§4.1 Aggregate Null Characterization (TOST + Power)")
+            st.markdown(
+                "Two One-Sided Tests (TOST) characterize the aggregate null: rather than "
+                "merely failing to reject H₀, we test whether insider selling is *equivalent* "
+                "to benchmark within practically meaningful margins. Post-hoc power analysis "
+                "quantifies what effect sizes the study can detect."
+            )
+            _tost_main = e3_tost[e3_tost["TEST"] == "TOST"].copy() if "TEST" in e3_tost.columns else e3_tost.copy()
+            if not _tost_main.empty:
+                _tost_display = _tost_main.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+                render_df(_tost_display, "TOST Equivalence Tests", "a3_tost")
+            _power = e3_tost[e3_tost["TEST"].isin(["POWER", "MDE"])].copy() if "TEST" in e3_tost.columns else pd.DataFrame()
+            if not _power.empty:
+                _power_display = _power.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+                render_df(_power_display, "Power Analysis & MDE", "a3_power")
+            st.divider()
+
+        # --- Subgroup Signal-Finding ---
+        if not e3_subgroup.empty:
+            st.subheader("§4.2 Subgroup Analysis (Signal-Finding)")
+            st.markdown(
+                "Disaggregated tests for theoretically motivated subgroups where information "
+                "asymmetry is strongest: C-suite insiders, high-CAR events, tight windows, "
+                "and their interactions. All p-values are BH-corrected for multiple comparisons."
+            )
+            _sub_display = e3_subgroup.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _sub_display = _sub_display.round(4)
+            render_df(_sub_display, "Subgroup Analysis", "a3_subgroup")
+            # Highlight any significant subgroups
+            if "BH_SIGNIFICANT" in e3_subgroup.columns:
+                _sig = e3_subgroup[e3_subgroup["BH_SIGNIFICANT"] == 1]
+                if not _sig.empty:
+                    st.success(f"**{len(_sig)} subgroup(s) significant after BH correction:** "
+                               f"{', '.join(_sig['SUBGROUP'].tolist())}")
+                else:
+                    st.info("No subgroups significant after Benjamini-Hochberg correction.")
+            st.divider()
+
+        # --- Volatility-Shift Identification Strategy ---
+        if not e3_vol_shift.empty:
+            st.subheader("§4.3 Robustness: Volatility-Shift Identification Strategy")
+            st.markdown(
+                "Anchors on firm-specific realized volatility spikes (5-day rolling vol > 1.5× 90-day baseline) "
+                "instead of event dates. Tests whether insiders sell more before vol spikes that coincide with "
+                "culture-war events (CW-driven) versus spikes with no CW nexus (non-CW natural controls). "
+                "Within-firm comparisons further control for firm-level confounds."
+            )
+            _vs_display = e3_vol_shift.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            _vs_display = _vs_display.round(4)
+            render_df(_vs_display, "Volatility-Shift Analysis", "a3_vol_shift")
+
+            # Highlight key comparison
+            _cw_row = e3_vol_shift[e3_vol_shift["TEST"] == "CW_VS_NON_CW"]
+            if not _cw_row.empty:
+                _p = float(_cw_row.iloc[0].get("P_VALUE", 1))
+                _d = float(_cw_row.iloc[0].get("COHEN_D", 0))
+                if _p < 0.05:
+                    st.success(f"**CW vs Non-CW significant**: d={_d:.3f}, p={_p:.4f}")
+                else:
+                    st.info(f"CW vs Non-CW not significant: d={_d:.3f}, p={_p:.4f}")
+
+            _mw_row = e3_vol_shift[e3_vol_shift["TEST"] == "CW_VS_NON_CW_MANNWHITNEY"]
+            if not _mw_row.empty:
+                _mw_p = float(_mw_row.iloc[0].get("P_VALUE", 1))
+                if _mw_p < 0.05:
+                    st.warning(f"Mann-Whitney U test significant (p={_mw_p:.4f}) — distributional difference detected")
+
+            _wf_row = e3_vol_shift[e3_vol_shift["TEST"] == "WITHIN_FIRM_CW_VS_NON_CW"]
+            if not _wf_row.empty:
+                _wf_p = float(_wf_row.iloc[0].get("P_VALUE", 1))
+                _wf_d = float(_wf_row.iloc[0].get("COHEN_D", 0))
+                st.markdown(f"**Within-firm paired test** (firms with both CW and non-CW spikes): "
+                            f"d={_wf_d:.3f}, p={_wf_p:.4f}, n={int(_wf_row.iloc[0]['N_SPIKES'])} firms")
+            st.divider()
+
+        # --- Tail Diagnostic: Who Drives the Distributional Difference? ---
+        _has_tail = (not e3_tail_leaning.empty or not e3_tail_event_type.empty
+                     or not e3_tail_interaction.empty)
+        if _has_tail:
+            st.subheader("§4.4 Tail Diagnostic: Leaning × Event Type")
+            st.markdown(
+                "The Mann-Whitney U test detected a distributional difference in insider "
+                "selling before CW-driven vol spikes. These tests decompose *who* drives "
+                "that tail: political leaning (Conservative/Liberal/Mixed), event type "
+                "(Planned corporate action vs Reactive external pressure), and their interaction."
+            )
+
+            # Leaning test
+            if not e3_tail_leaning.empty:
+                st.markdown("**Test 1: Political Leaning in Tail**")
+                _tl_display = e3_tail_leaning.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+                render_df(_tl_display, "Leaning in Tail", "a3_tail_leaning")
+                _chi2 = e3_tail_leaning[e3_tail_leaning["TEST"] == "CHI2_LEANING_VS_TAIL"]
+                if not _chi2.empty:
+                    _chi_p = float(_chi2.iloc[0]["P_VALUE"])
+                    if _chi_p < 0.05:
+                        st.success(f"Chi-square significant (p={_chi_p:.4f}) — leaning predicts tail membership")
+                    else:
+                        st.info(f"Chi-square not significant (p={_chi_p:.4f}) — leaning does not predict tail membership")
+
+            # Event type test
+            if not e3_tail_event_type.empty:
+                st.markdown("**Test 2: Planned vs Reactive Event Type**")
+                _te_display = e3_tail_event_type.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+                render_df(_te_display, "Event Type", "a3_tail_event_type")
+                _pvr = e3_tail_event_type[e3_tail_event_type["COMPARISON"] == "PLANNED_VS_REACTIVE"]
+                if not _pvr.empty:
+                    _pvr_tp = float(_pvr.iloc[0].get("T_PVALUE", 1))
+                    _pvr_d = float(_pvr.iloc[0].get("COHEN_D", 0))
+                    if _pvr_tp < 0.05:
+                        st.success(f"Planned > Reactive: d={_pvr_d:.3f}, p={_pvr_tp:.4f}")
+                    else:
+                        st.info(f"Planned vs Reactive not significant: d={_pvr_d:.3f}, p={_pvr_tp:.4f}")
+
+            # Interaction test
+            if not e3_tail_interaction.empty:
+                st.markdown("**Test 3: Leaning × Event Type Interaction**")
+                _ti_display = e3_tail_interaction.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
+                render_df(_ti_display, "Leaning × Event Type", "a3_tail_interaction")
+                _cells = e3_tail_interaction[e3_tail_interaction["LEAN"] != "INTERACTION"]
+                if not _cells.empty and "P_VALUE" in _cells.columns:
+                    _sig_cells = _cells[_cells["P_VALUE"] < 0.05]
+                    if not _sig_cells.empty:
+                        for _, _sc in _sig_cells.iterrows():
+                            st.success(
+                                f"**{_sc['LEAN']} × {_sc['EVENT_TYPE']}**: "
+                                f"d={float(_sc['COHEN_D']):.3f}, p={float(_sc['P_VALUE']):.4f}, n={int(_sc['N'])}"
+                            )
+                    else:
+                        _best = _cells.loc[_cells["COHEN_D"].astype(float).idxmax()]
+                        st.info(
+                            f"No cells significant after correction. Highest effect: "
+                            f"{_best['LEAN']} × {_best['EVENT_TYPE']} "
+                            f"(d={float(_best['COHEN_D']):.3f}, p={float(_best['P_VALUE']):.4f})"
+                        )
+
+            # Tail firms (expandable)
+            if not e3_tail_firms.empty:
+                with st.expander(f"Top Quintile Tail Firms ({len(e3_tail_firms)} events)", expanded=False):
+                    _tf_cols = [c for c in ["TICKER", "EVENT_DATE", "LEAN", "ABN_SELL",
+                                            "ESTIMATED_POLITICAL_LEANING", "EVENT_TYPE",
+                                            "EVENT_DESCRIPTION"] if c in e3_tail_firms.columns]
+                    _tf_display = e3_tail_firms[_tf_cols].copy()
+                    _tf_display = _tf_display.sort_values("ABN_SELL", ascending=False)
+                    for c in _tf_display.select_dtypes(include=[np.number]).columns:
+                        _tf_display[c] = _tf_display[c].round(0)
+                    render_df(_tf_display, "Tail Firms", "a3_tail_firms", height=400)
+            st.divider()
+
+        # --- Conservative × Planned Deep Dive ---
+        if not e3_cons_planned.empty:
+            st.subheader("§4.5 Conservative × Planned: Case-Study Deep Dive")
+            st.markdown(
+                "The highest-effect interaction cell (Conservative firms making planned political "
+                "actions) shows Cohen's d=0.751 — a large effect by conventional standards. "
+                "However, the cell contains very few events, making the test underpowered. "
+                "This case-study table reveals the individual firms driving the effect."
+            )
+
+            # Separate cases from power row
+            _cp_cases = e3_cons_planned[e3_cons_planned["TICKER"] != "_POWER_DIAGNOSTIC"]
+            _cp_power = e3_cons_planned[e3_cons_planned["TICKER"] == "_POWER_DIAGNOSTIC"]
+
+            if not _cp_cases.empty:
+                _cp_cols = [c for c in ["TICKER", "COMPANY", "EVENT_DATE",
+                            "EVENT_DESCRIPTION", "ABN_SELL_DAILY",
+                            "N_PRE_TRADES", "N_PRE_SELLS", "N_CSUITE_TRADES",
+                            "CSUITE_PRESENT", "MEDIAN_DAYS_BEFORE", "CAR_POST"]
+                            if c in _cp_cases.columns]
+                _cp_display = _cp_cases[_cp_cols].copy()
+                for c in _cp_display.select_dtypes(include=[np.number]).columns:
+                    _cp_display[c] = _cp_display[c].round(2)
+                render_df(_cp_display, "Conservative × Planned Cases", "a3_cons_planned")
+
+            if not _cp_power.empty:
+                _pw = _cp_power.iloc[0]
+                st.warning(f"**Power diagnostic**: {_pw.get('EVENT_DESCRIPTION', '')}")
+                st.markdown(
+                    "This is a **large effect in an underpowered cell** — not an absence of signal. "
+                    "The distinction matters: committees recognize the difference between a true null "
+                    "and insufficient data to reject. This finding motivates future research with "
+                    "larger samples of deliberately planned corporate political actions."
+                )
             st.divider()
 
         # --- Full Panel (expandable) ---
