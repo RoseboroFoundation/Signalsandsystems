@@ -241,6 +241,18 @@ TABLE_MAP = {
         'description': 'Consumer Sentiment, Housing Starts, Home Prices, Dollar Index',
     },
 
+    # --- Political Events & Exposure ---
+    'political_events': {
+        'table': 'POLITICAL_EVENTS',
+        'extract_mode': 'dataframe',
+        'description': 'Political fundamental events (votes, EOs, court decisions)',
+    },
+    'political_exposure': {
+        'table': 'POLITICAL_EXPOSURE',
+        'extract_mode': 'dataframe',
+        'description': 'Firm-level political exposure (lobbying, PAC)',
+    },
+
     # --- SEC Filings ---
     'form4data': {
         'table': 'FORM4_TRANSACTIONS',

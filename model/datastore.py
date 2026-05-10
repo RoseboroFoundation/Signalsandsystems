@@ -173,8 +173,12 @@ class DataStore:
         self.money = self._read('M2_COMPREHENSIVE', parse_dates=['DATE'])
         self.ip = self._read('IP_COMPREHENSIVE', parse_dates=['DATE'])
 
-        logger.info("DataStore ready (%s backend, %d events, %d tickers)",
-                     self.backend, len(self.events),
+        # --- Political Events & Exposure (Essay 3 reframe) ---
+        self.political_events = self._read('POLITICAL_EVENTS', parse_dates=['EVENT_DATE'])
+        self.political_exposure = self._read('POLITICAL_EXPOSURE')
+
+        logger.info("DataStore ready (%s backend, %d events, %d political events, %d tickers)",
+                     self.backend, len(self.events), len(self.political_events),
                      self.stock_returns['TICKER'].nunique() if 'TICKER' in self.stock_returns.columns else 0)
 
     def _reshape_stock_data(self, df):
