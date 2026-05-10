@@ -1,60 +1,82 @@
-"""Essay 3 — Insider Trading Around Culture War Events.
+"""Essay 3 — Informed Insider Trading Around Political Decisions:
+Foreknowledge, Profits, and the Limits of Regulatory Architecture.
 
-Structure mirrors the dissertation:
-  4.1 Aggregate Tests (null characterized by TOST + power)
-  4.2 Subgroup Analysis (signal-finding: C-suite, CAR severity, tight window)
-  4.3 Robustness (DiD, placebo, 10b5-1 filter, bootstrap CIs)
+Research question: Do insiders trade on advance knowledge of political
+decisions that move firm equity values?
 
-Analyses:
-  1.  Event-level insider trading panel (windows around each event)
-  2.  Window summary statistics
-  3.  Abnormal selling tests (pre-event vs benchmark)
-  4.  Treatment vs control regression
-  5.  Political leaning analysis
-  6.  VIX regime interaction
-  7.  Routine vs opportunistic insider classification
-  8.  Placebo permutation test
-  9.  Acceleration (Jonckheere-Terpstra) test
-  10. CAR-insider regression
-  11. Information gradient
-  12. Difference-in-differences (pre/post × treatment/control)
-  13. 10b5-1 plan filter (scheduled vs discretionary)
-  14. Match quality validation (covariate balance)
-  15. Event clustering adjustment (date-clustered SEs)
-  16. Intensive vs extensive margin decomposition
-  17. Abnormal volume ratio (normalized by benchmark volume)
-  18. Firm fixed effects regression
-  19. Cross-sectional determinants of abnormal selling
-  20. Post-event reversal test (selling terciles × CAR)
-  21. Bootstrap confidence intervals
-  22. Fama-MacBeth regressions
-  23. Short-swing profit rule (Section 16b) check
-  24. TOST equivalence tests + power analysis (aggregate null characterization)
-  25. Subgroup signal-finding (C-suite, high-CAR, tight window, normalized ratio)
-  26. Volatility-shift identification strategy (firm-level vol spikes)
-  27. Tail diagnostic: leaning × event type (who drives distributional diff?)
-      a. Tail firm identification (top quintile abnormal sellers)
-      b. Leaning distribution in tail (chi-square, KW)
-      c. Planned vs reactive event type (two-sample + one-sample)
-      d. Leaning × event type interaction (2×3 cells + OLS)
-  28. Conservative × Planned deep dive (case-study table + power diagnostic)
-  29. Industry-controlled logit for tail membership
-  30. Propensity score matching for tail analysis
-  31. Winsorized tail chi-square (1%, 5% clips)
-  32. Size-stratified tail analysis (market-cap terciles)
-  33. Insider-level tail concentration analysis
-  34. Time-series tail decomposition (pre-DEI vs DEI era)
-  35. Placebo test stratified by political leaning
-  36. Within-firm temporal clustering of tail episodes
-  37. Disclosure channel (10b5-1 × leaning in tail)
-  38. Buy-side analysis (abnormal buy reduction)
+Core argument (Roseboro 2026):
+  In the 180 days before political decisions that move firm equity values,
+  insiders trade in directions that significantly predict the event-day price
+  reaction. Pre-event sells are ~56% directionally accurate (vs 50% null,
+  p < 1e-66) compared to ~53% in matched non-political windows (premium
+  ~+3pp, p < 0.001). The aggregate dollar magnitude is billions in informed-
+  trading profits over 2000-2025, concentrated in the 30 days before events
+  with large negative CARs.
 
-Saves 41 tables to SQLite for visual.py and dashboard.py.
+  The buy/sell asymmetry and proximity-to-event pattern suggest informed
+  trading operates through both opportunistic and structural channels.
+  Post-2023 cooling-off amendments have not attenuated informed trading;
+  the directional-accuracy premium is highest in the most recent regulatory
+  period, raising the question of whether ex-ante commitment requirements
+  may institutionalize rather than disrupt informed pre-event trading.
+
+  Connection to Essay 2: the dollar profits documented here account for
+  a substantial fraction of the price discovery around political events.
+  The persistent mispricing in Essay 2 reflects, in part, systematic
+  extraction of value by informed insiders — a microfoundation linking
+  political-economic risk to corporate valuation through an identifiable
+  channel.
+
+Methodology:
+  Headline tests (§12):
+    1. Event-CAR-based directional profitability: political vs control
+    2. By trade direction (buy/sell asymmetry)
+    3. By proximity to event (0-30, 31-60, 61-90, 91-180 days)
+    4. By event-CAR severity (−5%, −10%, −15% thresholds)
+    5. Dollar magnitudes by cut
+    6. Pre/post regulatory period comparison
+
+  Supporting evidence (CG size-accuracy attenuation):
+    7. Trade-size decile accuracy table (political vs matched control)
+    8. LPM: Pr(accurate) ~ log(size) × political interaction
+    9. Pooled and within-firm (ticker FE) specifications
+
+  Distributional evidence (§1-§11):
+   10. Family-level Wilcoxon correction (Holm + BH)
+   11. Insider-level concentration metrics (Gini, HHI, top-K%)
+   12. Active subset characterization
+   13. Quantile/median regression, trimmed robustness, bootstrap
+   14. Insider fixed-effects panel
+
+Output tables (24, orphaned tables from prior runs are auto-dropped):
+  ESSAY3_PANEL                  Event-level panel (carried forward)
+  ESSAY3_STRATIFICATION         Year x activity-tercile strata
+  ESSAY3_MEAN_VS_DISTRIBUTIONAL Side-by-side t-test vs Wilcoxon across all cuts
+  ESSAY3_WILCOXON_FAMILY        Family-level correction (Holm + BH)
+  ESSAY3_INSIDER_CONCENTRATION  Gini, HHI, top-K% profit shares
+  ESSAY3_ACTIVE_SUBSET          Observable characteristics of active insiders
+  ESSAY3_QUANTILE_REGRESSION    Median + quantile regressions
+  ESSAY3_TRIMMED_ROBUSTNESS     Re-test after trimming 1% tails
+  ESSAY3_BOOTSTRAP_WILCOXON     Bootstrapped Wilcoxon (resampled under H0)
+  ESSAY3_INSIDER_PANEL          Within-insider variation (PanelOLS entity FE)
+  ESSAY3_CONCENTRATION_CUTS     Concentration by event type, policy area, connection
+  ESSAY3_REPEAT_TRADERS         Repeat-trader analysis
+  ESSAY3_TOST                   TOST equivalence (carried forward)
+  ESSAY3_PLACEBO                Permutation test (carried forward)
+  ESSAY3_BOOTSTRAP_CI           Bootstrap confidence intervals (carried forward)
+  ESSAY3_CRSP_PROFITS           Trade-level abnormal returns (CRSP profit analysis)
+  ESSAY3_CRSP_SUMMARY           Summary of abnormal returns by cut
+  ESSAY3_INFORMED_TRADING       Headline: directional accuracy by cut (headline)
+  ESSAY3_INFORMED_PROXIMITY     Accuracy by proximity-to-event window (headline)
+  ESSAY3_INFORMED_DOLLARS       Dollar magnitudes by proximity and severity (headline)
+  ESSAY3_SIZE_ACCURACY          Accuracy by trade-size decile × sample (supporting)
+  ESSAY3_SIZE_ACCURACY_SLOPES   Slope of accuracy on log(median_tv) per sample
+  ESSAY3_REVERSAL_REGRESSION    LPM: accuracy ~ log(size) × political (supporting)
+  ESSAY3_CONTROL_TRADES         Non-political matched control trades with CARs
 """
 
 import logging
 import os
-import re
 import warnings
 
 import numpy as np
@@ -63,10 +85,11 @@ from scipy import stats
 import statsmodels.api as sm
 
 from .datastore import DataStore
+from .essay2_did import compute_car
 
 logger = logging.getLogger(__name__)
 
-# ── Window definitions (days relative to event) ─────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────
 WINDOWS = {
     'BENCHMARK':  (-365, -181),
     'PRE_FAR':    (-180, -61),
@@ -76,14 +99,21 @@ WINDOWS = {
     'POST':       (0, 60),
 }
 
-# Transaction codes that represent sells vs buys
-SELL_CODES = {'S'}        # S = open-market sale (F = tax withholding, excluded as non-discretionary)
-BUY_CODES  = {'P'}        # P = open-market purchase
+SELL_CODES = {'S', 'D', 'F'}   # Sale, Disposition, Tax withholding via share surrender
+BUY_CODES  = {'P', 'A'}       # Purchase, Acquisition (option exercise); M handled separately
+SESOI_D = 0.20
+
+REGULATORY_PERIODS = {
+    'PRE_SOX':         (pd.Timestamp('2000-01-01'), pd.Timestamp('2002-12-31')),
+    'SOX_ERA':         (pd.Timestamp('2003-01-01'), pd.Timestamp('2009-12-31')),
+    'DODD_FRANK':      (pd.Timestamp('2010-01-01'), pd.Timestamp('2022-12-31')),
+    'POST_AMENDMENTS': (pd.Timestamp('2023-01-01'), pd.Timestamp('2030-12-31')),
+}
 
 
-# ═══════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════
 # HELPERS
-# ═══════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════
 
 def _load_form4(project_dir=None):
     """Load the combined Form 4 CSV."""
@@ -97,16 +127,12 @@ def _load_form4(project_dir=None):
     df = pd.read_csv(csv_path)
     df['transaction_date'] = pd.to_datetime(df['transaction_date'], errors='coerce')
     df['filing_date'] = pd.to_datetime(df['filing_date'], errors='coerce')
-    # Ensure numeric
-    # shares/shares_owned_after: fill NaN with 0 (missing means no shares
-    # transacted or reported; zeroing preserves row for event matching)
     for col in ['shares', 'shares_owned_after']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     for col in ['price_per_share', 'transaction_value']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-    # Compute transaction_value if column missing; fill NaN rows from shares × price
     if 'transaction_value' not in df.columns:
         df['transaction_value'] = df['shares'] * df['price_per_share']
     else:
@@ -115,8 +141,39 @@ def _load_form4(project_dir=None):
             df.loc[missing, 'transaction_value'] = (
                 df.loc[missing, 'shares'] * df.loc[missing, 'price_per_share']
             )
-            logger.info("  Imputed %d missing transaction_value rows at load time",
-                        missing.sum())
+
+    # Sanity-filter: drop transactions where value is implausible.
+    # Two checks:
+    #   1. Mechanical consistency: if shares and price are both present,
+    #      flag rows where transaction_value differs by >10x from
+    #      shares * price (catches data-entry errors without removing
+    #      legitimate large trades like Bezos/Musk sales >$1B).
+    #   2. Absolute cap at $10B as a backstop (no single Form 4
+    #      transaction should exceed this).
+    TV_ABS_CAP = 10_000_000_000
+    n_abs = (df['transaction_value'].abs() > TV_ABS_CAP).sum()
+    if n_abs > 0:
+        df.loc[df['transaction_value'].abs() > TV_ABS_CAP, 'transaction_value'] = np.nan
+        logger.info("  Dropped %d transactions with |value| > $10B", n_abs)
+
+    # Mechanical consistency check: shares * price vs reported value
+    # Use full-length series to avoid fragile index alignment
+    has_both = (df['shares'] > 0) & df['price_per_share'].notna() & df['transaction_value'].notna()
+    if has_both.any():
+        computed = pd.Series(np.nan, index=df.index)
+        computed.loc[has_both] = (df.loc[has_both, 'shares']
+                                  * df.loc[has_both, 'price_per_share'])
+        ratio = pd.Series(np.nan, index=df.index)
+        ratio.loc[has_both] = (df.loc[has_both, 'transaction_value']
+                               / computed.loc[has_both])
+        ratio = ratio.replace([np.inf, -np.inf], np.nan)
+        bad = ratio.notna() & ((ratio > 10) | (ratio < 0.1))
+        n_bad = bad.sum()
+        if n_bad > 0:
+            df.loc[bad, 'transaction_value'] = computed.loc[bad]
+            logger.info("  Fixed %d transactions where value differed >10x "
+                        "from shares*price", n_bad)
+
     logger.info("Loaded Form 4: %d transactions, %d tickers",
                 len(df), df['ticker'].nunique())
     return df
@@ -125,77 +182,77 @@ def _load_form4(project_dir=None):
 def _classify_trade(code, acq_disp):
     """Classify a transaction as 'sell', 'buy', or 'other'.
 
-    Following Cohen, Malloy & Pomorski (2012): only open-market sales (S)
-    and purchases (P) are used. Derivative exercises (M) are excluded to
-    avoid double-counting when a paired S transaction is also present.
+    For code 'M' (exercise/conversion), the acq_disp field determines
+    whether the underlying was acquired ('A' → buy) or disposed ('D' → sell).
     """
     code = str(code).upper().strip()
-    acq_disp = str(acq_disp).upper().strip()
     if code in SELL_CODES:
         return 'sell'
+    if code == 'M':
+        # Exercise/conversion: direction depends on whether underlying was acquired or disposed
+        ad = str(acq_disp).upper().strip()
+        return 'sell' if ad == 'D' else 'buy'
     if code in BUY_CODES:
         return 'buy'
-    # M (derivative exercise) excluded — often paired with S, causing
-    # double-counting. F (tax withholding) is non-discretionary.
     return 'other'
 
 
-def _is_routine_insider(form4, ticker, owner, event_date, lookback_years=2):
+def _build_routine_cache(form4):
+    """Precompute (ticker, owner) -> (month, year_set) for CMP routine classification.
+
+    Cohen-Malloy-Pomorski (2012): an insider is 'routine' for a given calendar
+    month if they traded in that same calendar month in >= 3 of the prior 5 years.
+    We precompute per (ticker, owner, month) the set of years they traded in.
     """
-    An insider is 'routine' if they traded in >= 3 of last 8 quarters
-    before the event. Otherwise 'opportunistic'.
-    """
-    start = event_date - pd.DateOffset(years=lookback_years)
-    mask = ((form4['ticker'] == ticker) &
-            (form4['owner_name'] == owner) &
-            (form4['transaction_date'] >= start) &
-            (form4['transaction_date'] < event_date))
-    trades = form4.loc[mask, 'transaction_date']
-    if trades.empty:
-        # No prior 2-year history → coded as None (unknown), NOT False (opportunistic).
-        # Robustness: exclude None-history insiders to avoid thin-history firms
-        # driving the opportunistic signal (see _is_routine_insider robustness row).
+    df = form4[['ticker', 'owner_name', 'transaction_date']].dropna().copy()
+    df['month'] = df['transaction_date'].dt.month
+    df['year'] = df['transaction_date'].dt.year
+    # Group by (ticker, owner, month) -> set of years
+    cache = {}
+    grouped = df.groupby(['ticker', 'owner_name', 'month'])['year'].apply(set).reset_index()
+    for _, row in grouped.iterrows():
+        key = (row['ticker'], row['owner_name'], row['month'])
+        cache[key] = row['year']
+    return cache
+
+
+def _is_routine_from_cache(cache, ticker, owner, event_date, lookback_years=5):
+    """CMP routine classification: traded in same calendar month in >= 3 of prior 5 years."""
+    event_month = event_date.month
+    event_year = event_date.year
+    years_traded = cache.get((ticker, owner, event_month))
+    if not years_traded:
         return None
-    quarters = trades.dt.to_period('Q').nunique()
-    return quarters >= 3
+    # Count years in the lookback window [event_year - lookback_years, event_year - 1]
+    lookback_start = event_year - lookback_years
+    n_years = sum(1 for y in years_traded if lookback_start <= y < event_year)
+    return n_years >= 3
 
 
 def _compute_window_metrics(txns, window_days):
-    """Compute trading metrics for a set of transactions in a window."""
+    """Compute trading metrics for transactions in a window."""
     sells = txns[txns['_trade_type'] == 'sell']
     buys = txns[txns['_trade_type'] == 'buy']
 
-    # transaction_value is imputed at load time in _load_form4;
-    # no per-window imputation needed (avoids inconsistent imputation
-    # between buy/sell subsets)
-
     n_transactions = len(txns)
-    n_sells = len(sells)
-    n_buys = len(buys)
-    shares_sold = sells['shares'].sum()
-    shares_bought = buys['shares'].sum()
-    net_shares_sold = shares_sold - shares_bought
     dollar_sold = sells['transaction_value'].sum()
     dollar_bought = buys['transaction_value'].sum()
-    net_dollar_sold = dollar_sold - dollar_bought
+    net_dollar = dollar_sold - dollar_bought
     total_dollar = dollar_sold + dollar_bought
-    net_sell_ratio = net_dollar_sold / total_dollar if total_dollar > 0 else 0.0
+    net_sell_ratio = net_dollar / total_dollar if total_dollar > 0 else 0.0
     n_unique_insiders = txns['owner_name'].nunique() if len(txns) > 0 else 0
-    # Explicit False = opportunistic (has 2yr history, <3 active quarters).
-    # None = unknown history — excluded from both counts.
     n_opportunistic = txns[txns['_is_routine'] == False]['owner_name'].nunique() if len(txns) > 0 else 0  # noqa: E712
     n_routine = txns[txns['_is_routine'] == True]['owner_name'].nunique() if len(txns) > 0 else 0  # noqa: E712
 
     return {
         'N_TRANSACTIONS': n_transactions,
-        'N_SELLS': n_sells,
-        'N_BUYS': n_buys,
-        'SHARES_SOLD': shares_sold,
-        'SHARES_BOUGHT': shares_bought,
-        'NET_SHARES_SOLD': net_shares_sold,
+        'N_SELLS': len(sells),
+        'N_BUYS': len(buys),
+        'SHARES_SOLD': sells['shares'].sum(),
+        'SHARES_BOUGHT': buys['shares'].sum(),
         'DOLLAR_SOLD': dollar_sold,
         'DOLLAR_BOUGHT': dollar_bought,
-        'NET_DOLLAR_SOLD': net_dollar_sold,
+        'NET_DOLLAR': net_dollar,
         'NET_SELL_RATIO': net_sell_ratio,
         'N_UNIQUE_INSIDERS': n_unique_insiders,
         'N_OPPORTUNISTIC': n_opportunistic,
@@ -203,137 +260,408 @@ def _compute_window_metrics(txns, window_days):
     }
 
 
-def _benjamini_hochberg(pvals, alpha=0.1):
-    """Apply BH correction, return boolean array of significance."""
+def _holm_bonferroni(pvals, alpha=0.05):
+    """Holm-Bonferroni correction. Returns boolean array of significance."""
     pvals = np.array(pvals, dtype=float)
     n = len(pvals)
     if n == 0:
         return np.array([], dtype=bool)
     ranked = np.argsort(pvals)
-    thresholds = alpha * (np.arange(1, n + 1)) / n
     significant = np.zeros(n, dtype=bool)
-    sorted_p = pvals[ranked]
-    # Find largest k where p(k) <= threshold(k)
-    below = sorted_p <= thresholds
-    if below.any():
-        k = np.max(np.where(below)[0])
-        significant[ranked[:k + 1]] = True
+    for i, idx in enumerate(ranked):
+        if pvals[idx] <= alpha / (n - i):
+            significant[idx] = True
+        else:
+            break
     return significant
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# PANEL BUILDER
-# ═══════════════════════════════════════════════════════════════════════
+def _benjamini_hochberg(pvals, alpha=0.05):
+    """Benjamini-Hochberg FDR correction. Returns boolean array."""
+    pvals = np.array(pvals, dtype=float)
+    n = len(pvals)
+    if n == 0:
+        return np.array([], dtype=bool)
+    ranked = np.argsort(pvals)
+    significant = np.zeros(n, dtype=bool)
+    # Work backwards from largest p-value
+    for i in range(n - 1, -1, -1):
+        idx = ranked[i]
+        threshold = alpha * (i + 1) / n
+        if pvals[idx] <= threshold:
+            # This and all smaller p-values are significant
+            for j in range(i + 1):
+                significant[ranked[j]] = True
+            break
+    return significant
 
-def build_insider_panel(form4, events, car_df, vix_regimes=None):
+
+def _daily_rate(value, window_name):
+    """Convert a window total to a per-trading-day rate.
+
+    Uses ~252 trading days per 365 calendar days (ratio ≈ 0.69).
     """
-    Build event-level insider trading panel.
+    start, end = WINDOWS[window_name]
+    cal_days = abs(end - start) + 1
+    trading_days = max(1, int(round(cal_days * 252 / 365)))
+    return value / trading_days if trading_days > 0 else 0.0
 
-    For each event (treatment + pseudo-events for controls), compute
-    trading metrics in each window.
 
-    Returns DataFrame with one row per event.
-    """
-    logger.info("Building insider trading panel...")
+def _two_sample_test(vals_a, vals_b, label_a='A', label_b='B'):
+    """Standard two-sample comparison returning a result dict."""
+    if len(vals_a) < 5 or len(vals_b) < 5:
+        return None
+    t_stat, t_pval = stats.ttest_ind(vals_a, vals_b, equal_var=False)
+    u_stat, u_pval = stats.mannwhitneyu(vals_a, vals_b, alternative='two-sided')
+    pooled_std = np.sqrt(
+        ((len(vals_a) - 1) * np.std(vals_a, ddof=1)**2 +
+         (len(vals_b) - 1) * np.std(vals_b, ddof=1)**2) /
+        (len(vals_a) + len(vals_b) - 2)
+    )
+    cohen_d = (np.mean(vals_a) - np.mean(vals_b)) / pooled_std if pooled_std > 0 else 0
+    return {
+        'N_A': len(vals_a), 'N_B': len(vals_b),
+        'MEAN_A': vals_a.mean(), 'MEAN_B': vals_b.mean(),
+        'DIFF_MEAN': vals_a.mean() - vals_b.mean(),
+        'T_STAT': t_stat, 'P_VALUE': t_pval,
+        'U_STAT': u_stat, 'U_PVALUE': u_pval,
+        'COHEN_D': cohen_d,
+    }
 
-    # Build event list: treatment events + control pseudo-events
-    event_rows = []
-    for _, ev in events.iterrows():
-        ticker = ev['TICKER']
+
+def _one_sample_test(vals):
+    """One-sample t-test and Wilcoxon against zero."""
+    if len(vals) < 5:
+        return None
+    t_stat, t_pval = stats.ttest_1samp(vals, 0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        w_stat, w_pval = (stats.wilcoxon(vals, alternative='two-sided', zero_method='pratt')
+                           if len(vals) >= 10 else (np.nan, np.nan))
+    return {
+        'N': len(vals),
+        'MEAN': vals.mean(), 'MEDIAN': vals.median(), 'STD': vals.std(),
+        'T_STAT': t_stat, 'P_VALUE': t_pval,
+        'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+        'COHEN_D': np.mean(vals) / np.std(vals, ddof=1) if np.std(vals, ddof=1) > 0 else 0,
+        'PCT_POSITIVE': (vals > 0).mean(),
+    }
+
+
+def _assign_regulatory_period(event_date):
+    """Assign a regulatory period label to an event date."""
+    for period, (start, end) in REGULATORY_PERIODS.items():
+        if start <= event_date <= end:
+            return period
+    return 'PRE_SOX'
+
+
+def _winsorize_panel(panel, percentile=1):
+    """Winsorize dollar columns within each EVENT_CATEGORY separately."""
+    dollar_cols = [c for c in panel.columns
+                   if any(kw in c for kw in ['DOLLAR', 'NET_TRADING'])]
+    lower = percentile / 100
+    upper = 1 - lower
+    n_clipped = 0
+    for cat in panel['EVENT_CATEGORY'].unique():
+        mask = panel['EVENT_CATEGORY'] == cat
+        for col in dollar_cols:
+            vals = panel.loc[mask, col].dropna()
+            if len(vals) < 10:
+                continue
+            lo, hi = vals.quantile(lower), vals.quantile(upper)
+            before = panel.loc[mask, col].copy()
+            panel.loc[mask, col] = panel.loc[mask, col].clip(lower=lo, upper=hi)
+            clipped = (before != panel.loc[mask, col]).sum()
+            n_clipped += clipped
+    logger.info("  Winsorized %d dollar columns at %d/%d%% within-category (%d values clipped)",
+                len(dollar_cols), percentile, 100 - percentile, n_clipped)
+    return panel
+
+
+def _compute_tost(vals, sesoi_d):
+    """TOST equivalence test against zero."""
+    mean_val = vals.mean()
+    std_val = vals.std()
+    n = len(vals)
+    se = std_val / np.sqrt(n)
+    delta = sesoi_d * std_val
+
+    t_upper = (mean_val - delta) / se if se > 0 else np.nan
+    t_lower = (mean_val + delta) / se if se > 0 else np.nan
+    p_upper = stats.t.cdf(t_upper, df=n - 1)
+    p_lower = 1 - stats.t.cdf(t_lower, df=n - 1)
+    p_tost = max(p_upper, p_lower)
+
+    ncp = mean_val / se if se > 0 else 0
+    power = 1 - stats.t.cdf(
+        stats.t.ppf(0.975, df=n - 1), df=n - 1, loc=abs(ncp)
+    ) if se > 0 else np.nan
+
+    z_alpha = stats.norm.ppf(0.975)
+    z_beta = stats.norm.ppf(0.80)
+    mde_raw = (z_alpha + z_beta) * se if se > 0 else np.nan
+    mde_d = mde_raw / std_val if std_val > 0 and not np.isnan(mde_raw) else np.nan
+
+    return {
+        'N': n, 'MEAN': mean_val, 'STD': std_val, 'SE': se,
+        'SESOI_D': sesoi_d, 'DELTA_RAW': delta,
+        'P_UPPER': p_upper, 'P_LOWER': p_lower, 'P_TOST': p_tost,
+        'EQUIVALENT': p_tost < 0.05,
+        'POWER_AT_OBSERVED': power, 'MDE_80_D': mde_d, 'MDE_80_RAW': mde_raw,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# FUNDAMENTAL CAR COMPUTATION
+# ═════════════════════════════════════════════════════════════════════
+
+def _compute_fundamental_cars(car_df, political_events, form4, store):
+    """Compute CARs for fundamental political events and merge with existing car_df."""
+    if political_events is None or political_events.empty:
+        return car_df
+
+    classified = political_events[
+        political_events['POLICY_AREA'].notna() &
+        (political_events['POLICY_AREA'] != 'unknown') &
+        (political_events['POLICY_AREA'] != '')
+    ]
+    MAX_POLITICAL_EVENTS = 500
+    if len(classified) > MAX_POLITICAL_EVENTS:
+        rng = np.random.RandomState(42)
+        classified = classified.sample(n=MAX_POLITICAL_EVENTS, random_state=rng)
+
+    form4_tickers = form4['ticker'].unique()
+    pairs = set()
+    for _, ev in classified.iterrows():
         event_date = pd.Timestamp(ev['EVENT_DATE'])
-        lean = ev.get('ESTIMATED_POLITICAL_LEANING', 'Unknown')
-        event_id = f"{ticker}_{event_date.strftime('%Y%m%d')}"
+        affected_naics = str(ev.get('AFFECTED_NAICS', ''))
+        naics_list = ([n.strip() for n in affected_naics.split(',')]
+                      if affected_naics and affected_naics != 'nan' else [])
+        matched = _match_tickers_to_naics(
+            form4_tickers, naics_list, form4, event_date, store=store
+        )
+        for ticker in matched:
+            pairs.add((ticker, event_date))
 
-        # Pair ID: shared by treatment and its matched control
-        pair_id = f"{ticker}_{event_date.strftime('%Y%m%d')}"
+    existing = set()
+    if car_df is not None and not car_df.empty:
+        for _, row in car_df.iterrows():
+            existing.add((row['TICKER'], pd.Timestamp(row['EVENT_DATE'])))
+    new_pairs = pairs - existing
+    if not new_pairs:
+        logger.info("All fundamental CARs already computed (%d pairs)", len(pairs))
+        return car_df
 
-        # Treatment event
-        event_rows.append({
-            'TICKER': ticker,
-            'EVENT_ID': event_id,
-            'EVENT_DATE': event_date,
-            'IS_TREATMENT': True,
-            'LEAN': lean,
-            'PAIR_ID': pair_id,
-        })
+    logger.info("Computing CARs for %d fundamental (ticker, event_date) pairs...",
+                len(new_pairs))
 
-        # Control pseudo-event (same date, different ticker)
-        ctrl_ticker = ev.get('CONTROL_TICKER')
-        if pd.notna(ctrl_ticker) and ctrl_ticker:
-            ctrl_id = f"{ctrl_ticker}_{event_date.strftime('%Y%m%d')}"
-            event_rows.append({
-                'TICKER': ctrl_ticker,
-                'EVENT_ID': ctrl_id,
-                'EVENT_DATE': event_date,
-                'IS_TREATMENT': False,
-                'LEAN': lean,
-                'PAIR_ID': pair_id,
+    new_rows = []
+    done = 0
+    for ticker, event_date in new_pairs:
+        result = compute_car(
+            ticker=ticker, store=store,
+            event_id=f"POL_{ticker}_{event_date.strftime('%Y%m%d')}",
+            event_date=event_date, is_treatment=True, regime='Unknown',
+        )
+        if result is not None:
+            new_rows.append({
+                'TICKER': ticker, 'EVENT_DATE': event_date,
+                'CAR': result.car_post, 'CAR_PRE': result.car_pre,
+                'CAR_FULL': result.car_full, 'N_OBS': result.n_event_obs,
+                'R_SQUARED': result.r_squared, 'STATUS': 'OK',
             })
+        done += 1
+        if done % 500 == 0:
+            logger.info("  CARs computed: %d/%d (%d successful)",
+                        done, len(new_pairs), len(new_rows))
 
-    event_list = pd.DataFrame(event_rows)
-    logger.info("  %d events (%d treatment, %d control)",
-                len(event_list),
-                event_list['IS_TREATMENT'].sum(),
-                (~event_list['IS_TREATMENT']).sum())
+    logger.info("  Computed %d CARs from %d pairs (%.0f%% coverage)",
+                len(new_rows), len(new_pairs),
+                100 * len(new_rows) / len(new_pairs) if new_pairs else 0)
 
-    # Precompute routine/opportunistic classification per insider per event date
-    logger.info("  Classifying routine vs opportunistic insiders...")
-    routine_cache = {}
-    for _, ev_row in event_list.iterrows():
-        ticker = ev_row['TICKER']
-        event_date = ev_row['EVENT_DATE']
-        ticker_txns = form4[form4['ticker'] == ticker]
-        for owner in ticker_txns['owner_name'].unique():
-            key = (ticker, owner, event_date)
-            if key not in routine_cache:
-                routine_cache[key] = _is_routine_insider(form4, ticker, owner, event_date)
+    if not new_rows:
+        return car_df
 
-    # Ensure _trade_type is tagged (may already be done by caller)
+    new_car_df = pd.DataFrame(new_rows)
+    if car_df is not None and not car_df.empty:
+        car_df = pd.concat([car_df, new_car_df], ignore_index=True)
+    else:
+        car_df = new_car_df
+    return car_df
+
+
+# ═════════════════════════════════════════════════════════════════════
+# PANEL BUILDER
+# ═════════════════════════════════════════════════════════════════════
+
+def build_insider_panel(form4, culture_events, political_events,
+                        political_exposure=None, car_df=None, store=None):
+    """Build unified event-level insider trading panel.
+
+    Returns a DataFrame with one row per event-firm pair, tagged with
+    EVENT_CATEGORY (CULTURAL/FUNDAMENTAL), REGULATORY_PERIOD, stratification
+    variables, and per-window trading metrics.
+    """
+    logger.info("Building unified insider trading panel...")
+
     form4 = form4.copy()
     if '_trade_type' not in form4.columns:
         form4['_trade_type'] = form4.apply(
             lambda r: _classify_trade(r['transaction_code'], r['acquired_disposed']),
             axis=1
         )
-    # _is_routine will be set per-event in the panel loop below
-    # Default None (unknown history), NOT False — preserves three-valued logic
     form4['_is_routine'] = None
 
-    # Build CAR lookup
+    # ── Cultural events ──────────────────────────────────────────────
+    cultural_rows = []
+    for _, ev in culture_events.iterrows():
+        ticker = ev['TICKER']
+        event_date = pd.Timestamp(ev['EVENT_DATE'])
+        event_id = f"CW_{ticker}_{event_date.strftime('%Y%m%d')}"
+        pair_id = f"{ticker}_{event_date.strftime('%Y%m%d')}"
+        cultural_rows.append({
+            'TICKER': ticker, 'EVENT_ID': event_id,
+            'EVENT_DATE': event_date, 'EVENT_CATEGORY': 'CULTURAL',
+            'EVENT_TYPE': 'CULTURE_WAR', 'IS_TREATMENT': True,
+            'LEAN': ev.get('ESTIMATED_POLITICAL_LEANING', 'Unknown'),
+            'PAIR_ID': pair_id, 'POLICY_AREA': 'cultural',
+            'DESCRIPTION': ev.get('CULTURE_WAR_EVENT', ''),
+        })
+        ctrl_ticker = ev.get('CONTROL_TICKER')
+        if pd.notna(ctrl_ticker) and ctrl_ticker:
+            cultural_rows.append({
+                'TICKER': ctrl_ticker,
+                'EVENT_ID': f"CW_CTRL_{ctrl_ticker}_{event_date.strftime('%Y%m%d')}",
+                'EVENT_DATE': event_date, 'EVENT_CATEGORY': 'CULTURAL',
+                'EVENT_TYPE': 'CULTURE_WAR', 'IS_TREATMENT': False,
+                'LEAN': ev.get('ESTIMATED_POLITICAL_LEANING', 'Unknown'),
+                'PAIR_ID': pair_id, 'POLICY_AREA': 'cultural',
+                'DESCRIPTION': '',
+            })
+
+    # ── Fundamental political events ─────────────────────────────────
+    fundamental_rows = []
+    if political_events is not None and not political_events.empty:
+        classified = political_events[
+            political_events['POLICY_AREA'].notna() &
+            (political_events['POLICY_AREA'] != 'unknown') &
+            (political_events['POLICY_AREA'] != '')
+        ]
+        logger.info("  Filtered political events: %d classified / %d total",
+                     len(classified), len(political_events))
+
+        MAX_POLITICAL_EVENTS = 500
+        if len(classified) > MAX_POLITICAL_EVENTS:
+            rng = np.random.RandomState(42)
+            classified = classified.sample(n=MAX_POLITICAL_EVENTS, random_state=rng)
+            logger.info("  Sampled %d political events", len(classified))
+
+        form4_tickers = form4['ticker'].unique()
+        for _, ev in classified.iterrows():
+            event_date = pd.Timestamp(ev['EVENT_DATE'])
+            affected_naics = str(ev.get('AFFECTED_NAICS', ''))
+            naics_list = ([n.strip() for n in affected_naics.split(',')]
+                          if affected_naics and affected_naics != 'nan' else [])
+            affected_tickers = _match_tickers_to_naics(
+                form4_tickers, naics_list, form4, event_date, store=store
+            )
+            for ticker in affected_tickers:
+                event_id_base = ev.get('EVENT_ID', f"POL_{event_date.strftime('%Y%m%d')}")
+                fundamental_rows.append({
+                    'TICKER': ticker,
+                    'EVENT_ID': f"{event_id_base}_{ticker}",
+                    'EVENT_DATE': event_date, 'EVENT_CATEGORY': 'FUNDAMENTAL',
+                    'EVENT_TYPE': ev.get('EVENT_TYPE', 'POLITICAL'),
+                    'IS_TREATMENT': True, 'LEAN': 'N/A',
+                    'PAIR_ID': f"{event_id_base}_{ticker}",
+                    'POLICY_AREA': ev.get('POLICY_AREA', 'unknown'),
+                    'DESCRIPTION': ev.get('DESCRIPTION', ''),
+                    'IS_CLOSE_VOTE': ev.get('IS_CLOSE_VOTE', False),
+                    'VOTE_MARGIN': ev.get('VOTE_MARGIN', np.nan),
+                })
+
+    all_event_rows = cultural_rows + fundamental_rows
+    if not all_event_rows:
+        logger.error("No events to process")
+        return pd.DataFrame()
+
+    event_list = pd.DataFrame(all_event_rows)
+    n_cultural = (event_list['EVENT_CATEGORY'] == 'CULTURAL').sum()
+    n_fundamental = (event_list['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum()
+    logger.info("  %d total events: %d cultural, %d fundamental",
+                len(event_list), n_cultural, n_fundamental)
+
+    # Precompute routine classification (vectorized)
+    logger.info("  Building routine insider cache (vectorized)...")
+    quarter_cache = _build_routine_cache(form4)
+    logger.info("  Cache built: %d (ticker, owner) pairs", len(quarter_cache))
+
+    routine_cache = {}
+    unique_events = event_list[['TICKER', 'EVENT_DATE']].drop_duplicates()
+    for _, ev_row in unique_events.iterrows():
+        ticker = ev_row['TICKER']
+        event_date = ev_row['EVENT_DATE']
+        ticker_owners = form4.loc[form4['ticker'] == ticker, 'owner_name'].unique()
+        for owner in ticker_owners:
+            key = (ticker, owner, event_date)
+            if key not in routine_cache:
+                routine_cache[key] = _is_routine_from_cache(
+                    quarter_cache, ticker, owner, event_date
+                )
+
+    # Build lookups
     car_lookup = {}
     if car_df is not None and not car_df.empty:
         for _, row in car_df.iterrows():
             key = (row['TICKER'], pd.Timestamp(row['EVENT_DATE']).strftime('%Y%m%d'))
             car_lookup[key] = row.get('CAR', None)
 
-    # Compute metrics for each event × window
+    exposure_lookup = {}
+    if political_exposure is not None and not political_exposure.empty:
+        for _, row in political_exposure.iterrows():
+            key = (row['TICKER'], int(row['YEAR']))
+            exposure_lookup[key] = {
+                'LOBBYING_TOTAL': row.get('LOBBYING_TOTAL', 0),
+                'PAC_TOTAL': row.get('PAC_TOTAL', 0),
+                'POLITICAL_CONNECTION_SCORE': row.get('POLITICAL_CONNECTION_SCORE', np.nan),
+            }
+
+    # ── Compute metrics per event ────────────────────────────────────
     panel_rows = []
     n_events = len(event_list)
-    for i, (idx, ev) in enumerate(event_list.iterrows()):
+    for i, (_, ev) in enumerate(event_list.iterrows()):
         ticker = ev['TICKER']
         event_date = ev['EVENT_DATE']
         ticker_txns = form4[form4['ticker'] == ticker].copy()
-
-        # Set per-event routine classification
-        # Default to None (unknown history) — not False (opportunistic).
-        # Insiders with no 2-year history should be excluded from routine/
-        # opportunistic counts, not silently lumped into opportunistic.
         ticker_txns['_is_routine'] = ticker_txns['owner_name'].apply(
             lambda owner: routine_cache.get((ticker, owner, event_date), None)
         )
 
         row = {
-            'TICKER': ticker,
-            'EVENT_ID': ev['EVENT_ID'],
-            'EVENT_DATE': event_date,
-            'IS_TREATMENT': ev['IS_TREATMENT'],
-            'LEAN': ev['LEAN'],
+            'TICKER': ticker, 'EVENT_ID': ev['EVENT_ID'],
+            'EVENT_DATE': event_date, 'EVENT_CATEGORY': ev['EVENT_CATEGORY'],
+            'EVENT_TYPE': ev['EVENT_TYPE'], 'IS_TREATMENT': ev['IS_TREATMENT'],
+            'LEAN': ev.get('LEAN', 'N/A'),
             'PAIR_ID': ev.get('PAIR_ID', ev['EVENT_ID']),
+            'POLICY_AREA': ev.get('POLICY_AREA', 'unknown'),
+            'IS_CLOSE_VOTE': ev.get('IS_CLOSE_VOTE', False),
+            'VOTE_MARGIN': ev.get('VOTE_MARGIN', np.nan),
+            'REGULATORY_PERIOD': _assign_regulatory_period(event_date),
         }
 
-        # Look up CAR
+        # CAR + exposure lookups
         car_key = (ticker, event_date.strftime('%Y%m%d'))
         row['CAR_POST'] = car_lookup.get(car_key)
+        exp = exposure_lookup.get((ticker, event_date.year), {})
+        row['LOBBYING_TOTAL'] = exp.get('LOBBYING_TOTAL', 0)
+        row['PAC_TOTAL'] = exp.get('PAC_TOTAL', 0)
+        row['POLITICAL_CONNECTION_SCORE'] = exp.get('POLITICAL_CONNECTION_SCORE', np.nan)
+        row['HIGH_POLITICAL_CONNECTION'] = (
+            row['POLITICAL_CONNECTION_SCORE'] >= 0.5
+            if not np.isnan(row.get('POLITICAL_CONNECTION_SCORE', np.nan))
+            else False
+        )
 
         # Compute each window
         has_data = False
@@ -342,4648 +670,3092 @@ def build_insider_panel(form4, events, car_df, vix_regimes=None):
             w_end = event_date + pd.Timedelta(days=d_end)
             mask = ((ticker_txns['transaction_date'] >= w_start) &
                     (ticker_txns['transaction_date'] <= w_end))
-            w_txns = ticker_txns[mask]
-            metrics = _compute_window_metrics(w_txns, (d_start, d_end))
-
+            metrics = _compute_window_metrics(ticker_txns[mask], (d_start, d_end))
             for k, v in metrics.items():
                 row[f'{window_name}_{k}'] = v
-
             if metrics['N_TRANSACTIONS'] > 0:
                 has_data = True
 
-        # Abnormal selling flag: pre-full daily > benchmark daily
-        bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-        pre_full_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-        bench_daily = row.get('BENCHMARK_NET_DOLLAR_SOLD', 0) / bench_days
-        pre_daily = row.get('PRE_FULL_NET_DOLLAR_SOLD', 0) / pre_full_days
+        bench_daily = _daily_rate(row.get('BENCHMARK_NET_DOLLAR', 0), 'BENCHMARK')
+        pre_daily = _daily_rate(row.get('PRE_FULL_NET_DOLLAR', 0), 'PRE_FULL')
+        row['ABNORMAL_NET_TRADING'] = pre_daily - bench_daily
         row['ABNORMAL_SELLING'] = 1 if (pre_daily > bench_daily and pre_daily > 0) else 0
         row['HAS_SUFFICIENT_DATA'] = 1 if has_data else 0
 
-        panel_rows.append(row)
+        # Four-condition proxies (kept for descriptive use)
+        row['C1_FIRM_VALUE'] = int(abs(row.get('CAR_POST') or 0) > 0.02)
+        pre_n = row.get('PRE_NEAR_N_TRANSACTIONS', 0)
+        post_n = row.get('POST_N_TRANSACTIONS', 0)
+        if post_n == 0:
+            row['C2_INFO_ASYMMETRY'] = int(pre_n > 0)  # max asymmetry if pre but no post
+        else:
+            row['C2_INFO_ASYMMETRY'] = int(pre_n > post_n * 1.5)
+        row['C3_TRADEABLE'] = int(row.get('BENCHMARK_N_TRANSACTIONS', 0) >= 3)
+        row['C4_ABNORMAL_RETURN'] = int(abs(row['ABNORMAL_NET_TRADING']) > 0)
+        row['CONDITIONS_MET'] = (row['C1_FIRM_VALUE'] + row['C2_INFO_ASYMMETRY'] +
+                                  row['C3_TRADEABLE'] + row['C4_ABNORMAL_RETURN'])
 
-        if (i + 1) % 50 == 0:
+        # Opportunistic fraction for this event
+        opp_n = row.get('PRE_FULL_N_OPPORTUNISTIC', 0)
+        rout_n = row.get('PRE_FULL_N_ROUTINE', 0)
+        total_classified = opp_n + rout_n
+        row['OPP_FRACTION'] = opp_n / total_classified if total_classified > 0 else np.nan
+        row['HIGH_OPP'] = row['OPP_FRACTION'] >= 0.5 if not np.isnan(row['OPP_FRACTION']) else False
+
+        panel_rows.append(row)
+        if (i + 1) % 500 == 0:
             logger.info("  Processed %d/%d events", i + 1, n_events)
 
     panel = pd.DataFrame(panel_rows)
-    logger.info("  Panel built: %d rows, %d with sufficient data",
-                len(panel), panel['HAS_SUFFICIENT_DATA'].sum())
+
+    # Winsorize within-category
+    panel = _winsorize_panel(panel, percentile=1)
+
+    # Recompute DV after winsorization
+    panel['ABNORMAL_NET_TRADING'] = panel.apply(
+        lambda r: _daily_rate(r.get('PRE_FULL_NET_DOLLAR', 0), 'PRE_FULL')
+                  - _daily_rate(r.get('BENCHMARK_NET_DOLLAR', 0), 'BENCHMARK'),
+        axis=1
+    )
+    panel['ABNORMAL_SELLING'] = (panel['ABNORMAL_NET_TRADING'] > 0).astype(int)
+
+    # Stratify
+    panel = _stratify_panel(panel)
+
+    logger.info("  Panel built: %d rows (%d cultural, %d fundamental), %d with data",
+                len(panel),
+                (panel['EVENT_CATEGORY'] == 'CULTURAL').sum(),
+                (panel['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum(),
+                panel['HAS_SUFFICIENT_DATA'].sum())
     return panel
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# AGGREGATE ANALYSES
-# ═══════════════════════════════════════════════════════════════════════
+def _build_ticker_naics_map(store):
+    """Build ticker -> 3-digit NAICS prefix mapping from database tables.
 
-def compute_window_summary(panel):
-    """Aggregate insider trading metrics by window, separately for treatment and control."""
-    windows = ['BENCHMARK', 'PRE_FAR', 'PRE_MID', 'PRE_NEAR', 'PRE_FULL', 'POST']
-    rows = []
-    for group_name, sub in [('TREATMENT', panel[panel['IS_TREATMENT'] == True]),
-                             ('CONTROL', panel[panel['IS_TREATMENT'] == False]),
-                             ('ALL', panel)]:
-        for w in windows:
-            col_nds = f'{w}_NET_DOLLAR_SOLD'
-            col_nsr = f'{w}_NET_SELL_RATIO'
-            col_nt = f'{w}_N_TRANSACTIONS'
-            col_no = f'{w}_N_OPPORTUNISTIC'
-            if col_nds not in sub.columns:
-                continue
-            rows.append({
-                'GROUP': group_name,
-                'WINDOW': w,
-                'N_EVENTS': len(sub),
-                'MEAN_NET_DOLLAR_SOLD': sub[col_nds].mean(),
-                'MEDIAN_NET_DOLLAR_SOLD': sub[col_nds].median(),
-                'STD_NET_DOLLAR_SOLD': sub[col_nds].std(),
-                'MEAN_NET_SELL_RATIO': sub[col_nsr].mean() if col_nsr in sub.columns else 0,
-                'MEDIAN_NET_SELL_RATIO': sub[col_nsr].median() if col_nsr in sub.columns else 0,
-                'MEAN_N_TRANSACTIONS': sub[col_nt].mean() if col_nt in sub.columns else 0,
-                'TOTAL_TRANSACTIONS': int(sub[col_nt].sum()) if col_nt in sub.columns else 0,
-                'MEAN_N_OPPORTUNISTIC': sub[col_no].mean() if col_no in sub.columns else 0,
-            })
-    return pd.DataFrame(rows)
+    Combines CULTURE_WAR_COMPANIES and CONTROL_COMPANIES NAICS codes,
+    plus manual assignments for tickers without database coverage.
+    """
+    naics_map = {}
 
-
-def compute_abnormal_selling(panel):
-    """Paired t-test: pre-event daily selling vs benchmark daily selling (treatment only)."""
-    treatment = panel[panel['IS_TREATMENT'] == True]
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-    windows = ['PRE_FAR', 'PRE_MID', 'PRE_NEAR', 'PRE_FULL']
-    rows = []
-    for w in windows:
-        w_days = abs(WINDOWS[w][1] - WINDOWS[w][0]) + 1
-        pre_col = f'{w}_NET_DOLLAR_SOLD'
-        bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-        if pre_col not in treatment.columns or bench_col not in treatment.columns:
-            continue
-
-        pre_daily = treatment[pre_col] / w_days
-        bench_daily = treatment[bench_col] / bench_days
-        diff = pre_daily - bench_daily
-
-        # Paired t-test
-        t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-        # Wilcoxon signed-rank (needs non-zero differences)
-        nonzero_diff = diff[diff != 0]
-        if len(nonzero_diff) > 10:
-            w_stat, w_p = stats.wilcoxon(nonzero_diff)
-        else:
-            w_stat, w_p = np.nan, np.nan
-
-        rows.append({
-            'WINDOW': w,
-            'N_PAIRS': len(treatment),
-            'MEAN_PRE_DAILY': pre_daily.mean(),
-            'MEAN_BENCH_DAILY': bench_daily.mean(),
-            'MEAN_DIFF': diff.mean(),
-            'T_STAT': t_stat,
-            'T_PVALUE': t_p,
-            'WILCOXON_STAT': w_stat if not np.isnan(w_stat) else 0.0,
-            'WILCOXON_PVALUE': w_p if not np.isnan(w_p) else 1.0,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df['T_BH_SIGNIFICANT'] = _benjamini_hochberg(df['T_PVALUE'].values).astype(int)
-        df['WILCOXON_BH_SIGNIFICANT'] = _benjamini_hochberg(df['WILCOXON_PVALUE'].values).astype(int)
-    return df
-
-
-def compute_treatment_vs_control(panel):
-    """OLS regression: net dollar sold ~ IS_TREATMENT + controls."""
-    rows = []
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    if dep_var not in panel.columns:
-        return pd.DataFrame()
-
-    pair_col = 'PAIR_ID' if 'PAIR_ID' in panel.columns else 'EVENT_ID'
-    df = panel[[dep_var, 'IS_TREATMENT', 'LEAN', 'EVENT_ID', pair_col]].dropna(subset=[dep_var]).copy()
-    df['IS_TREATMENT_INT'] = df['IS_TREATMENT'].astype(int)
-
-    # Spec 1: OLS with clustering on matched pair (treatment + control share PAIR_ID)
+    # From CULTURE_WAR_COMPANIES
     try:
-        y = df[dep_var].astype(float)
-        X = sm.add_constant(df[['IS_TREATMENT_INT']].astype(float))
-        model = sm.OLS(y, X).fit(cov_type='cluster',
-                                  cov_kwds={'groups': df[pair_col]})
-        for var in model.params.index:
-            rows.append({
-                'SPECIFICATION': 'OLS_CLUSTER_EVENT',
-                'VARIABLE': var,
-                'COEFFICIENT': model.params[var],
-                'STD_ERROR': model.bse[var],
-                'T_STAT': model.tvalues[var],
-                'P_VALUE': model.pvalues[var],
-                'R_SQUARED': model.rsquared,
-                'N_OBS': int(model.nobs),
-            })
-    except Exception as e:
-        logger.warning("OLS treatment-vs-control failed: %s", e)
+        cwc = store.read_table('CULTURE_WAR_COMPANIES')
+        if not cwc.empty and 'NAICS_CODE' in cwc.columns:
+            for _, r in cwc[['TICKER', 'NAICS_CODE']].drop_duplicates('TICKER').iterrows():
+                code = int(r['NAICS_CODE']) if pd.notna(r['NAICS_CODE']) else 0
+                if code != 999999 and code > 0:
+                    naics_map[r['TICKER']] = str(code)[:3]
+    except Exception:
+        pass
 
-    # Spec 2: With lean dummies
+    # From CONTROL_COMPANIES
     try:
-        lean_dummies = pd.get_dummies(df['LEAN'], prefix='LEAN', drop_first=True).astype(float)
-        X2 = sm.add_constant(pd.concat([df[['IS_TREATMENT_INT']].astype(float), lean_dummies], axis=1))
-        model2 = sm.OLS(y, X2).fit(cov_type='cluster',
-                                    cov_kwds={'groups': df[pair_col]})
-        for var in model2.params.index:
-            rows.append({
-                'SPECIFICATION': 'OLS_CLUSTER_LEAN',
-                'VARIABLE': var,
-                'COEFFICIENT': model2.params[var],
-                'STD_ERROR': model2.bse[var],
-                'T_STAT': model2.tvalues[var],
-                'P_VALUE': model2.pvalues[var],
-                'R_SQUARED': model2.rsquared,
-                'N_OBS': int(model2.nobs),
-            })
-    except Exception as e:
-        logger.warning("OLS treatment-vs-control (lean) failed: %s", e)
-
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out['BH_SIGNIFICANT'] = _benjamini_hochberg(df_out['P_VALUE'].values).astype(int)
-    return df_out
-
-
-def compute_leaning_analysis(panel):
-    """Insider selling by political leaning."""
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    if treatment.empty:
-        return pd.DataFrame()
-
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    rows = []
-    groups = []
-    for lean, grp in treatment.groupby('LEAN'):
-        vals = grp[dep_var].dropna()
-        t_stat, t_p = (np.nan, np.nan)
-        if len(vals) > 1 and vals.std() > 0:
-            t_stat, t_p = stats.ttest_1samp(vals, 0)
-        groups.append(vals.values)
-        rows.append({
-            'LEAN': lean,
-            'N_EVENTS': len(grp),
-            'MEAN_NET_DOLLAR_SOLD': vals.mean() if len(vals) > 0 else 0,
-            'MEDIAN_NET_DOLLAR_SOLD': vals.median() if len(vals) > 0 else 0,
-            'STD_NET_DOLLAR_SOLD': vals.std() if len(vals) > 0 else 0,
-            'T_STAT_VS_ZERO': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE_VS_ZERO': t_p if not np.isnan(t_p) else None,
-        })
-
-    # Kruskal-Wallis across leanings
-    valid_groups = [g for g in groups if len(g) > 0]
-    if len(valid_groups) >= 2:
-        try:
-            kw_stat, kw_p = stats.kruskal(*valid_groups)
-        except Exception:
-            kw_stat, kw_p = None, None
-    else:
-        kw_stat, kw_p = None, None
-
-    df = pd.DataFrame(rows)
-    df['KW_STAT'] = kw_stat
-    df['KW_PVALUE'] = kw_p
-    df['BH_SIGNIFICANT'] = 0
-    if df['P_VALUE_VS_ZERO'].notna().any():
-        pvals = df['P_VALUE_VS_ZERO'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-    return df
-
-
-def compute_regime_interaction(panel, vix_df=None):
-    """Test insider selling by VIX regime."""
-    if vix_df is None or vix_df.empty:
-        return pd.DataFrame()
-
-    # Classify VIX regimes: Low (<15), Medium (15-25), High (>25)
-    vix = vix_df[['DATE', 'VIX']].dropna().copy()
-    vix['DATE'] = pd.to_datetime(vix['DATE'])
-    vix['VIX_REGIME'] = pd.cut(vix['VIX'],
-                                bins=[0, 15, 25, 100],
-                                labels=['Low', 'Medium', 'High'])
-
-    # Map each event to nearest prior trading day's VIX regime
-    panel = panel.copy()
-    panel['EVENT_DATE'] = pd.to_datetime(panel['EVENT_DATE'])
-    vix = vix.sort_values('DATE')
-    panel = panel.sort_values('EVENT_DATE')
-    panel = pd.merge_asof(
-        panel, vix[['DATE', 'VIX_REGIME']],
-        left_on='EVENT_DATE', right_on='DATE',
-        direction='backward', tolerance=pd.Timedelta(days=7)
-    )
-    panel = panel.drop(columns=['DATE'], errors='ignore')
-    panel['VIX_MATCHED'] = panel['VIX_REGIME'].notna() & (panel['VIX_REGIME'].astype(str) != 'nan')
-    panel['VIX_REGIME'] = panel['VIX_REGIME'].astype(str).replace('nan', 'Unknown')
-
-    # Daily pre-event selling
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    panel['_pre_daily'] = panel['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days
-
-    rows = []
-    tests = [
-        ('NET_SELL_DAILY', '_pre_daily'),
-    ]
-
-    for test_name, col in tests:
-        for regime, grp in panel.groupby('VIX_REGIME'):
-            vals = grp[col].dropna()
-            n = len(vals)
-            if n < 2:
-                t_stat, p_val = np.nan, np.nan
-            else:
-                t_stat, p_val = stats.ttest_1samp(vals, 0)
-            rows.append({
-                'TEST': f'REGIME_{regime}_VS_ZERO',
-                'REGIME': regime,
-                'N': n,
-                'MEAN_NET_SELL_DAILY': vals.mean() if n > 0 else 0,
-                'STD_NET_SELL_DAILY': vals.std() if n > 0 else 0,
-                'T_STAT': t_stat if not np.isnan(t_stat) else None,
-                'P_VALUE': p_val if not np.isnan(p_val) else None,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        pvals = df['P_VALUE'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-    return df
-
-
-def compute_routine_vs_opportunistic(panel):
-    """Compare routine vs opportunistic insider trading pre vs benchmark (treatment only)."""
-    treatment = panel[panel['IS_TREATMENT'] == True]
-    if treatment.empty:
-        return pd.DataFrame()
-
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-
-    tests = [
-        ('OPPORTUNISTIC_PRE_VS_BENCH', 'N_OPPORTUNISTIC'),
-        ('ROUTINE_PRE_VS_BENCH', 'N_ROUTINE'),
-        ('ALL_SELLS_PRE_VS_BENCH', 'NET_DOLLAR_SOLD'),
-        ('OPP_DOLLAR_PRE_VS_BENCH', 'DOLLAR_SOLD'),
-        ('SELL_RATIO_PRE_VS_BENCH', 'NET_SELL_RATIO'),
-        ('INSIDERS_PRE_VS_BENCH', 'N_UNIQUE_INSIDERS'),
-    ]
-
-    rows = []
-    for test_name, metric in tests:
-        pre_col = f'PRE_FULL_{metric}'
-        bench_col = f'BENCHMARK_{metric}'
-        if pre_col not in treatment.columns or bench_col not in treatment.columns:
-            continue
-
-        pre_vals = treatment[pre_col].fillna(0)
-        bench_vals = treatment[bench_col].fillna(0)
-
-        if metric == 'NET_SELL_RATIO':
-            # Ratio metric — already normalized, no day adjustment needed
-            pre_daily = pre_vals
-            bench_daily = bench_vals
-        else:
-            # Day-normalize all count and dollar metrics for apples-to-apples
-            # comparison across windows of different lengths (PRE_FULL=180, BENCHMARK=185)
-            pre_daily = pre_vals / pre_days
-            bench_daily = bench_vals / bench_days
-
-        diff = pre_daily - bench_daily
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1:
-            t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-
-        rows.append({
-            'TEST': test_name,
-            'N_PAIRS': len(treatment),
-            'MEAN_PRE_DAILY': pre_daily.mean(),
-            'MEAN_BENCH_DAILY': bench_daily.mean(),
-            'MEAN_DIFF': diff.mean(),
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        pvals = df['P_VALUE'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-    return df
-
-
-def compute_placebo_test(panel, n_iterations=500, seed=42):
-    """Permutation test: shuffle treatment labels *within pairs*, compare selling.
-
-    Treatment and control firms are matched pairs (PAIR_ID). We permute
-    the treatment label within each pair so that the matched structure is
-    preserved (each permuted draw has exactly one treatment and one control
-    per pair). If PAIR_ID is unavailable, falls back to global permutation.
-    """
-    rng = np.random.RandomState(seed)
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    pre_daily = panel[pre_col] / pre_days
-    bench_daily = panel[bench_col] / bench_days
-    diff = (pre_daily - bench_daily).values
-
-    treatment_mask = panel['IS_TREATMENT'].values
-    observed = diff[treatment_mask].mean() - diff[~treatment_mask].mean()
-
-    # Within-pair permutation: flip treatment label within each PAIR_ID
-    has_pairs = 'PAIR_ID' in panel.columns
-    if has_pairs:
-        pair_ids = panel['PAIR_ID'].values
-        unique_pairs = np.unique(pair_ids[~pd.isna(pair_ids)])
-        if len(unique_pairs) == 0:
-            logger.warning("Placebo: PAIR_ID column exists but no valid pairs; falling back to global")
-            has_pairs = False
-
-    placebo_stats = []
-    for _ in range(n_iterations):
-        if has_pairs and len(unique_pairs) > 0:
-            shuffled = treatment_mask.copy()
-            for pid in unique_pairs:
-                pair_idx = np.where(pair_ids == pid)[0]
-                if len(pair_idx) == 2:
-                    if rng.random() < 0.5:
-                        shuffled[pair_idx[0]], shuffled[pair_idx[1]] = \
-                            shuffled[pair_idx[1]], shuffled[pair_idx[0]]
-        else:
-            shuffled = rng.permutation(treatment_mask)
-        placebo_stat = diff[shuffled].mean() - diff[~shuffled].mean()
-        placebo_stats.append(placebo_stat)
-
-    placebo_stats = np.array(placebo_stats)
-    percentile = (placebo_stats < observed).mean() * 100
-    empirical_p = (np.abs(placebo_stats) >= np.abs(observed)).mean()
-
-    return pd.DataFrame([{
-        'TEST': 'PLACEBO_PERMUTATION',
-        'OBSERVED_STAT': observed,
-        'PLACEBO_MEAN': placebo_stats.mean(),
-        'PLACEBO_STD': placebo_stats.std(),
-        'PERCENTILE_ONE_SIDED': percentile,
-        'EMPIRICAL_P_TWO_SIDED': empirical_p,
-        'N_ITERATIONS': n_iterations,
-        'N_FIRMS': panel['TICKER'].nunique(),
-    }])
-
-
-def compute_acceleration_test(panel):
-    """Jonckheere-Terpstra trend test for monotonic increase far → mid → near.
-
-    Note: JT assumes independent groups, but these are repeated measures on
-    the same firms across consecutive windows. Results should be interpreted
-    as approximate; a Page's trend test or mixed-effects model with linear
-    time coefficient would be more appropriate for paired data.
-    """
-    windows = ['PRE_FAR', 'PRE_MID', 'PRE_NEAR']
-
-    tests_config = [
-        ('JT_TREND_ALL', 'NET_DOLLAR_SOLD', None),
-        ('JT_TREND_TREATMENT', 'NET_DOLLAR_SOLD', True),
-        ('JT_TREND_CONTROL', 'NET_DOLLAR_SOLD', False),
-        ('JT_TREND_SELLS', 'N_SELLS', None),
-        ('JT_TREND_DOLLAR_SOLD', 'DOLLAR_SOLD', None),
-        ('JT_TREND_OPP', 'N_OPPORTUNISTIC', None),
-        ('JT_TREND_INSIDERS', 'N_UNIQUE_INSIDERS', None),
-        ('JT_TREND_SELL_RATIO', 'NET_SELL_RATIO', None),
-        ('JT_TREND_CONSERVATIVE', 'NET_DOLLAR_SOLD', 'Conservative'),
-        ('JT_TREND_LIBERAL', 'NET_DOLLAR_SOLD', 'Liberal'),
-        ('JT_TREND_MIXED', 'NET_DOLLAR_SOLD', 'Mixed'),
-        ('JT_TREND_NET_SHARES', 'NET_SHARES_SOLD', None),
-    ]
-
-    rows = []
-    for test_name, metric, filter_val in tests_config:
-        sub = panel.copy()
-        if filter_val is True:
-            sub = sub[sub['IS_TREATMENT'] == True]
-        elif filter_val is False:
-            sub = sub[sub['IS_TREATMENT'] == False]
-        elif isinstance(filter_val, str):
-            sub = sub[sub['LEAN'] == filter_val]
-
-        cols = [f'{w}_{metric}' for w in windows]
-        present = [c for c in cols if c in sub.columns]
-        if len(present) < 3:
-            continue
-
-        # Normalize by window days
-        day_counts = [abs(WINDOWS[w][1] - WINDOWS[w][0]) + 1 for w in windows]
-        groups = []
-        for col, days in zip(present, day_counts):
-            if metric in ('NET_DOLLAR_SOLD', 'DOLLAR_SOLD', 'NET_SHARES_SOLD'):
-                groups.append(sub[col].fillna(0) / days)
-            else:
-                groups.append(sub[col].fillna(0))
-
-        # Jonckheere-Terpstra: test for ordered increase across independent groups
-        # JT statistic = sum of Mann-Whitney U statistics for all ordered pairs
-        try:
-            jt_stat = 0
-            for i_g in range(len(groups)):
-                for j_g in range(i_g + 1, len(groups)):
-                    u_stat, _ = stats.mannwhitneyu(
-                        groups[i_g].values, groups[j_g].values, alternative='less'
-                    )
-                    jt_stat += u_stat
-            # Normal approximation for p-value
-            n_list = [len(g) for g in groups]
-            n_total = sum(n_list)
-            jt_mean = (n_total ** 2 - sum(n ** 2 for n in n_list)) / 4
-            jt_var = (n_total ** 2 * (2 * n_total + 3) -
-                      sum(n ** 2 * (2 * n + 3) for n in n_list)) / 72
-            if jt_var > 0:
-                jt_z = (jt_stat - jt_mean) / np.sqrt(jt_var)
-                jt_p = 1 - stats.norm.cdf(jt_z)  # one-sided (increasing)
-            else:
-                jt_p = 1.0
-        except Exception:
-            # Fallback: Kruskal-Wallis as approximation
-            try:
-                jt_stat, jt_p = stats.kruskal(*[g.values for g in groups])
-            except Exception:
-                jt_stat, jt_p = 0, 0.5
-
-        means = [g.mean() for g in groups]
-        monotonic = all(means[i] <= means[i+1] for i in range(len(means)-1))
-
-        rows.append({
-            'TEST': test_name,
-            'N': len(sub),
-            'N_WINDOWS': len(present),
-            'JT_STAT': jt_stat,
-            'JT_PVALUE': jt_p,
-            'MEAN_FAR': means[0],
-            'MEAN_MID': means[1],
-            'MEAN_NEAR': means[2],
-            'MONOTONIC_INCREASE': monotonic,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        pvals = df['JT_PVALUE'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-    return df
-
-
-def compute_car_insider_regression(panel):
-    """Regress post-event CAR on pre-event insider selling."""
-    if 'CAR_POST' not in panel.columns:
-        return pd.DataFrame()
-
-    valid = panel.dropna(subset=['CAR_POST', 'PRE_FULL_NET_DOLLAR_SOLD']).copy()
-    if len(valid) < 10:
-        return pd.DataFrame()
-
-    rows = []
-    # Cluster on PAIR_ID if available and complete (matched pairs share shocks)
-    has_pairs = 'PAIR_ID' in valid.columns and valid['PAIR_ID'].notna().all()
-    cluster_kwds = ({'groups': valid['PAIR_ID']} if has_pairs
-                    else {'groups': valid['TICKER']})
-
-    # Spec 1: CAR ~ selling
-    try:
-        y = valid['CAR_POST'].astype(float)
-        X = sm.add_constant(valid[['PRE_FULL_NET_DOLLAR_SOLD']].astype(float))
-        model = sm.OLS(y, X).fit(cov_type='cluster', cov_kwds=cluster_kwds)
-        for var in model.params.index:
-            rows.append({
-                'SPECIFICATION': 'CAR_VS_SELLING',
-                'VARIABLE': var,
-                'COEFFICIENT': model.params[var],
-                'STD_ERROR': model.bse[var],
-                'T_STAT': model.tvalues[var],
-                'P_VALUE': model.pvalues[var],
-                'R_SQUARED': model.rsquared,
-                'N_OBS': int(model.nobs),
-            })
-    except Exception as e:
-        logger.warning("CAR regression failed: %s", e)
-
-    # Spec 2: CAR ~ selling + treatment + lean
-    try:
-        valid2 = valid.copy().reset_index(drop=True)
-        valid2['IS_TREATMENT_INT'] = valid2['IS_TREATMENT'].astype(int)
-        lean_dummies = pd.get_dummies(valid2['LEAN'], prefix='LEAN', drop_first=True).astype(float)
-        lean_dummies = lean_dummies.reset_index(drop=True)
-        X2 = sm.add_constant(pd.concat([
-            valid2[['PRE_FULL_NET_DOLLAR_SOLD', 'IS_TREATMENT_INT']].astype(float),
-            lean_dummies
-        ], axis=1))
-        y2 = valid2['CAR_POST'].astype(float)
-        cluster_kwds2 = ({'groups': valid2['PAIR_ID']} if has_pairs
-                         else {'groups': valid2['TICKER']})
-        model2 = sm.OLS(y2, X2).fit(cov_type='cluster', cov_kwds=cluster_kwds2)
-        for var in model2.params.index:
-            rows.append({
-                'SPECIFICATION': 'CAR_VS_SELLING_CONTROLS',
-                'VARIABLE': var,
-                'COEFFICIENT': model2.params[var],
-                'STD_ERROR': model2.bse[var],
-                'T_STAT': model2.tvalues[var],
-                'P_VALUE': model2.pvalues[var],
-                'R_SQUARED': model2.rsquared,
-                'N_OBS': int(model2.nobs),
-            })
-    except Exception as e:
-        logger.warning("CAR regression (controls) failed: %s", e)
-
-    return pd.DataFrame(rows)
-
-
-def compute_information_gradient(panel):
-    """Information gradient: how selling intensifies approaching the event.
-
-    Reports gradient for ALL firms, TREATMENT only, and CONTROL only.
-    The information-asymmetry story should be sharpest in treatment firms;
-    the control gradient serves as a comparison baseline.
-    """
-    windows = ['BENCHMARK', 'PRE_FAR', 'PRE_MID', 'PRE_NEAR', 'POST']
-    metrics = ['NET_DOLLAR_SOLD', 'N_SELLS', 'N_UNIQUE_INSIDERS', 'NET_SELL_RATIO']
-
-    groups = [('ALL', panel)]
-    if 'IS_TREATMENT' in panel.columns:
-        groups.append(('TREATMENT', panel[panel['IS_TREATMENT'] == True]))
-        groups.append(('CONTROL', panel[panel['IS_TREATMENT'] == False]))
-
-    rows = []
-    for group_name, sub in groups:
-        for metric in metrics:
-            for w in windows:
-                col = f'{w}_{metric}'
-                if col not in sub.columns:
-                    continue
-                days = abs(WINDOWS[w][1] - WINDOWS[w][0]) + 1
-                vals = sub[col].fillna(0)
-                if metric in ('NET_DOLLAR_SOLD', 'N_SELLS', 'N_UNIQUE_INSIDERS'):
-                    daily = vals / days
-                else:
-                    daily = vals
-                rows.append({
-                    'GROUP': group_name,
-                    'METRIC': metric,
-                    'WINDOW': w,
-                    'MEAN': daily.mean(),
-                    'MEDIAN': daily.median(),
-                    'STD': daily.std(),
-                    'N': len(vals),
-                })
-
-    return pd.DataFrame(rows)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# ADDITIONAL ANALYSES (12–23)
-# ═══════════════════════════════════════════════════════════════════════
-
-def compute_diff_in_diff(panel):
-    """Difference-in-differences: IS_TREATMENT × IS_POST interaction.
-
-    Stacks the panel into long form with pre (PRE_FULL) and post (POST)
-    windows, then regresses raw daily net dollar sold on treatment, post,
-    and their interaction. The regression structure absorbs baseline
-    differences via IS_TREATMENT and IS_POST main effects.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    post_days = abs(WINDOWS['POST'][1] - WINDOWS['POST'][0]) + 1
-
-    required = ['PRE_FULL_NET_DOLLAR_SOLD', 'POST_NET_DOLLAR_SOLD',
-                'IS_TREATMENT', 'TICKER', 'EVENT_DATE']
-    if not all(c in panel.columns for c in required):
-        return pd.DataFrame()
-
-    # Stack pre and post into long form using raw daily selling (melt for speed)
-    wide = panel[['TICKER', 'EVENT_DATE', 'IS_TREATMENT',
-                   'PRE_FULL_NET_DOLLAR_SOLD', 'POST_NET_DOLLAR_SOLD']].copy()
-    wide['IS_TREATMENT'] = wide['IS_TREATMENT'].astype(int)
-    wide['PRE'] = wide['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days
-    wide['POST'] = wide['POST_NET_DOLLAR_SOLD'] / post_days
-    long_df = wide.melt(
-        id_vars=['TICKER', 'EVENT_DATE', 'IS_TREATMENT'],
-        value_vars=['PRE', 'POST'],
-        var_name='_period', value_name='NET_SELL_DAILY',
-    )
-    long_df['IS_POST'] = (long_df['_period'] == 'POST').astype(int)
-    long_df = long_df.drop(columns=['_period']).dropna(subset=['NET_SELL_DAILY'])
-
-    # Ensure balanced panel: each firm-event must have exactly 2 rows (pre + post)
-    firm_event_counts = long_df.groupby(['TICKER', 'EVENT_DATE']).size()
-    unbalanced = firm_event_counts[firm_event_counts != 2]
-    if not unbalanced.empty:
-        logger.warning("DiD: dropping %d unbalanced firm-events", len(unbalanced))
-        balanced_idx = firm_event_counts[firm_event_counts == 2].index
-        long_df = long_df.set_index(['TICKER', 'EVENT_DATE'])
-        long_df = long_df.loc[long_df.index.isin(balanced_idx)].reset_index()
-
-    if len(long_df) < 20:
-        return pd.DataFrame()
-
-    long_df['TREAT_X_POST'] = long_df['IS_TREATMENT'] * long_df['IS_POST']
-
-    rows = []
-    # Spec 1: Simple DiD
-    try:
-        y = long_df['NET_SELL_DAILY'].astype(float)
-        X = sm.add_constant(long_df[['IS_TREATMENT', 'IS_POST', 'TREAT_X_POST']].astype(float))
-        model = sm.OLS(y, X).fit(cov_type='cluster',
-                                  cov_kwds={'groups': long_df['TICKER']})
-        for var in model.params.index:
-            rows.append({
-                'SPECIFICATION': 'DID_SIMPLE',
-                'VARIABLE': var,
-                'COEFFICIENT': model.params[var],
-                'STD_ERROR': model.bse[var],
-                'T_STAT': model.tvalues[var],
-                'P_VALUE': model.pvalues[var],
-                'R_SQUARED': model.rsquared,
-                'N_OBS': int(model.nobs),
-            })
-    except Exception as e:
-        logger.warning("DiD simple failed: %s", e)
-
-    # Spec 2: DiD with event-date fixed effects
-    # With only 2 rows per firm (pre + post), firm FE collapses to a
-    # before-after on treatment only. Event-date FE is more defensible:
-    # it absorbs time-varying shocks common to all firms on a given date.
-    n_dates = long_df['EVENT_DATE'].nunique()
-    n_obs_did = len(long_df)
-    # Guard: need at least 10 residual df after absorbing date dummies + 3 regressors + const
-    if (n_dates - 1) + 4 >= n_obs_did - 10:
-        logger.warning("DiD date FE: too many date dummies (%d) for %d obs; skipping", n_dates, n_obs_did)
-    else:
-        try:
-            date_dummies = pd.get_dummies(
-                long_df['EVENT_DATE'].astype(str), prefix='DATE', drop_first=True
-            ).astype(float)
-            X2 = sm.add_constant(pd.concat([
-                long_df[['IS_TREATMENT', 'IS_POST', 'TREAT_X_POST']].astype(float),
-                date_dummies
-            ], axis=1))
-            y2 = long_df['NET_SELL_DAILY'].astype(float)
-            model2 = sm.OLS(y2, X2).fit(cov_type='cluster',
-                                         cov_kwds={'groups': long_df['TICKER']})
-            # Only report the main coefficients, not date dummies
-            for var in ['const', 'IS_TREATMENT', 'IS_POST', 'TREAT_X_POST']:
-                if var in model2.params.index:
-                    rows.append({
-                        'SPECIFICATION': 'DID_DATE_FE',
-                        'VARIABLE': var,
-                        'COEFFICIENT': model2.params[var],
-                        'STD_ERROR': model2.bse[var],
-                        'T_STAT': model2.tvalues[var],
-                        'P_VALUE': model2.pvalues[var],
-                        'R_SQUARED': model2.rsquared,
-                        'N_OBS': int(model2.nobs),
-                    })
-        except Exception as e:
-            logger.warning("DiD date FE failed: %s", e)
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(df['P_VALUE'].values).astype(int)
-    return df
-
-
-def compute_10b5_1_filter(panel, form4):
-    """Sensitivity check: approximate 10b5-1 (scheduled) trades using regularity proxy.
-
-    SEC Form 4 footnotes contain 10b5-1 plan disclosures, but they are not
-    parsed from XML by our downloader. We approximate: an insider is flagged
-    as likely 10b5-1 if they have regular, periodic transactions (trades in
-    >= 4 of last 8 quarters with consistent timing, i.e., trades in similar
-    calendar weeks). Results are reported with and without 10b5-1 trades.
-    """
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    # Identify tickers with likely 10b5-1 insiders
-    plan_tickers = set()
-    for ticker in panel['TICKER'].unique():
-        ticker_txns = form4[form4['ticker'] == ticker]
-        for owner in ticker_txns['owner_name'].unique():
-            trades = ticker_txns[ticker_txns['owner_name'] == owner]['transaction_date'].dropna()
-            if len(trades) < 8:
-                continue
-            quarters = trades.dt.to_period('Q').nunique()
-            if quarters < 4:
-                continue
-            # Check timing regularity: std of week-within-quarter < 3 weeks
-            # Map each trade to its week offset within its quarter (0-12)
-            q_start_month = ((trades.dt.month - 1) // 3) * 3 + 1
-            day_of_quarter = (trades.dt.month - q_start_month) * 30 + trades.dt.day
-            week_in_q = day_of_quarter // 7
-            if week_in_q.std() < 3:
-                plan_tickers.add(ticker)
-                break
-
-    panel = panel.copy()
-    panel['LIKELY_10B5_1'] = panel['TICKER'].isin(plan_tickers).astype(int)
-
-    rows = []
-    for label, sub in [('ALL', panel),
-                        ('EXCL_10B5_1', panel[panel['LIKELY_10B5_1'] == 0]),
-                        ('ONLY_10B5_1', panel[panel['LIKELY_10B5_1'] == 1])]:
-        treatment = sub[sub['IS_TREATMENT'] == True]
-        if len(treatment) < 5:
-            continue
-        pre_daily = treatment[pre_col] / pre_days
-        bench_daily = treatment[bench_col] / bench_days
-        diff = pre_daily - bench_daily
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1:
-            t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-        rows.append({
-            'FILTER': label,
-            'N_EVENTS': len(treatment),
-            'N_10B5_1_TICKERS': len(plan_tickers),
-            'MEAN_DIFF': diff.mean(),
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(df['P_VALUE'].fillna(1).values).astype(int)
-    return df
-
-
-def compute_match_quality(panel, events, stock_data=None):
-    """Post-hoc validation of treatment-control balance on insider activity.
-
-    This checks covariate balance on insider trading metrics in the
-    benchmark period (not the original matching covariates like size,
-    B/M, industry). Reports standardized mean differences (SMD).
-    Threshold |SMD| < 0.25 per Rubin (2001); <0.1 is ideal.
-    """
-    treat = panel[panel['IS_TREATMENT'] == True]
-    ctrl = panel[panel['IS_TREATMENT'] == False]
-
-    if treat.empty or ctrl.empty:
-        return pd.DataFrame()
-
-    rows = []
-    covariates = [
-        ('BENCHMARK_NET_DOLLAR_SOLD', 'Benchmark Net Dollar Sold'),
-        ('BENCHMARK_N_TRANSACTIONS', 'Benchmark N Transactions'),
-        ('BENCHMARK_N_UNIQUE_INSIDERS', 'Benchmark N Unique Insiders'),
-        ('BENCHMARK_NET_SELL_RATIO', 'Benchmark Net Sell Ratio'),
-        ('BENCHMARK_N_OPPORTUNISTIC', 'Benchmark N Opportunistic'),
-    ]
-
-    for col, label in covariates:
-        if col not in panel.columns:
-            continue
-        t_vals = treat[col].fillna(0)
-        c_vals = ctrl[col].fillna(0)
-        t_mean = t_vals.mean()
-        c_mean = c_vals.mean()
-        pooled_std = np.sqrt((t_vals.std() ** 2 + c_vals.std() ** 2) / 2)
-        smd = (t_mean - c_mean) / pooled_std if pooled_std > 0 else 0
-        # Two-sample t-test
-        t_stat, t_p = stats.ttest_ind(t_vals, c_vals, equal_var=False)
-        rows.append({
-            'COVARIATE': label,
-            'TREATMENT_MEAN': t_mean,
-            'CONTROL_MEAN': c_mean,
-            'TREATMENT_STD': t_vals.std(),
-            'CONTROL_STD': c_vals.std(),
-            'SMD': smd,
-            'ABS_SMD': abs(smd),
-            'BALANCED': 1 if abs(smd) < 0.25 else 0,
-            'T_STAT': t_stat,
-            'P_VALUE': t_p,
-        })
-
-    # Add daily volume if stock data available
-    if stock_data is not None and not stock_data.empty and 'VOLUME' in stock_data.columns:
-        vol_lookup = {}
-        for ticker in panel['TICKER'].unique():
-            t_stock = stock_data[stock_data['TICKER'] == ticker]
-            if not t_stock.empty:
-                vol_lookup[ticker] = t_stock['VOLUME'].mean()
-        panel_vol = panel.copy()
-        panel_vol['AVG_DAILY_VOLUME'] = panel_vol['TICKER'].map(vol_lookup)
-        t_vol = panel_vol.loc[panel_vol['IS_TREATMENT'] == True, 'AVG_DAILY_VOLUME'].dropna()
-        c_vol = panel_vol.loc[panel_vol['IS_TREATMENT'] == False, 'AVG_DAILY_VOLUME'].dropna()
-        if len(t_vol) > 0 and len(c_vol) > 0:
-            pooled = np.sqrt((t_vol.std() ** 2 + c_vol.std() ** 2) / 2)
-            smd = (t_vol.mean() - c_vol.mean()) / pooled if pooled > 0 else 0
-            t_stat, t_p = stats.ttest_ind(t_vol, c_vol, equal_var=False)
-            rows.append({
-                'COVARIATE': 'Avg Daily Volume',
-                'TREATMENT_MEAN': t_vol.mean(),
-                'CONTROL_MEAN': c_vol.mean(),
-                'TREATMENT_STD': t_vol.std(),
-                'CONTROL_STD': c_vol.std(),
-                'SMD': smd,
-                'ABS_SMD': abs(smd),
-                'BALANCED': 1 if abs(smd) < 0.25 else 0,
-                'T_STAT': t_stat,
-                'P_VALUE': t_p,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        n_balanced = df['BALANCED'].sum()
-        logger.info("  Match quality: %d/%d covariates balanced (|SMD| < 0.25)",
-                    n_balanced, len(df))
-    return df
-
-
-def compute_event_clustering(panel):
-    """Treatment vs control regression with date-clustered standard errors.
-
-    Culture war events cluster in time. This re-runs the main specification
-    with SEs clustered at the event-date level instead of event-ID.
-    """
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    if dep_var not in panel.columns:
-        return pd.DataFrame()
-
-    df = panel[[dep_var, 'IS_TREATMENT', 'EVENT_DATE', 'TICKER']].dropna(subset=[dep_var]).copy()
-    df['IS_TREATMENT_INT'] = df['IS_TREATMENT'].astype(int)
-    # Create date cluster: group events within 7 days of the cluster anchor date.
-    # Anchor is the first event in each cluster (not chain-linked from prior event).
-    df = df.sort_values('EVENT_DATE')
-    df['EVENT_DATE_TS'] = pd.to_datetime(df['EVENT_DATE'])
-    date_clusters = []
-    cluster_id = 0
-    anchor_date = None
-    for _, row in df.iterrows():
-        if anchor_date is None or (row['EVENT_DATE_TS'] - anchor_date).days > 7:
-            cluster_id += 1
-            anchor_date = row['EVENT_DATE_TS']
-        date_clusters.append(cluster_id)
-    df['DATE_CLUSTER'] = date_clusters
-
-    rows = []
-    cluster_types = [
-        ('CLUSTER_EVENT_DATE', df['EVENT_DATE'].astype(str)),
-        ('CLUSTER_DATE_7DAY', df['DATE_CLUSTER']),
-        ('CLUSTER_TICKER', df['TICKER']),
-        ('TWOWAY_DATE_TICKER', None),  # two-way clustering
-    ]
-
-    for spec_name, cluster_var in cluster_types:
-        try:
-            y = df[dep_var].astype(float)
-            X = sm.add_constant(df[['IS_TREATMENT_INT']].astype(float))
-            if spec_name == 'TWOWAY_DATE_TICKER':
-                # Two-way clustering: Cameron, Gelbach & Miller (2011)
-                # V = V_date + V_ticker - V_{date∩ticker}
-                # Intersection of date × ticker is the individual observation
-                model_d = sm.OLS(y, X).fit(cov_type='cluster',
-                                            cov_kwds={'groups': df['EVENT_DATE'].astype(str)})
-                model_t = sm.OLS(y, X).fit(cov_type='cluster',
-                                            cov_kwds={'groups': df['TICKER']})
-                # Intersection: each unique (date, ticker) pair
-                intersection_id = df['EVENT_DATE'].astype(str) + '_' + df['TICKER']
-                model_dt = sm.OLS(y, X).fit(cov_type='cluster',
-                                             cov_kwds={'groups': intersection_id})
-                # V_twoway = V_date + V_ticker - V_intersection
-                var_twoway = model_d.cov_params() + model_t.cov_params() - model_dt.cov_params()
-                # Enforce numerical symmetry before eigendecomposition
-                var_twoway = (var_twoway + var_twoway.T) / 2
-                # Ensure positive semi-definiteness (can fail with small clusters)
-                eigvals, eigvecs = np.linalg.eigh(var_twoway)
-                psd_adjusted = bool(np.any(eigvals < 0))
-                if psd_adjusted:
-                    # Use abs(eigvals) rather than max(eigvals, 0): the conservative
-                    # convention per CGM (2011, eq. 2.13). Clipping to zero shrinks
-                    # the variance matrix and inflates t-stats; abs preserves magnitude.
-                    logger.warning("Two-way cluster VCV not PSD (min eigval=%.4e); "
-                                   "using abs(eigenvalues) per CGM convention", eigvals.min())
-                    var_twoway = eigvecs @ np.diag(np.abs(eigvals)) @ eigvecs.T
-                se_twoway = np.sqrt(np.diag(var_twoway))
-                for j, var in enumerate(model_d.params.index):
-                    coef = model_d.params[var]
-                    se = se_twoway[j]
-                    t_val = coef / se if se > 0 else 0
-                    p_val = 2 * (1 - stats.norm.cdf(abs(t_val)))
-                    rows.append({
-                        'SPECIFICATION': spec_name,
-                        'VARIABLE': var,
-                        'COEFFICIENT': coef,
-                        'STD_ERROR': se,
-                        'T_STAT': t_val,
-                        'P_VALUE': p_val,
-                        'N_CLUSTERS': f"{df['EVENT_DATE'].nunique()}+{df['TICKER'].nunique()}",
-                        'N_OBS': int(len(df)),
-                        'PSD_ADJUSTED': psd_adjusted,
-                        'N_UNIQUE_TICKERS': int(df['TICKER'].nunique()),
-                        'N_UNIQUE_DATES': int(df['EVENT_DATE'].nunique()),
-                    })
-            else:
-                model = sm.OLS(y, X).fit(cov_type='cluster',
-                                          cov_kwds={'groups': cluster_var})
-                for var in model.params.index:
-                    rows.append({
-                        'SPECIFICATION': spec_name,
-                        'VARIABLE': var,
-                        'COEFFICIENT': model.params[var],
-                        'STD_ERROR': model.bse[var],
-                        'T_STAT': model.tvalues[var],
-                        'P_VALUE': model.pvalues[var],
-                        'N_CLUSTERS': str(cluster_var.nunique()),
-                        'N_OBS': int(model.nobs),
-                    })
-        except Exception as e:
-            logger.warning("Event clustering (%s) failed: %s", spec_name, e)
-
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out['BH_SIGNIFICANT'] = _benjamini_hochberg(df_out['P_VALUE'].values).astype(int)
-    return df_out
-
-
-def compute_intensive_extensive_margin(panel):
-    """Decompose abnormal selling into intensive and extensive margins.
-
-    Extensive: do MORE insiders trade pre-event vs benchmark?
-    Intensive: do the SAME insiders trade MORE ($ per insider)?
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-
-    if treatment.empty:
-        return pd.DataFrame()
-
-    rows = []
-
-    # Extensive margin: N_UNIQUE_INSIDERS
-    for metric, label in [('N_UNIQUE_INSIDERS', 'EXTENSIVE_INSIDERS'),
-                           ('N_SELLS', 'EXTENSIVE_SELL_COUNT'),
-                           ('N_OPPORTUNISTIC', 'EXTENSIVE_OPPORTUNISTIC')]:
-        pre_col = f'PRE_FULL_{metric}'
-        bench_col = f'BENCHMARK_{metric}'
-        if pre_col not in treatment.columns or bench_col not in treatment.columns:
-            continue
-        pre_daily = treatment[pre_col] / pre_days
-        bench_daily = treatment[bench_col] / bench_days
-        diff = pre_daily - bench_daily
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1:
-            t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-        rows.append({
-            'MARGIN': label,
-            'N': len(treatment),
-            'MEAN_PRE_DAILY': pre_daily.mean(),
-            'MEAN_BENCH_DAILY': bench_daily.mean(),
-            'MEAN_DIFF': diff.mean(),
-            'PCT_INCREASE': (diff.mean() / bench_daily.mean() * 100) if bench_daily.mean() != 0 else np.nan,
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    # Intensive margin: NET_DOLLAR_SOLD / N_UNIQUE_INSIDERS ($ per insider)
-    for metric, label in [('NET_DOLLAR_SOLD', 'INTENSIVE_DOLLAR_PER_INSIDER'),
-                           ('SHARES_SOLD', 'INTENSIVE_SHARES_PER_INSIDER')]:
-        pre_col = f'PRE_FULL_{metric}'
-        bench_col = f'BENCHMARK_{metric}'
-        pre_ins = 'PRE_FULL_N_UNIQUE_INSIDERS'
-        bench_ins = 'BENCHMARK_N_UNIQUE_INSIDERS'
-        if not all(c in treatment.columns for c in [pre_col, bench_col, pre_ins, bench_ins]):
-            continue
-        # Per-insider, per-day
-        pre_per_ins = np.where(treatment[pre_ins] > 0,
-                               treatment[pre_col] / treatment[pre_ins] / pre_days, 0)
-        bench_per_ins = np.where(treatment[bench_ins] > 0,
-                                  treatment[bench_col] / treatment[bench_ins] / bench_days, 0)
-        diff = pre_per_ins - bench_per_ins
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1:
-            t_stat, t_p = stats.ttest_rel(pre_per_ins, bench_per_ins)
-        rows.append({
-            'MARGIN': label,
-            'N': len(treatment),
-            'MEAN_PRE_DAILY': float(np.mean(pre_per_ins)),
-            'MEAN_BENCH_DAILY': float(np.mean(bench_per_ins)),
-            'MEAN_DIFF': float(np.mean(diff)),
-            'PCT_INCREASE': (np.mean(diff) / np.mean(bench_per_ins) * 100)
-                            if np.mean(bench_per_ins) != 0 else np.nan,
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(df['P_VALUE'].fillna(1).values).astype(int)
-    return df
-
-
-def compute_abnormal_volume_ratio(panel, stock_data=None):
-    """Normalize insider selling by firm's average daily trading volume.
-
-    Creates ABNORMAL_VOLUME_RATIO = pre-event daily insider $ sold /
-    benchmark average daily stock volume (in $). This controls for firm
-    size differences (Lakonishok & Lee, 2001).
-    """
-    if stock_data is None or stock_data.empty:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    # Compute benchmark-period average daily dollar volume per event
-    if 'VOLUME' not in stock_data.columns or 'CLOSE' not in stock_data.columns:
-        return pd.DataFrame()
-    stock_data = stock_data.copy()
-    stock_data['DATE'] = pd.to_datetime(stock_data['DATE'])
-    stock_data['DOLLAR_VOL'] = stock_data['VOLUME'] * stock_data['CLOSE']
-
-    vol_lookup = {}
-    for ticker, grp in panel.groupby('TICKER'):
-        t_stock = stock_data[stock_data['TICKER'] == ticker]
-        if t_stock.empty:
-            continue
-        for _, row in grp.iterrows():
-            event_date = pd.Timestamp(row['EVENT_DATE'])
-            bench_start = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][0])
-            bench_end = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][1])
-            mask = (t_stock['DATE'] >= bench_start) & (t_stock['DATE'] <= bench_end)
-            bench_vol = t_stock.loc[mask, 'DOLLAR_VOL']
-            if not bench_vol.empty:
-                vol_lookup[(ticker, event_date)] = bench_vol.mean()
-
-    if not vol_lookup:
-        logger.warning("No stock volume data available for abnormal volume ratio")
-        return pd.DataFrame()
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    rows = []
-    avr_values = []
-
-    for _, row in treatment.iterrows():
-        key = (row['TICKER'], pd.Timestamp(row['EVENT_DATE']))
-        bench_vol = vol_lookup.get(key)
-        if bench_vol is None or bench_vol <= 0:
-            continue
-        pre_raw = row.get('PRE_FULL_NET_DOLLAR_SOLD', 0)
-        bench_raw = row.get('BENCHMARK_NET_DOLLAR_SOLD', 0)
-        pre_daily = (0 if pd.isna(pre_raw) else pre_raw) / pre_days
-        bench_daily_sell = (0 if pd.isna(bench_raw) else bench_raw) / bench_days
-        avr_pre = pre_daily / bench_vol
-        avr_bench = bench_daily_sell / bench_vol
-        avr_values.append({
-            'TICKER': row['TICKER'],
-            'AVR_PRE': avr_pre,
-            'AVR_BENCH': avr_bench,
-            'AVR_DIFF': avr_pre - avr_bench,
-            'BENCH_DOLLAR_VOL': bench_vol,
-        })
-
-    if not avr_values:
-        return pd.DataFrame()
-
-    avr_df = pd.DataFrame(avr_values)
-    # Test if AVR is significantly different pre vs benchmark
-    t_stat, t_p = stats.ttest_rel(avr_df['AVR_PRE'], avr_df['AVR_BENCH'])
-    nonzero = avr_df['AVR_DIFF'][avr_df['AVR_DIFF'] != 0]
-    w_stat, w_p = (np.nan, np.nan)
-    if len(nonzero) > 10:
-        w_stat, w_p = stats.wilcoxon(nonzero)
-
-    rows.append({
-        'TEST': 'AVR_PRE_VS_BENCH',
-        'N': len(avr_df),
-        'MEAN_AVR_PRE': avr_df['AVR_PRE'].mean(),
-        'MEAN_AVR_BENCH': avr_df['AVR_BENCH'].mean(),
-        'MEAN_AVR_DIFF': avr_df['AVR_DIFF'].mean(),
-        'MEDIAN_AVR_DIFF': avr_df['AVR_DIFF'].median(),
-        'T_STAT': t_stat,
-        'T_PVALUE': t_p,
-        'WILCOXON_STAT': w_stat if not np.isnan(w_stat) else None,
-        'WILCOXON_PVALUE': w_p if not np.isnan(w_p) else None,
-    })
-
-    # By quintile of firm size (dollar volume)
-    avr_df['SIZE_Q'] = pd.qcut(avr_df['BENCH_DOLLAR_VOL'], q=min(5, len(avr_df) // 5 or 1),
-                                 labels=False, duplicates='drop') + 1
-    for q, grp in avr_df.groupby('SIZE_Q'):
-        t_s, t_pp = (np.nan, np.nan)
-        if len(grp) > 2:
-            t_s, t_pp = stats.ttest_rel(grp['AVR_PRE'], grp['AVR_BENCH'])
-        rows.append({
-            'TEST': f'AVR_SIZE_Q{int(q)}',
-            'N': len(grp),
-            'MEAN_AVR_PRE': grp['AVR_PRE'].mean(),
-            'MEAN_AVR_BENCH': grp['AVR_BENCH'].mean(),
-            'MEAN_AVR_DIFF': grp['AVR_DIFF'].mean(),
-            'MEDIAN_AVR_DIFF': grp['AVR_DIFF'].median(),
-            'T_STAT': t_s if not np.isnan(t_s) else None,
-            'T_PVALUE': t_pp if not np.isnan(t_pp) else None,
-            'WILCOXON_STAT': None,
-            'WILCOXON_PVALUE': None,
-        })
-
-    return pd.DataFrame(rows)
-
-
-def compute_firm_fixed_effects(panel):
-    """OLS with firm fixed effects for firms appearing in multiple events."""
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    if dep_var not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    df = panel[['TICKER', dep_var, 'IS_TREATMENT', 'LEAN']].dropna(subset=[dep_var]).copy()
-    df['DAILY_SELL'] = df[dep_var] / pre_days
-    df['IS_TREATMENT_INT'] = df['IS_TREATMENT'].astype(int)
-
-    # Only include firms with >1 event (otherwise FE absorbs everything)
-    firm_counts = df['TICKER'].value_counts()
-    multi_event_firms = firm_counts[firm_counts > 1].index
-    df_multi = df[df['TICKER'].isin(multi_event_firms)].copy()
-
-    rows = []
-
-    # Spec 1: Firm FE via dummies (for small panel)
-    if len(df_multi) >= 10 and len(multi_event_firms) >= 3:
-        try:
-            firm_dummies = pd.get_dummies(df_multi['TICKER'], prefix='FE', drop_first=True).astype(float)
-            X = sm.add_constant(pd.concat([
-                df_multi[['IS_TREATMENT_INT']].astype(float).reset_index(drop=True),
-                firm_dummies.reset_index(drop=True)
-            ], axis=1))
-            y = df_multi['DAILY_SELL'].astype(float).reset_index(drop=True)
-            model = sm.OLS(y, X).fit(
-                cov_type='cluster',
-                cov_kwds={'groups': df_multi['TICKER'].reset_index(drop=True)})
-            # Only report treatment coefficient and constant
-            for var in ['const', 'IS_TREATMENT_INT']:
-                if var in model.params.index:
-                    rows.append({
-                        'SPECIFICATION': 'FIRM_FE_MULTI_EVENT',
-                        'VARIABLE': var,
-                        'COEFFICIENT': model.params[var],
-                        'STD_ERROR': model.bse[var],
-                        'T_STAT': model.tvalues[var],
-                        'P_VALUE': model.pvalues[var],
-                        'R_SQUARED': model.rsquared,
-                        'N_OBS': int(model.nobs),
-                        'N_FIRMS': len(multi_event_firms),
-                        'IS_TREATMENT_INCLUDED': True,
-                    })
-        except Exception as e:
-            logger.warning("Firm FE (multi-event) failed: %s", e)
-
-    # Spec 2: Within-firm demeaning (Mundlak)
-    # Manual demeaning absorbs N_firms degrees of freedom that OLS doesn't
-    # know about. Correct SEs by inflating by sqrt(n-k_ols) / sqrt(n-k_ols-N_firms).
-    # NOTE: This dof correction on top of cluster-robust SEs is an approximation —
-    # cluster SEs already include their own finite-cluster adjustment. The correction
-    # is conservative (inflates SEs), so it won't produce false positives. For an
-    # exact treatment, use linearmodels.PanelOLS with entity_effects=True. Spec 1
-    # (explicit dummies) is the primary firm-FE result; this is a robustness check.
-    if len(df_multi) >= 10:
-        try:
-            n_firms_dm = len(multi_event_firms)
-            firm_means = df_multi.groupby('TICKER')['DAILY_SELL'].transform('mean')
-            y_dm = (df_multi['DAILY_SELL'] - firm_means).astype(float).reset_index(drop=True)
-            treat_dm = (df_multi['IS_TREATMENT_INT'] -
-                        df_multi.groupby('TICKER')['IS_TREATMENT_INT'].transform('mean'))
-            # Check whether demeaned treatment has variation; if firm FE
-            # fully absorbs treatment (every firm is always-treated or
-            # always-control), the demeaned treatment is zero and the
-            # coefficient is meaningless.
-            treatment_included = treat_dm.abs().sum() > 1e-10
-            if not treatment_included:
-                logger.info("Firm FE absorbs IS_TREATMENT entirely "
-                            "(no within-firm variation); reporting intercept only")
-                X_dm = sm.add_constant(
-                    pd.Series(0.0, index=y_dm.index, name='IS_TREATMENT_INT'))
-            else:
-                X_dm = sm.add_constant(treat_dm.astype(float).reset_index(drop=True))
-            model_dm = sm.OLS(y_dm, X_dm).fit(
-                cov_type='cluster',
-                cov_kwds={'groups': df_multi['TICKER'].reset_index(drop=True)})
-
-            # Correct SEs for absorbed firm dummies (cluster SEs handle
-            # within-firm correlation; dof correction handles absorbed FE)
-            n = int(model_dm.nobs)
-            k_ols = len(model_dm.params)
-            dof_ols = n - k_ols
-            dof_true = n - k_ols - n_firms_dm
-            if dof_true > 0:
-                se_correction = np.sqrt(dof_ols / dof_true)
-            else:
-                se_correction = np.nan
-
-            for var in model_dm.params.index:
-                corrected_se = model_dm.bse[var] * se_correction if not np.isnan(se_correction) else np.nan
-                corrected_t = model_dm.params[var] / corrected_se if corrected_se and corrected_se > 0 else np.nan
-                corrected_p = 2 * stats.t.sf(abs(corrected_t), dof_true) if not np.isnan(corrected_t) and dof_true > 0 else np.nan
-                rows.append({
-                    'SPECIFICATION': 'WITHIN_FIRM_DEMEANED',
-                    'VARIABLE': var,
-                    'COEFFICIENT': model_dm.params[var],
-                    'STD_ERROR': corrected_se,
-                    'T_STAT': corrected_t,
-                    'P_VALUE': corrected_p,
-                    'R_SQUARED': model_dm.rsquared,
-                    'N_OBS': n,
-                    'N_FIRMS': n_firms_dm,
-                    'IS_TREATMENT_INCLUDED': treatment_included,
-                })
-        except Exception as e:
-            logger.warning("Within-firm demeaned failed: %s", e)
-
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out['BH_SIGNIFICANT'] = _benjamini_hochberg(df_out['P_VALUE'].values).astype(int)
-    return df_out
-
-
-def compute_cross_sectional_determinants(panel, events=None):
-    """What predicts which firms see more abnormal selling?
-
-    Regresses abnormal selling (pre daily - bench daily) on firm/event
-    characteristics: political leaning, number of benchmark insiders,
-    benchmark activity level, opportunistic share.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    if dep_var not in panel.columns:
-        return pd.DataFrame()
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    if len(treatment) < 15:
-        return pd.DataFrame()
-
-    treatment['ABN_SELL'] = (treatment[dep_var] / pre_days -
-                              treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days)
-
-    # Build regressors
-    regressors = ['ABN_SELL']
-    treat_df = treatment[['ABN_SELL', 'TICKER']].copy()
-
-    if 'BENCHMARK_N_UNIQUE_INSIDERS' in treatment.columns:
-        treat_df['BENCH_INSIDERS'] = treatment['BENCHMARK_N_UNIQUE_INSIDERS'].fillna(0)
-        regressors.append('BENCH_INSIDERS')
-
-    # N13 fix: BENCH_ACTIVITY removed — it is the subtrahend of ABN_SELL,
-    # so including it as a regressor creates mechanical correlation with the DV.
-
-    if 'BENCHMARK_N_OPPORTUNISTIC' in treatment.columns and 'BENCHMARK_N_ROUTINE' in treatment.columns:
-        denom = (treatment['BENCHMARK_N_OPPORTUNISTIC'].fillna(0) +
-                 treatment['BENCHMARK_N_ROUTINE'].fillna(0))
-        treat_df['OPP_SHARE'] = np.where(
-            denom > 0,
-            treatment['BENCHMARK_N_OPPORTUNISTIC'].fillna(0) / denom,
-            np.nan)
-        regressors.append('OPP_SHARE')
-
-    if 'LEAN' in treatment.columns:
-        lean_dummies = pd.get_dummies(treatment['LEAN'], prefix='LEAN', drop_first=True).astype(float)
-        lean_dummies = lean_dummies.reset_index(drop=True)
-        treat_df = treat_df.reset_index(drop=True)
-        treat_df = pd.concat([treat_df, lean_dummies], axis=1)
-        regressors.extend(lean_dummies.columns.tolist())
-
-    x_cols = [c for c in regressors if c != 'ABN_SELL' and c in treat_df.columns]
-    if not x_cols:
-        return pd.DataFrame()
-
-    treat_df = treat_df.dropna(subset=['ABN_SELL'] + x_cols).reset_index(drop=True)
-    if len(treat_df) < 15:
-        return pd.DataFrame()
-
-    rows = []
-    try:
-        y = treat_df['ABN_SELL'].astype(float)
-        X = sm.add_constant(treat_df[x_cols].astype(float))
-        model = sm.OLS(y, X).fit(cov_type='HC3')
-        for var in model.params.index:
-            rows.append({
-                'VARIABLE': var,
-                'COEFFICIENT': model.params[var],
-                'STD_ERROR': model.bse[var],
-                'T_STAT': model.tvalues[var],
-                'P_VALUE': model.pvalues[var],
-                'R_SQUARED': model.rsquared,
-                'ADJ_R_SQUARED': model.rsquared_adj,
-                'N_OBS': int(model.nobs),
-            })
-    except Exception as e:
-        logger.warning("Cross-sectional determinants failed: %s", e)
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(df['P_VALUE'].values).astype(int)
-    return df
-
-
-def compute_post_event_reversal(panel):
-    """Test if high pre-event insider selling predicts worse post-event CARs.
-
-    Sorts treatment firms into terciles by pre-event abnormal selling,
-    then compares post-event CAR distributions across terciles.
-    """
-    if 'CAR_POST' not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    valid = treatment.dropna(subset=['CAR_POST', 'PRE_FULL_NET_DOLLAR_SOLD']).copy()
-    if len(valid) < 15:
-        return pd.DataFrame()
-
-    valid['ABN_SELL'] = (valid['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-                          valid['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days)
-
-    # Terciles
-    n_groups = min(3, len(valid) // 5 or 1)
-    if n_groups < 2:
-        return pd.DataFrame()
-    valid['SELL_TERCILE'] = pd.qcut(valid['ABN_SELL'], q=n_groups,
-                                      labels=[f'T{i+1}' for i in range(n_groups)],
-                                      duplicates='drop')
-    actual_groups = valid['SELL_TERCILE'].nunique()
-    if actual_groups < 3:
-        logger.warning("Post-event reversal: qcut produced %d groups (requested 3); "
-                       "heavy zero-ties in ABN_SELL collapsed terciles", actual_groups)
-
-    rows = []
-    groups = []
-    for tercile, grp in valid.groupby('SELL_TERCILE'):
-        cars = grp['CAR_POST'].dropna()
-        groups.append(cars.values)
-        t_stat, t_p = (np.nan, np.nan)
-        if len(cars) > 1:
-            t_stat, t_p = stats.ttest_1samp(cars, 0)
-        rows.append({
-            'TERCILE': str(tercile),
-            'N': len(grp),
-            'MEAN_ABN_SELL': grp['ABN_SELL'].mean(),
-            'MEAN_CAR': cars.mean() if len(cars) > 0 else np.nan,
-            'MEDIAN_CAR': cars.median() if len(cars) > 0 else np.nan,
-            'STD_CAR': cars.std() if len(cars) > 0 else np.nan,
-            'T_STAT_VS_ZERO': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE_VS_ZERO': t_p if not np.isnan(t_p) else None,
-        })
-
-    # Test monotonic relationship: highest selling tercile should have lowest CAR
-    valid_groups = [g for g in groups if len(g) > 0]
-    if len(valid_groups) >= 2:
-        try:
-            kw_stat, kw_p = stats.kruskal(*valid_groups)
-        except Exception:
-            kw_stat, kw_p = None, None
-    else:
-        kw_stat, kw_p = None, None
-
-    # High vs Low tercile direct comparison
-    # MEAN_CAR = (high-selling firms CAR) - (low-selling firms CAR)
-    # Negative value supports reversal hypothesis (more selling → worse returns)
-    if len(groups) >= 2 and len(groups[0]) > 1 and len(groups[-1]) > 1:
-        try:
-            hl_t, hl_p = stats.ttest_ind(groups[-1], groups[0], equal_var=False)
-        except Exception:
-            hl_t, hl_p = None, None
-        rows.append({
-            'TERCILE': 'HIGH_VS_LOW',
-            'N': len(groups[-1]) + len(groups[0]),
-            'MEAN_ABN_SELL': np.nan,
-            'MEAN_CAR': np.mean(groups[-1]) - np.mean(groups[0]),
-            'MEDIAN_CAR': np.nan,
-            'STD_CAR': np.nan,
-            'T_STAT_VS_ZERO': hl_t,
-            'P_VALUE_VS_ZERO': hl_p,
-        })
-
-    df = pd.DataFrame(rows)
-    df['KW_STAT'] = kw_stat
-    df['KW_PVALUE'] = kw_p
-    return df
-
-
-def compute_bootstrap_ci(panel, n_bootstrap=1000, seed=42):
-    """Bootstrap 95% confidence intervals for key statistics."""
-    rng = np.random.RandomState(seed)
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    control = panel[panel['IS_TREATMENT'] == False].copy()
-
-    stats_config = [
-        ('MEAN_ABN_SELL_TREATMENT', treatment, 'abn_sell'),
-        ('MEAN_ABN_SELL_CONTROL', control, 'abn_sell'),
-        ('DID_ESTIMATE', panel, 'did'),
-    ]
-
-    rows = []
-    for stat_name, sub, stat_type in stats_config:
-        if len(sub) < 5:
-            continue
-
-        if stat_type == 'abn_sell':
-            values = (sub[pre_col] / pre_days - sub[bench_col] / bench_days).values
-            observed = np.mean(values)
-            boot_stats = []
-            for _ in range(n_bootstrap):
-                sample = rng.choice(values, size=len(values), replace=True)
-                boot_stats.append(np.mean(sample))
-        elif stat_type == 'did':
-            # Resample matched pairs together to preserve pairing structure
-            # Use PAIR_ID to properly align treatment and control
-            pair_col = 'PAIR_ID' if 'PAIR_ID' in panel.columns else None
-            if pair_col:
-                dup_t = treatment[pair_col].duplicated().sum()
-                dup_c = control[pair_col].duplicated().sum()
-                if dup_t or dup_c:
-                    raise ValueError(
-                        f"Duplicate PAIR_IDs: {dup_t} in treatment, {dup_c} in control. "
-                        "Join would produce cartesian product.")
-                paired = treatment.set_index(pair_col)[[pre_col, bench_col]].join(
-                    control.set_index(pair_col)[[pre_col, bench_col]],
-                    lsuffix='_t', rsuffix='_c', how='inner'
-                )
-                t_vals = (paired[f'{pre_col}_t'] / pre_days - paired[f'{bench_col}_t'] / bench_days).values
-                c_vals = (paired[f'{pre_col}_c'] / pre_days - paired[f'{bench_col}_c'] / bench_days).values
-            elif 'CONTROL_TICKER' in panel.columns and 'EVENT_ID' in panel.columns:
-                # Build explicit pair tuples from EVENT_ID → CONTROL_TICKER mapping
-                pair_map = treatment.set_index('EVENT_ID')[['TICKER', pre_col, bench_col]].join(
-                    control.set_index('EVENT_ID')[['TICKER', pre_col, bench_col]],
-                    lsuffix='_t', rsuffix='_c', how='inner'
-                )
-                t_vals = (pair_map[f'{pre_col}_t'] / pre_days - pair_map[f'{bench_col}_t'] / bench_days).values
-                c_vals = (pair_map[f'{pre_col}_c'] / pre_days - pair_map[f'{bench_col}_c'] / bench_days).values
-            else:
-                # No reliable pairing available — sort-based alignment is broken
-                # (treatment/control tickers differ, so secondary sort scrambles pairs).
-                # Fail loudly rather than produce silently misaligned bootstrap results.
-                raise ValueError(
-                    "Bootstrap DiD requires PAIR_ID or EVENT_ID+CONTROL_TICKER columns "
-                    "to align treatment-control pairs. Sort-based fallback is unreliable."
-                )
-            n_pairs = min(len(t_vals), len(c_vals))
-            t_vals = t_vals[:n_pairs]
-            c_vals = c_vals[:n_pairs]
-            observed = np.mean(t_vals) - np.mean(c_vals)
-            boot_stats = []
-            for _ in range(n_bootstrap):
-                pair_idx = rng.choice(n_pairs, size=n_pairs, replace=True)
-                boot_stats.append(np.mean(t_vals[pair_idx]) - np.mean(c_vals[pair_idx]))
-        else:
-            continue
-
-        boot_stats = np.array(boot_stats)
-        ci_lower = np.percentile(boot_stats, 2.5)
-        ci_upper = np.percentile(boot_stats, 97.5)
-        boot_se = boot_stats.std()
-
-        rows.append({
-            'STATISTIC': stat_name,
-            'OBSERVED': observed,
-            'BOOT_MEAN': boot_stats.mean(),
-            'BOOT_SE': boot_se,
-            'CI_LOWER_95': ci_lower,
-            'CI_UPPER_95': ci_upper,
-            'CI_LOWER_90': np.percentile(boot_stats, 5),
-            'CI_UPPER_90': np.percentile(boot_stats, 95),
-            'SIGNIFICANT_95': 1 if (ci_lower > 0 or ci_upper < 0) else 0,
-            'N': len(sub) if stat_type == 'abn_sell' else len(panel),
-            'N_BOOTSTRAP': n_bootstrap,
-        })
-
-    return pd.DataFrame(rows)
-
-
-def compute_fama_macbeth(panel):
-    """Fama-MacBeth (1973) cross-sectional regressions by event date.
-
-    For each event date, run cross-sectional regression of daily net selling
-    on IS_TREATMENT. Average coefficients across dates and compute
-    Newey-West adjusted standard errors.
-    """
-    dep_var = 'PRE_FULL_NET_DOLLAR_SOLD'
-    if dep_var not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    df = panel[['TICKER', 'EVENT_DATE', dep_var, 'IS_TREATMENT']].dropna(subset=[dep_var]).copy()
-    df['DAILY_SELL'] = df[dep_var] / pre_days
-    df['IS_TREATMENT_INT'] = df['IS_TREATMENT'].astype(int)
-
-    # Cross-sectional regression for each event date
-    date_coefs = []
-    for date, grp in df.groupby('EVENT_DATE'):
-        if len(grp) < 4 or grp['IS_TREATMENT_INT'].nunique() < 2:
-            continue
-        try:
-            y = grp['DAILY_SELL'].astype(float)
-            X = sm.add_constant(grp[['IS_TREATMENT_INT']].astype(float))
-            model = sm.OLS(y, X).fit()
-            const_pos = next((i for i, k in enumerate(model.params.index)
-                              if k in ('const', 'Intercept')), 0)
-            treat_pos = next((i for i, k in enumerate(model.params.index)
-                              if k == 'IS_TREATMENT_INT'), None)
-            date_coefs.append({
-                'DATE': date,
-                'CONST': model.params.iloc[const_pos],
-                'IS_TREATMENT_INT': model.params.iloc[treat_pos] if treat_pos is not None else 0,
-                'N': len(grp),
-            })
-        except Exception:
-            continue
-
-    if len(date_coefs) < 3:
-        return pd.DataFrame()
-
-    coef_df = pd.DataFrame(date_coefs)
-    T = len(coef_df)
-    n_per_date = coef_df['N']
-    logger.info("FM: %d event-date cross-sections; N per date: "
-                "median=%.0f, mean=%.1f, min=%d, max=%d",
-                T, n_per_date.median(), n_per_date.mean(),
-                int(n_per_date.min()), int(n_per_date.max()))
-
-    rows = []
-    for var in ['CONST', 'IS_TREATMENT_INT']:
-        gamma = coef_df[var].values
-        gamma_bar = gamma.mean()
-        # Newey-West SE with lag = int(T^(1/3))
-        max_lag = max(1, int(T ** (1 / 3)))
-        gamma_dm = gamma - gamma_bar
-        var_nw = np.sum(gamma_dm ** 2) / T
-        for lag in range(1, max_lag + 1):
-            weight = 1 - lag / (max_lag + 1)  # Bartlett kernel
-            autocovar = np.sum(gamma_dm[lag:] * gamma_dm[:-lag]) / T
-            var_nw += 2 * weight * autocovar
-        if var_nw < 0:
-            logger.warning("FM Newey-West variance negative for %s (%.4e); "
-                           "falling back to simple variance", var, var_nw)
-            var_nw = np.sum(gamma_dm ** 2) / T  # drop NW correction
-            max_lag = 0  # signal that NW was not applied
-        se_nw = np.sqrt(max(var_nw, 1e-30) / T)
-        t_stat = gamma_bar / se_nw if se_nw > 0 else 0
-        p_val = 2 * (1 - stats.norm.cdf(abs(t_stat)))
-
-        rows.append({
-            'VARIABLE': var,
-            'FM_COEFFICIENT': gamma_bar,
-            'FM_STD_ERROR': se_nw,
-            'FM_T_STAT': t_stat,
-            'FM_P_VALUE': p_val,
-            'N_PERIODS': T,
-            'MAX_LAG_NW': max_lag,
-            'MEDIAN_N_PER_DATE': float(n_per_date.median()),
-            'MEAN_N_PER_DATE': float(n_per_date.mean()),
-        })
-
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out['BH_SIGNIFICANT'] = _benjamini_hochberg(df_out['FM_P_VALUE'].values).astype(int)
-    return df_out
-
-
-def compute_short_swing_check(panel, form4):
-    """Section 16(b) short-swing profit rule check.
-
-    Flags insiders who bought within 6 months before selling in the pre-event
-    window. These insiders face legal constraints on profit-taking, so their
-    sells may be mechanically constrained rather than informationally motivated.
-    Reports results with and without short-swing constrained insiders.
-    """
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    # Identify tickers where insiders had buys within 6 months before pre-event sells
-    short_swing_tickers = set()
-    for _, row in panel[panel['IS_TREATMENT'] == True].iterrows():
-        ticker = row['TICKER']
-        event_date = pd.Timestamp(row['EVENT_DATE'])
-        pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
-        pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
-        lookback_start = pre_start - pd.Timedelta(days=180)
-
-        ticker_txns = form4[form4['ticker'] == ticker]
-        # Find sellers in pre-event window
-        pre_sellers = ticker_txns[
-            (ticker_txns['transaction_date'] >= pre_start) &
-            (ticker_txns['transaction_date'] <= pre_end) &
-            (ticker_txns['_trade_type'] == 'sell')
-        ]['owner_name'].unique()
-
-        # Check if any of these sellers bought in the 6 months before their sell
-        for seller in pre_sellers:
-            buys = ticker_txns[
-                (ticker_txns['owner_name'] == seller) &
-                (ticker_txns['transaction_date'] >= lookback_start) &
-                (ticker_txns['transaction_date'] < pre_start) &
-                (ticker_txns['_trade_type'] == 'buy')
-            ]
-            if len(buys) > 0:
-                short_swing_tickers.add(ticker)
-                break
-
-    panel = panel.copy()
-    panel['SHORT_SWING_FLAG'] = panel['TICKER'].isin(short_swing_tickers).astype(int)
-
-    rows = []
-    for label, sub in [('ALL', panel),
-                        ('EXCL_SHORT_SWING', panel[panel['SHORT_SWING_FLAG'] == 0]),
-                        ('ONLY_SHORT_SWING', panel[panel['SHORT_SWING_FLAG'] == 1])]:
-        treatment = sub[sub['IS_TREATMENT'] == True]
-        if len(treatment) < 5:
-            continue
-        pre_daily = treatment[pre_col] / pre_days
-        bench_daily = treatment[bench_col] / bench_days
-        diff = pre_daily - bench_daily
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1:
-            t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-        rows.append({
-            'FILTER': label,
-            'N_EVENTS': len(treatment),
-            'N_SHORT_SWING_TICKERS': len(short_swing_tickers),
-            'MEAN_DIFF': diff.mean(),
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(df['P_VALUE'].fillna(1).values).astype(int)
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 4.1 AGGREGATE NULL CHARACTERIZATION (TOST + POWER)
-# ═══════════════════════════════════════════════════════════════════════
-
-def compute_tost_equivalence(panel):
-    """Two One-Sided Tests (TOST) for equivalence of pre-event vs benchmark selling.
-
-    Tests whether aggregate insider selling is *equivalent* to benchmark within
-    a practically meaningful margin (±δ). A significant TOST means we can
-    confidently say the effect is negligibly small — characterizing the aggregate
-    null rather than just failing to reject it.
-
-    Equivalence margins (δ):
-      - ±10% of benchmark mean daily selling (primary)
-      - ±20% of benchmark mean (sensitivity)
-      - ±0.5 SD of the difference distribution (Cohen's convention)
-
-    Also reports post-hoc power of the paired t-test at conventional α=0.05
-    for detecting small (d=0.2), medium (d=0.5), and the observed effect size.
-    """
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    if len(treatment) < 10:
-        return pd.DataFrame()
-
-    pre_daily = treatment[pre_col] / pre_days
-    bench_daily = treatment[bench_col] / bench_days
-    diff = pre_daily - bench_daily
-    n = len(diff)
-    diff_mean = diff.mean()
-    diff_std = diff.std()
-    diff_se = diff_std / np.sqrt(n)
-
-    # Observed effect size (Cohen's d for paired data)
-    observed_d = abs(diff_mean) / diff_std if diff_std > 0 else 0
-
-    rows = []
-
-    # ── TOST across multiple equivalence margins ──
-    bench_mean_daily = bench_daily.mean()
-    margins = [
-        # 10%/20% of benchmark daily selling: pre-specified, external to the test
-        ('10PCT_BENCH', abs(bench_mean_daily) * 0.10),
-        ('20PCT_BENCH', abs(bench_mean_daily) * 0.20),
-        # HALF_SD: sensitivity check only — margin is circular (wider when data
-        # is noisy → equivalence easier to establish). Primary SESOI is benchmark-based.
-        ('HALF_SD', diff_std * 0.5),
-    ]
-
-    for margin_name, delta in margins:
-        if delta <= 0:
-            continue
-        # TOST: reject equivalence null if BOTH one-sided tests reject
-        # H0_lower: diff <= -delta  =>  t_lower = (diff_mean + delta) / se
-        # H0_upper: diff >= +delta  =>  t_upper = (diff_mean - delta) / se
-        t_lower = (diff_mean + delta) / diff_se if diff_se > 0 else 0
-        t_upper = (diff_mean - delta) / diff_se if diff_se > 0 else 0
-        p_lower = 1 - stats.t.cdf(t_lower, df=n - 1)
-        p_upper = stats.t.cdf(t_upper, df=n - 1)
-        tost_p = max(p_lower, p_upper)  # both must reject
-        equivalent = 1 if tost_p < 0.05 else 0
-
-        # 90% CI for the difference (standard for equivalence testing)
-        t_crit_90 = stats.t.ppf(0.95, df=n - 1)
-        ci90_lower = diff_mean - t_crit_90 * diff_se
-        ci90_upper = diff_mean + t_crit_90 * diff_se
-
-        rows.append({
-            'TEST': 'TOST',
-            'MARGIN_NAME': margin_name,
-            'DELTA': delta,
-            'DIFF_MEAN': diff_mean,
-            'DIFF_SE': diff_se,
-            'T_LOWER': t_lower,
-            'P_LOWER': p_lower,
-            'T_UPPER': t_upper,
-            'P_UPPER': p_upper,
-            'TOST_P': tost_p,
-            'EQUIVALENT': equivalent,
-            'CI90_LOWER': ci90_lower,
-            'CI90_UPPER': ci90_upper,
-            'N': n,
-            'OBSERVED_D': observed_d,
-            'STATISTIC_VALUE': observed_d,  # Cohen's d for TOST rows
-        })
-
-    # ── Post-hoc power analysis ──
-    # Power of paired t-test at α=0.05 for various effect sizes
-    alpha = 0.05
-    t_crit = stats.t.ppf(1 - alpha / 2, df=n - 1)
-    for d_label, d_target in [('SMALL_D02', 0.2), ('MEDIUM_D05', 0.5),
-                               ('OBSERVED', observed_d)]:
-        if d_target == 0:
-            power = alpha  # power equals α when effect is zero
-        else:
-            # Non-central t-distribution: ncp = d * sqrt(n)
-            ncp = d_target * np.sqrt(n)
-            # Power = P(reject H0 | H1 true)
-            # Under H1, test stat ~ noncentral t(df=n-1, ncp)
-            power = 1 - stats.nct.cdf(t_crit, df=n - 1, nc=ncp) + \
-                    stats.nct.cdf(-t_crit, df=n - 1, nc=ncp)
-
-        rows.append({
-            'TEST': 'POWER',
-            'MARGIN_NAME': d_label,
-            'DELTA': d_target,
-            'DIFF_MEAN': diff_mean,
-            'DIFF_SE': diff_se,
-            'T_LOWER': np.nan,
-            'P_LOWER': np.nan,
-            'T_UPPER': np.nan,
-            'P_UPPER': np.nan,
-            'TOST_P': np.nan,
-            'EQUIVALENT': np.nan,
-            'CI90_LOWER': np.nan,
-            'CI90_UPPER': np.nan,
-            'N': n,
-            'OBSERVED_D': observed_d,
-            'STATISTIC_VALUE': power,  # power (probability, 0-1)
-        })
-
-    # ── Minimum detectable effect (MDE) at 80% power ──
-    # Solve: d * sqrt(n) = t_crit + z_0.80
-    z80 = stats.norm.ppf(0.80)
-    mde_d = (t_crit + z80) / np.sqrt(n) if n > 0 else np.nan
-    mde_dollars = mde_d * diff_std if diff_std > 0 else np.nan
-
-    rows.append({
-        'TEST': 'MDE',
-        'MARGIN_NAME': 'MDE_80PCT_POWER',
-        'DELTA': mde_d,
-        'DIFF_MEAN': mde_dollars,
-        'DIFF_SE': diff_se,
-        'T_LOWER': np.nan,
-        'P_LOWER': np.nan,
-        'T_UPPER': np.nan,
-        'P_UPPER': np.nan,
-        'TOST_P': np.nan,
-        'EQUIVALENT': np.nan,
-        'CI90_LOWER': np.nan,
-        'CI90_UPPER': np.nan,
-        'N': n,
-        'OBSERVED_D': observed_d,
-        'STATISTIC_VALUE': mde_d,  # MDE in Cohen's d units
-    })
-
-    return pd.DataFrame(rows)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 4.2 SUBGROUP SIGNAL-FINDING
-# ═════════════════════════════════════════════════════════��═════════════
-
-def compute_subgroup_analysis(panel, form4):
-    """Disaggregated subgroup tests for theoretically motivated heterogeneity.
-
-    Tests whether insider selling is elevated in specific subgroups where
-    information asymmetry or incentives are strongest:
-
-    1. C-suite insiders (CEO, CFO, COO, CTO, President) vs all insiders
-    2. High-CAR events (worst return quintile post-event)
-    3. Tight window (PRE_NEAR: -30 to -1 days only)
-    4. Normalized sell ratio (volume-adjusted, not raw dollars)
-    5. C-suite × High-CAR interaction (most theoretically motivated subgroup)
-    6. Opportunistic insiders only (exclude routine traders)
-    """
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    near_pre_col = 'PRE_NEAR_NET_DOLLAR_SOLD'
-    near_bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
-        return pd.DataFrame()
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-    near_days = abs(WINDOWS['PRE_NEAR'][1] - WINDOWS['PRE_NEAR'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    if len(treatment) < 10:
-        return pd.DataFrame()
-
-    rows = []
-
-    # ── Helper: run paired t-test on a subgroup and return row ──
-    def _test_subgroup(label, sub, pre_c=pre_col, bench_c=bench_col,
-                       pre_d=pre_days, bench_d=bench_days):
-        if len(sub) < 5:
-            return None
-        pre_daily = sub[pre_c] / pre_d
-        bench_daily = sub[bench_c] / bench_d
-        diff = pre_daily - bench_daily
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1 and diff.std() > 0:
-            t_stat, t_p = stats.ttest_rel(pre_daily, bench_daily)
-        cohen_d = diff.mean() / diff.std() if diff.std() > 0 else (0 if diff.mean() == 0 else np.nan)
-        return {
-            'SUBGROUP': label,
-            'N_EVENTS': len(sub),
-            'MEAN_PRE_DAILY': pre_daily.mean(),
-            'MEAN_BENCH_DAILY': bench_daily.mean(),
-            'MEAN_DIFF': diff.mean(),
-            'MEDIAN_DIFF': diff.median(),
-            'COHEN_D': cohen_d,
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-            'PCT_POSITIVE': (diff > 0).mean() * 100,
-        }
-
-    # 0. Baseline: all treatment events (for comparison)
-    row = _test_subgroup('ALL_TREATMENT', treatment)
-    if row:
-        rows.append(row)
-
-    # 1. C-suite insiders
-    # Identify events where C-suite officers traded in the pre-event window
-    csuite_titles = {'CEO', 'CFO', 'COO', 'CTO', 'PRESIDENT', 'CHIEF EXECUTIVE',
-                     'CHIEF FINANCIAL', 'CHIEF OPERATING', 'CHIEF TECHNOLOGY'}
-    csuite_events = set()
-    for _, ev in treatment.iterrows():
-        ticker = ev['TICKER']
-        event_date = pd.Timestamp(ev['EVENT_DATE'])
-        pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
-        pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
-        ticker_txns = form4[
-            (form4['ticker'] == ticker) &
-            (form4['transaction_date'] >= pre_start) &
-            (form4['transaction_date'] <= pre_end)
-        ]
-        # Check insider_title (not owner_name) for C-suite presence
-        if 'insider_title' in ticker_txns.columns:
-            titles = ticker_txns['insider_title'].dropna().astype(str).str.upper()
-            if titles.apply(lambda t: any(cs in t for cs in csuite_titles)).any():
-                csuite_events.add(ev['EVENT_ID'])
-        else:
-            # Fallback: check owner_name if insider_title unavailable
-            for owner in ticker_txns['owner_name'].unique():
-                owner_upper = str(owner).upper()
-                if any(title in owner_upper for title in csuite_titles):
-                    csuite_events.add(ev['EVENT_ID'])
-                    break
-
-    csuite_mask = treatment['EVENT_ID'].isin(csuite_events)
-    row = _test_subgroup('CSUITE_PRESENT', treatment[csuite_mask])
-    if row:
-        rows.append(row)
-    row = _test_subgroup('NO_CSUITE', treatment[~csuite_mask])
-    if row:
-        rows.append(row)
-
-    # 2. High-CAR events (worst quintile of post-event returns)
-    if 'CAR_POST' in treatment.columns:
-        valid_car = treatment.dropna(subset=['CAR_POST'])
-        if len(valid_car) >= 20:
-            car_q20 = valid_car['CAR_POST'].quantile(0.20)
-            high_car_mask = valid_car['CAR_POST'] <= car_q20
-            row = _test_subgroup('HIGH_CAR_SEVERITY', valid_car[high_car_mask])
-            if row:
-                rows.append(row)
-            row = _test_subgroup('LOW_CAR_SEVERITY', valid_car[~high_car_mask])
-            if row:
-                rows.append(row)
-
-    # 3. Tight window (PRE_NEAR: -30 to -1 days)
-    if near_pre_col in treatment.columns:
-        row = _test_subgroup('TIGHT_WINDOW_30D', treatment,
-                             pre_c=near_pre_col, bench_c=near_bench_col,
-                             pre_d=near_days, bench_d=bench_days)
-        if row:
-            rows.append(row)
-
-    # 4. Normalized sell ratio (NET_SELL_RATIO instead of raw dollars)
-    nsr_pre = 'PRE_FULL_NET_SELL_RATIO'
-    nsr_bench = 'BENCHMARK_NET_SELL_RATIO'
-    if nsr_pre in treatment.columns and nsr_bench in treatment.columns:
-        sub = treatment.copy()
-        pre_vals = sub[nsr_pre].fillna(0)
-        bench_vals = sub[nsr_bench].fillna(0)
-        diff = pre_vals - bench_vals
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1 and diff.std() > 0:
-            t_stat, t_p = stats.ttest_rel(pre_vals, bench_vals)
-        cohen_d = diff.mean() / diff.std() if diff.std() > 0 else (0 if diff.mean() == 0 else np.nan)
-        rows.append({
-            'SUBGROUP': 'NORMALIZED_SELL_RATIO',
-            'N_EVENTS': len(sub),
-            'MEAN_PRE_DAILY': pre_vals.mean(),
-            'MEAN_BENCH_DAILY': bench_vals.mean(),
-            'MEAN_DIFF': diff.mean(),
-            'MEDIAN_DIFF': diff.median(),
-            'COHEN_D': cohen_d,
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-            'PCT_POSITIVE': (diff > 0).mean() * 100,
-        })
-
-    # 5. C-suite × High-CAR interaction
-    if 'CAR_POST' in treatment.columns and len(csuite_events) > 0:
-        valid_car = treatment.dropna(subset=['CAR_POST'])
-        if len(valid_car) >= 20:
-            car_q20 = valid_car['CAR_POST'].quantile(0.20)
-            interaction_mask = (valid_car['EVENT_ID'].isin(csuite_events) &
-                                (valid_car['CAR_POST'] <= car_q20))
-            row = _test_subgroup('CSUITE_X_HIGH_CAR', valid_car[interaction_mask])
-            if row:
-                rows.append(row)
-
-    # 6. Opportunistic insiders only
-    opp_pre = 'PRE_FULL_N_OPPORTUNISTIC'
-    opp_bench = 'BENCHMARK_N_OPPORTUNISTIC'
-    if opp_pre in treatment.columns and opp_bench in treatment.columns:
-        # Events where opportunistic insiders were active pre-event
-        opp_active = treatment[treatment[opp_pre] > 0]
-        row = _test_subgroup('FIRMS_W_OPPORTUNISTIC_ACTIVITY', opp_active)
-        if row:
-            rows.append(row)
-
-    # 7. Large firms (more insiders = more potential for information-motivated trading)
-    insiders_col = 'BENCHMARK_N_UNIQUE_INSIDERS'
-    if insiders_col in treatment.columns:
-        median_insiders = treatment[insiders_col].median()
-        if median_insiders > 0:
-            large_mask = treatment[insiders_col] >= median_insiders
-            row = _test_subgroup('LARGE_INSIDER_BASE', treatment[large_mask])
-            if row:
-                rows.append(row)
-            row = _test_subgroup('SMALL_INSIDER_BASE', treatment[~large_mask])
-            if row:
-                rows.append(row)
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        pvals = df['P_VALUE'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 4.3 ROBUSTNESS — VOLATILITY-SHIFT IDENTIFICATION
-# ═══════════════════════════════════════════════════════════════════════
-
-def _identify_vol_spikes(stock_data, fast_window=5, slow_window=90,
-                          threshold=1.5, min_gap_days=30):
-    """Identify firm-specific realized volatility spikes.
-
-    A spike occurs when the rolling fast-window realized volatility
-    (std of returns) exceeds threshold x the rolling slow-window
-    realized volatility. Spikes within min_gap_days of each other
-    are deduplicated (keep earliest).
-
-    Returns DataFrame with columns: TICKER, SPIKE_DATE, FAST_VOL, SLOW_VOL, RATIO.
-    """
-    if stock_data is None or stock_data.empty:
-        return pd.DataFrame()
-
-    required = ['TICKER', 'DATE', 'RETURN']
-    alt_return = None
-    if 'RETURN' not in stock_data.columns:
-        for candidate in ['RET', 'DAILY_RETURN', 'LOG_RETURN']:
-            if candidate in stock_data.columns:
-                alt_return = candidate
-                break
-        if alt_return is None and 'CLOSE' in stock_data.columns:
-            alt_return = '_COMPUTED_RETURN'
-        if alt_return is None:
-            return pd.DataFrame()
-
-    sd = stock_data.copy()
-    sd['DATE'] = pd.to_datetime(sd['DATE'])
-    if alt_return == '_COMPUTED_RETURN':
-        sd = sd.sort_values(['TICKER', 'DATE'])
-        sd['RETURN'] = sd.groupby('TICKER')['CLOSE'].pct_change()
-    elif alt_return:
-        sd['RETURN'] = sd[alt_return]
-
-    spikes = []
-    for ticker, grp in sd.groupby('TICKER'):
-        grp = grp.sort_values('DATE').copy()
-        if len(grp) < slow_window + fast_window:
-            continue
-
-        # Realized vol = rolling std of returns (annualized not needed for ratio)
-        grp['FAST_VOL'] = grp['RETURN'].rolling(fast_window, min_periods=fast_window).std()
-        grp['SLOW_VOL'] = grp['RETURN'].rolling(slow_window, min_periods=slow_window).std()
-        grp['VOL_RATIO'] = grp['FAST_VOL'] / grp['SLOW_VOL']
-        grp = grp.dropna(subset=['VOL_RATIO'])
-
-        # Find spike dates
-        spike_dates = grp[grp['VOL_RATIO'] >= threshold].copy()
-        if spike_dates.empty:
-            continue
-
-        # Deduplicate: keep first spike in each cluster
-        spike_dates = spike_dates.sort_values('DATE')
-        kept = []
-        last_kept = None
-        for _, row in spike_dates.iterrows():
-            if last_kept is None or (row['DATE'] - last_kept).days >= min_gap_days:
-                kept.append({
-                    'TICKER': ticker,
-                    'SPIKE_DATE': row['DATE'],
-                    'FAST_VOL': row['FAST_VOL'],
-                    'SLOW_VOL': row['SLOW_VOL'],
-                    'VOL_RATIO': row['VOL_RATIO'],
-                })
-                last_kept = row['DATE']
-        spikes.extend(kept)
-
-    return pd.DataFrame(spikes)
-
-
-def compute_volatility_shift_analysis(panel, form4, stock_data,
-                                       vol_threshold=1.5, pre_window=30):
-    """Alternative identification: anchor on volatility spikes instead of event dates.
-
-    Tests whether insiders sell before firm-specific volatility spikes. Cross-
-    references with culture war event panel to distinguish:
-      - Vol spikes coinciding with culture war events (CW-driven)
-      - Vol spikes with no associated event (non-CW control)
-
-    If insiders sell before CW-driven spikes but not non-CW spikes → political
-    foreknowledge. If they sell before both → general volatility-timing. If
-    neither → no anticipatory trading.
-
-    This provides a natural within-firm control that the event-date anchor lacks.
-
-    Parameters
-    ----------
-    panel : DataFrame
-        The existing insider trading panel (for cross-referencing event dates).
-    form4 : DataFrame
-        Raw Form 4 transactions.
-    stock_data : DataFrame
-        Daily stock data with TICKER, DATE, RETURN (or CLOSE).
-    vol_threshold : float
-        Fast vol / slow vol ratio to qualify as a spike (default 1.5).
-    pre_window : int
-        Days before spike to measure insider selling (default 30).
-    """
-    if stock_data is None or stock_data.empty:
-        logger.warning("Volatility shift: no stock data available")
-        return pd.DataFrame()
-
-    # 1. Identify vol spikes across all firms
-    spikes = _identify_vol_spikes(stock_data, threshold=vol_threshold)
-    if spikes.empty:
-        logger.warning("Volatility shift: no vol spikes found at threshold %.1f",
-                        vol_threshold)
-        return pd.DataFrame()
-
-    logger.info("  Vol spikes identified: %d across %d tickers",
-                len(spikes), spikes['TICKER'].nunique())
-
-    # 2. Cross-reference with culture war event dates
-    # A spike is "CW-driven" if it falls within ±7 days of a treatment event
-    event_dates = {}
-    if not panel.empty:
-        treatment = panel[panel['IS_TREATMENT'] == True]
-        for _, row in treatment.iterrows():
-            ticker = row['TICKER']
-            edate = pd.Timestamp(row['EVENT_DATE'])
-            if ticker not in event_dates:
-                event_dates[ticker] = []
-            event_dates[ticker].append(edate)
-
-    def _is_cw_spike(ticker, spike_date, tolerance_days=7):
-        if ticker not in event_dates:
-            return False
-        for edate in event_dates[ticker]:
-            if abs((spike_date - edate).days) <= tolerance_days:
-                return True
-        return False
-
-    spikes['IS_CW_DRIVEN'] = spikes.apply(
-        lambda r: _is_cw_spike(r['TICKER'], r['SPIKE_DATE']), axis=1
-    )
-
-    n_cw = spikes['IS_CW_DRIVEN'].sum()
-    n_non_cw = (~spikes['IS_CW_DRIVEN']).sum()
-    logger.info("  CW-driven spikes: %d, Non-CW spikes: %d", n_cw, n_non_cw)
-
-    # 3. Measure insider selling in [-pre_window, -1] before each spike
-    # and in benchmark [-365, -181] (same as main panel)
-    bench_start_offset = -365
-    bench_end_offset = -181
-    bench_days = abs(bench_end_offset - bench_start_offset) + 1
-
-    # Ensure form4 has trade type
-    if '_trade_type' not in form4.columns:
-        form4 = form4.copy()
-        form4['_trade_type'] = form4.apply(
-            lambda r: _classify_trade(r['transaction_code'], r['acquired_disposed']),
-            axis=1
-        )
-
-    spike_rows = []
-    for _, spike in spikes.iterrows():
-        ticker = spike['TICKER']
-        spike_date = pd.Timestamp(spike['SPIKE_DATE'])
-
-        ticker_txns = form4[form4['ticker'] == ticker]
-        if ticker_txns.empty:
-            continue
-
-        # Pre-spike window
-        pre_start = spike_date - pd.Timedelta(days=pre_window)
-        pre_end = spike_date - pd.Timedelta(days=1)
-        pre_mask = ((ticker_txns['transaction_date'] >= pre_start) &
-                    (ticker_txns['transaction_date'] <= pre_end))
-        pre_txns = ticker_txns[pre_mask]
-
-        # Benchmark window
-        bench_start = spike_date + pd.Timedelta(days=bench_start_offset)
-        bench_end = spike_date + pd.Timedelta(days=bench_end_offset)
-        bench_mask = ((ticker_txns['transaction_date'] >= bench_start) &
-                      (ticker_txns['transaction_date'] <= bench_end))
-        bench_txns = ticker_txns[bench_mask]
-
-        # Compute selling metrics
-        def _net_dollar(txns):
-            sells = txns[txns['_trade_type'] == 'sell']
-            buys = txns[txns['_trade_type'] == 'buy']
-            sell_val = sells['transaction_value'].sum() if 'transaction_value' in sells.columns else (sells['shares'] * sells['price_per_share']).sum()
-            buy_val = buys['transaction_value'].sum() if 'transaction_value' in buys.columns else (buys['shares'] * buys['price_per_share']).sum()
-            return sell_val - buy_val
-
-        pre_net = _net_dollar(pre_txns)
-        bench_net = _net_dollar(bench_txns)
-
-        pre_daily = pre_net / pre_window
-        bench_daily = bench_net / bench_days
-
-        pre_sells = len(pre_txns[pre_txns['_trade_type'] == 'sell'])
-        bench_sells = len(bench_txns[bench_txns['_trade_type'] == 'sell'])
-
-        spike_rows.append({
-            'TICKER': ticker,
-            'SPIKE_DATE': spike_date,
-            'IS_CW_DRIVEN': spike['IS_CW_DRIVEN'],
-            'VOL_RATIO': spike['VOL_RATIO'],
-            'PRE_NET_DOLLAR_DAILY': pre_daily,
-            'BENCH_NET_DOLLAR_DAILY': bench_daily,
-            'DIFF_DAILY': pre_daily - bench_daily,
-            'PRE_N_SELLS': pre_sells,
-            'BENCH_N_SELLS_DAILY': bench_sells / bench_days,
-            'PRE_N_TRANSACTIONS': len(pre_txns),
-            'HAS_PRE_DATA': 1 if len(pre_txns) > 0 else 0,
-        })
-
-    if not spike_rows:
-        return pd.DataFrame()
-
-    spike_panel = pd.DataFrame(spike_rows)
-
-    # 4. Statistical tests
-    rows = []
-
-    # Test A: All vol spikes — do insiders sell before vol spikes generally?
-    with_data = spike_panel[spike_panel['HAS_PRE_DATA'] == 1]
-    for label, sub in [('ALL_SPIKES', with_data),
-                        ('CW_DRIVEN', with_data[with_data['IS_CW_DRIVEN'] == True]),
-                        ('NON_CW', with_data[with_data['IS_CW_DRIVEN'] == False])]:
-        if len(sub) < 5:
-            rows.append({
-                'TEST': label,
-                'N_SPIKES': len(sub),
-                'N_TICKERS': sub['TICKER'].nunique() if len(sub) > 0 else 0,
-                'MEAN_PRE_DAILY': np.nan,
-                'MEAN_BENCH_DAILY': np.nan,
-                'MEAN_DIFF': np.nan,
-                'COHEN_D': np.nan,
-                'T_STAT': np.nan,
-                'P_VALUE': np.nan,
-            })
-            continue
-
-        diff = sub['DIFF_DAILY']
-        t_stat, t_p = (np.nan, np.nan)
-        if len(diff) > 1 and diff.std() > 0:
-            t_stat, t_p = stats.ttest_1samp(diff, 0)
-        cohen_d = diff.mean() / diff.std() if diff.std() > 0 else (0 if diff.mean() == 0 else np.nan)
-
-        rows.append({
-            'TEST': label,
-            'N_SPIKES': len(sub),
-            'N_TICKERS': sub['TICKER'].nunique(),
-            'MEAN_PRE_DAILY': sub['PRE_NET_DOLLAR_DAILY'].mean(),
-            'MEAN_BENCH_DAILY': sub['BENCH_NET_DOLLAR_DAILY'].mean(),
-            'MEAN_DIFF': diff.mean(),
-            'COHEN_D': cohen_d,
-            'T_STAT': t_stat if not np.isnan(t_stat) else None,
-            'P_VALUE': t_p if not np.isnan(t_p) else None,
-        })
-
-    # Test B: CW-driven vs non-CW (two-sample comparison)
-    cw = with_data[with_data['IS_CW_DRIVEN'] == True]['DIFF_DAILY']
-    non_cw = with_data[with_data['IS_CW_DRIVEN'] == False]['DIFF_DAILY']
-    if len(cw) >= 5 and len(non_cw) >= 5:
-        t_stat_2s, t_p_2s = stats.ttest_ind(cw, non_cw, equal_var=False)
-        pooled_std = np.sqrt((cw.std() ** 2 + non_cw.std() ** 2) / 2)
-        cohen_d_2s = (cw.mean() - non_cw.mean()) / pooled_std if pooled_std > 0 else 0
-
-        rows.append({
-            'TEST': 'CW_VS_NON_CW',
-            'N_SPIKES': len(cw) + len(non_cw),
-            'N_TICKERS': with_data['TICKER'].nunique(),
-            'MEAN_PRE_DAILY': cw.mean(),
-            'MEAN_BENCH_DAILY': non_cw.mean(),
-            'MEAN_DIFF': cw.mean() - non_cw.mean(),
-            'COHEN_D': cohen_d_2s,
-            'T_STAT': t_stat_2s,
-            'P_VALUE': t_p_2s,
-        })
-
-        # Mann-Whitney U for robustness
-        try:
-            u_stat, u_p = stats.mannwhitneyu(cw, non_cw, alternative='two-sided')
-            rows.append({
-                'TEST': 'CW_VS_NON_CW_MANNWHITNEY',
-                'N_SPIKES': len(cw) + len(non_cw),
-                'N_TICKERS': with_data['TICKER'].nunique(),
-                'MEAN_PRE_DAILY': cw.median(),
-                'MEAN_BENCH_DAILY': non_cw.median(),
-                'MEAN_DIFF': cw.median() - non_cw.median(),
-                'COHEN_D': np.nan,
-                'T_STAT': u_stat,
-                'P_VALUE': u_p,
-            })
-        except Exception:
-            pass
-
-    # Test C: Regression — DIFF_DAILY ~ IS_CW_DRIVEN + VOL_RATIO
-    if len(with_data) >= 20:
-        try:
-            reg_df = with_data[['DIFF_DAILY', 'IS_CW_DRIVEN', 'VOL_RATIO']].copy()
-            reg_df['IS_CW_INT'] = reg_df['IS_CW_DRIVEN'].astype(int)
-            y = reg_df['DIFF_DAILY'].astype(float)
-            X = sm.add_constant(reg_df[['IS_CW_INT', 'VOL_RATIO']].astype(float))
-            model = sm.OLS(y, X).fit(cov_type='HC1')
-            for var in model.params.index:
-                rows.append({
-                    'TEST': f'OLS_{var}',
-                    'N_SPIKES': int(model.nobs),
-                    'N_TICKERS': with_data['TICKER'].nunique(),
-                    'MEAN_PRE_DAILY': np.nan,
-                    'MEAN_BENCH_DAILY': np.nan,
-                    'MEAN_DIFF': model.params[var],
-                    'COHEN_D': np.nan,
-                    'T_STAT': model.tvalues[var],
-                    'P_VALUE': model.pvalues[var],
-                })
-        except Exception as e:
-            logger.warning("Vol-shift OLS failed: %s", e)
-
-    # Test D: Transition test — selling in the N days before VIX crosses threshold
-    # (within-firm: compare pre-spike selling at same firm on CW vs non-CW dates)
-    firms_with_both = set()
-    if not spike_panel.empty:
-        for ticker, grp in spike_panel.groupby('TICKER'):
-            if grp['IS_CW_DRIVEN'].any() and (~grp['IS_CW_DRIVEN']).any():
-                firms_with_both.add(ticker)
-
-    if len(firms_with_both) >= 3:
-        within_firm = spike_panel[spike_panel['TICKER'].isin(firms_with_both)].copy()
-        # Within-firm difference: CW spike selling - non-CW spike selling (same firm)
-        firm_diffs = []
-        for ticker in firms_with_both:
-            t_data = within_firm[within_firm['TICKER'] == ticker]
-            cw_mean = t_data[t_data['IS_CW_DRIVEN'] == True]['DIFF_DAILY'].mean()
-            ncw_mean = t_data[t_data['IS_CW_DRIVEN'] == False]['DIFF_DAILY'].mean()
-            if not np.isnan(cw_mean) and not np.isnan(ncw_mean):
-                firm_diffs.append(cw_mean - ncw_mean)
-
-        if len(firm_diffs) >= 3:
-            firm_diffs = np.array(firm_diffs)
-            t_stat_wf, t_p_wf = stats.ttest_1samp(firm_diffs, 0)
-            rows.append({
-                'TEST': 'WITHIN_FIRM_CW_VS_NON_CW',
-                'N_SPIKES': len(firm_diffs),
-                'N_TICKERS': len(firms_with_both),
-                'MEAN_PRE_DAILY': np.nan,
-                'MEAN_BENCH_DAILY': np.nan,
-                'MEAN_DIFF': firm_diffs.mean(),
-                'COHEN_D': firm_diffs.mean() / firm_diffs.std() if firm_diffs.std() > 0 else 0,
-                'T_STAT': t_stat_wf,
-                'P_VALUE': t_p_wf,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        pvals = df['P_VALUE'].fillna(1).values
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(pvals).astype(int)
-
-    # Log interpretation guide
-    if not df.empty:
-        for _, r in df[df['TEST'].isin(['CW_DRIVEN', 'NON_CW', 'CW_VS_NON_CW'])].iterrows():
-            logger.info("    %s: diff=%.0f, d=%.3f, p=%s",
-                        r['TEST'], r.get('MEAN_DIFF', 0) or 0,
-                        r.get('COHEN_D', 0) or 0,
-                        f"{r['P_VALUE']:.4f}" if pd.notna(r.get('P_VALUE')) else 'N/A')
-
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TAIL DIAGNOSTIC — WHO'S DRIVING THE MANN-WHITNEY DISTRIBUTIONAL DIFF?
-# ═══════════════════════════════════════════════════════════════════════
-
-# Keywords for classifying culture-war events as planned vs reactive.
-# Event descriptions typically describe both the corporate ACTION (planned)
-# and the public REACTION, so we use position-weighted scoring: keywords
-# appearing in the first half of the description (the action clause) get
-# double weight, since "Nike launches Kaepernick campaign" is planned even
-# though the description also mentions "backlash".
-
-# Keywords use base-form stems with \w* to capture inflections (plurals,
-# past tense, gerunds).  Short roots that would false-positive on common
-# words (e.g. 'ad' → 'adventure', 'fire' → 'first') are enumerated as
-# explicit inflection lists instead.
-#
-# Note: finditer counts *every* match, so a description mentioning "protest"
-# three times scores higher than one mention — this is intentional (stronger
-# evidence from repetition).  The old str.find() version counted only the
-# first occurrence per keyword.
-
-_PLANNED_KEYWORDS = [
-    # Base-form stems (safe with \w* — long enough to avoid false positives)
-    'partnership', 'campaign', 'announc', 'initiat', 'pledg',
-    'introduc', 'releas', 'unveil', 'sponsor', 'endors',
-    'donat', 'creat', 'expand',
-    'promot', 'featur', 'launch', 'collect',
-    'advertisement', 'commercial', 'marketing',
-    # Explicit inflections — 'invest' enumerated to avoid colliding with
-    # 'investigat' (REACTIVE); 'commit' enumerated to avoid 'committee'
-    'invest', 'invested', 'investing', 'investment', 'investments',
-    'investor', 'investors',
-    'commit', 'committed', 'commitment', 'commitments', 'committing',
-    # 'hire' as stem covers hire/hired/hires but NOT hiring (e-drop conjugation),
-    # so 'hiring' is added explicitly. 'appoint' stem covers all inflections.
-    'hire', 'hiring', 'appoint',
-    'policy', 'policies',
-    'decision', 'decisions',
-    'ad', 'ads',  # exact-match only (short root)
-]
-# All keywords are stems except the explicit-inflection entries
-_PLANNED_STEMS = {
-    'partnership', 'campaign', 'announc', 'initiat', 'pledg',
-    'introduc', 'releas', 'unveil', 'sponsor', 'endors',
-    'donat', 'creat', 'expand',
-    'promot', 'featur', 'launch', 'collect',
-    'advertisement', 'commercial', 'marketing',
-    'hire', 'appoint',
-}
-
-_REACTIVE_KEYWORDS = [
-    # Base-form stems (safe with \w*)
-    'boycott', 'backlash', 'controvers', 'critic',
-    'scandal', 'accus', 'investigat',
-    'condemn', 'apolog', 'walkout', 'petition',
-    'whistleblow', 'outrag', 'fallout',
-    # Explicit inflections for short / ambiguous roots
-    # 'protest' enumerated to avoid matching 'protestant'
-    'protest', 'protests', 'protested', 'protesting', 'protester', 'protesters',
-    # 'fire' → 'first/firm/fireside' so enumerate
-    'fired', 'fires', 'firing',
-    'resigned', 'resigns', 'resigning', 'resignation',
-    'sued', 'sues', 'suing', 'lawsuit',
-    'leaked', 'leaks', 'leaking',
-]
-_REACTIVE_STEMS = {
-    'boycott', 'backlash', 'controvers', 'critic',
-    'scandal', 'accus', 'investigat',
-    'condemn', 'apolog', 'walkout', 'petition',
-    'whistleblow', 'outrag', 'fallout',
-}
-
-
-def _build_keyword_re(keywords, stems=frozenset()):
-    """Build word-boundary regex. Stems get \\w* to match inflections."""
-    parts = []
-    seen = set()
-    for kw in keywords:
-        if kw in seen:
-            continue
-        seen.add(kw)
-        escaped = re.escape(kw)
-        if kw in stems:
-            parts.append(escaped + r'\w*')
-        else:
-            parts.append(escaped)
-    return re.compile(r'\b(?:' + '|'.join(parts) + r')\b', re.IGNORECASE)
-
-
-# Compile once — avoids false positives from substring matches
-# ('issued' no longer triggers 'sued'; 'broad' no longer triggers 'ad';
-# 'protestant' no longer triggers 'protest').
-_PLANNED_RE = _build_keyword_re(_PLANNED_KEYWORDS, _PLANNED_STEMS)
-_REACTIVE_RE = _build_keyword_re(_REACTIVE_KEYWORDS, _REACTIVE_STEMS)
-
-
-def _classify_event_type(description):
-    """Classify a culture-war event as PLANNED, REACTIVE, or AMBIGUOUS.
-
-    Uses position-weighted scoring: keywords in the first half of the
-    description (the action clause) get 2x weight. This prevents events
-    like "Nike launches Kaepernick campaign causing backlash" from being
-    classified as REACTIVE when the corporate action was clearly planned.
-
-    Word-boundary regex prevents false positives from substring matches
-    (e.g. 'issued' no longer triggers 'sued'; 'protestant' no longer
-    triggers 'protest').
-
-    Note: repeated keyword mentions in a single description each contribute
-    to the score (finditer counts every match). This is intentional — a
-    description mentioning "protest" three times is stronger evidence than
-    one mention.
-    """
-    desc = str(description)
-    desc_lower = desc.lower()
-    midpoint = len(desc_lower) // 2
-
-    planned_score = 0
-    for m in _PLANNED_RE.finditer(desc_lower):
-        planned_score += 2 if m.start() < midpoint else 1
-
-    reactive_score = 0
-    for m in _REACTIVE_RE.finditer(desc_lower):
-        reactive_score += 2 if m.start() < midpoint else 1
-
-    if planned_score > reactive_score:
-        return 'PLANNED'
-    elif reactive_score > planned_score:
-        return 'REACTIVE'
-    return 'AMBIGUOUS'
-
-
-def identify_tail_firms(panel, events, top_pct=0.20):
-    """
-    Identify treatment firms in the top quintile of abnormal pre-event
-    selling relative to their own benchmark — the firms driving the
-    Mann-Whitney distributional difference.
-
-    Returns (tail_enriched DataFrame, threshold value).
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['PRE_DAILY'] = treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days
-    treatment['BENCH_DAILY'] = treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    treatment['ABN_SELL'] = treatment['PRE_DAILY'] - treatment['BENCH_DAILY']
-
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    tail_firms = treatment[treatment['ABN_SELL'] >= threshold].copy()
-
-    # Enrich with event metadata
-    event_meta = events[['TICKER', 'EVENT_DATE',
-                          'ESTIMATED_POLITICAL_LEANING']].copy()
-    if 'CULTURE_WAR_EVENT' in events.columns:
-        event_meta['EVENT_TYPE'] = events['CULTURE_WAR_EVENT'].apply(
-            _classify_event_type)
-        event_meta['EVENT_DESCRIPTION'] = events['CULTURE_WAR_EVENT']
-
-    tail_enriched = tail_firms.merge(
-        event_meta, on=['TICKER', 'EVENT_DATE'], how='left',
-        suffixes=('', '_evt')
-    )
-
-    logger.info("  Tail diagnostic: %d/%d events in top %.0f%% "
-                "(threshold=$%.0f/day)",
-                len(tail_enriched), len(treatment), top_pct * 100, threshold)
-
-    return tail_enriched, threshold
-
-
-def test_leaning_in_tail(panel, events, top_pct=0.20):
-    """
-    Chi-square test: is political leaning distributed differently in the
-    top quintile of abnormal sellers vs the rest?
-
-    Also includes Kruskal-Wallis across leanings and per-leaning stats.
-    Returns DataFrame with test results.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
-
-    # Merge leaning from events
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    rows = []
-
-    # Chi-square: leaning × tail membership
-    contingency = pd.crosstab(
-        treatment['ESTIMATED_POLITICAL_LEANING'],
-        treatment['IN_TAIL']
-    )
-    if contingency.shape[0] >= 2 and contingency.shape[1] >= 2:
-        chi2, chi2_p, dof, _ = stats.chi2_contingency(contingency)
-        rows.append({
-            'TEST': 'CHI2_LEANING_VS_TAIL',
-            'N': len(treatment),
-            'STAT': chi2,
-            'P_VALUE': chi2_p,
-            'DOF': dof,
-        })
-
-    # Mean abnormal selling by leaning
-    for lean, grp in treatment.groupby('ESTIMATED_POLITICAL_LEANING'):
-        vals = grp['ABN_SELL'].dropna()
-        tail_share = grp['IN_TAIL'].mean() * 100
-        t_stat, t_p = (np.nan, np.nan)
-        if len(vals) > 1:
-            t_stat, t_p = stats.ttest_1samp(vals, 0)
-        rows.append({
-            'TEST': f'LEANING_{lean.upper().replace(" ", "_")}',
-            'N': len(grp),
-            'MEAN_ABN_SELL': vals.mean() if len(vals) > 0 else np.nan,
-            'MEDIAN_ABN_SELL': vals.median() if len(vals) > 0 else np.nan,
-            'PCT_IN_TAIL': tail_share,
-            'STAT': t_stat,
-            'P_VALUE': t_p,
-        })
-
-    # Kruskal-Wallis across leanings
-    groups = [
-        treatment.loc[treatment['ESTIMATED_POLITICAL_LEANING'] == l,
-                       'ABN_SELL'].dropna().values
-        for l in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique()
-    ]
-    valid_groups = [g for g in groups if len(g) >= 3]
-    if len(valid_groups) >= 2:
-        kw_stat, kw_p = stats.kruskal(*valid_groups)
-        rows.append({
-            'TEST': 'KW_LEANING_VS_ABN_SELL',
-            'N': sum(len(g) for g in valid_groups),
-            'STAT': kw_stat,
-            'P_VALUE': kw_p,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(
-            df['P_VALUE'].fillna(1).values
-        ).astype(int)
-    return df
-
-
-def test_event_type_vs_selling(panel, events):
-    """
-    Test whether insiders sell more before PLANNED events (where they had
-    advance notice of corporate action) vs REACTIVE events (external
-    pressure — less foreknowledge).
-
-    Classifies events from CULTURE_WAR_EVENT text into PLANNED/REACTIVE/
-    AMBIGUOUS using keyword matching.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Classify events and merge
-    evt = events[['TICKER', 'EVENT_DATE']].copy()
-    if 'CULTURE_WAR_EVENT' in events.columns:
-        evt['EVENT_TYPE'] = events['CULTURE_WAR_EVENT'].apply(
-            _classify_event_type)
-    else:
-        logger.warning("No CULTURE_WAR_EVENT column — skipping event type test")
-        return pd.DataFrame()
-
-    treatment = treatment.merge(
-        evt, on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    rows = []
-    planned = treatment.loc[treatment['EVENT_TYPE'] == 'PLANNED',
-                             'ABN_SELL'].dropna()
-    reactive = treatment.loc[treatment['EVENT_TYPE'] == 'REACTIVE',
-                              'ABN_SELL'].dropna()
-    ambiguous = treatment.loc[treatment['EVENT_TYPE'] == 'AMBIGUOUS',
-                               'ABN_SELL'].dropna()
-
-    logger.info("  Event type classification: %d PLANNED, %d REACTIVE, "
-                "%d AMBIGUOUS", len(planned), len(reactive), len(ambiguous))
-
-    # Two-sample: PLANNED vs REACTIVE
-    if len(planned) >= 5 and len(reactive) >= 5:
-        t_stat, t_p = stats.ttest_ind(planned, reactive, equal_var=False)
-        u_stat, u_p = stats.mannwhitneyu(planned, reactive,
-                                          alternative='greater')
-        pooled_sd = np.sqrt(
-            (planned.std() ** 2 + reactive.std() ** 2) / 2)
-        cohen_d = ((planned.mean() - reactive.mean()) / pooled_sd
-                   if pooled_sd > 0 else 0)
-        rows.append({
-            'COMPARISON': 'PLANNED_VS_REACTIVE',
-            'N_A': len(planned),
-            'N_B': len(reactive),
-            'MEAN_A': planned.mean(),
-            'MEAN_B': reactive.mean(),
-            'COHEN_D': cohen_d,
-            'T_STAT': t_stat,
-            'T_PVALUE': t_p,
-            'MW_STAT': u_stat,
-            'MW_PVALUE': u_p,
-        })
-
-    # One-sample tests: each type vs zero
-    for label, vals in [('PLANNED', planned), ('REACTIVE', reactive),
-                         ('AMBIGUOUS', ambiguous)]:
-        if len(vals) >= 5:
-            t_s, t_p = stats.ttest_1samp(vals, 0)
-            d = vals.mean() / vals.std() if vals.std() > 0 else 0
-            rows.append({
-                'COMPARISON': f'{label}_VS_ZERO',
-                'N_A': len(vals),
-                'MEAN_A': vals.mean(),
-                'COHEN_D': d,
-                'T_STAT': t_s,
-                'T_PVALUE': t_p,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        # BH on whichever p-value columns exist
-        for pcol in ['T_PVALUE', 'MW_PVALUE']:
-            if pcol in df.columns and df[pcol].notna().any():
-                df[f'{pcol}_BH_SIG'] = _benjamini_hochberg(
-                    df[pcol].fillna(1).values
-                ).astype(int)
-    return df
-
-
-def test_leaning_x_event_type(panel, events):
-    """
-    2×3 interaction: Event Type (Planned/Reactive/Ambiguous) ×
-    Political Leaning (Conservative/Liberal/Mixed).
-
-    Theory: highest abnormal selling in CONSERVATIVE × PLANNED (insiders
-    at firms making deliberate right-leaning political stands have the
-    most foreknowledge). Lowest in LIBERAL × REACTIVE.
-
-    Includes cell-level t-tests and OLS with interaction terms.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Merge leaning + event type
-    evt = events[['TICKER', 'EVENT_DATE',
-                   'ESTIMATED_POLITICAL_LEANING']].copy()
-    if 'CULTURE_WAR_EVENT' in events.columns:
-        evt['EVENT_TYPE'] = events['CULTURE_WAR_EVENT'].apply(
-            _classify_event_type)
-    else:
-        return pd.DataFrame()
-
-    treatment = treatment.merge(
-        evt, on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    rows = []
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        for etype in ['PLANNED', 'REACTIVE', 'AMBIGUOUS']:
-            cell = treatment.loc[
-                (treatment['ESTIMATED_POLITICAL_LEANING'] == lean) &
-                (treatment['EVENT_TYPE'] == etype),
-                'ABN_SELL'
-            ].dropna()
-
-            if len(cell) < 3:
-                continue
-
-            t_stat, t_p = stats.ttest_1samp(cell, 0)
-            d = cell.mean() / cell.std() if cell.std() > 0 else 0
-            rows.append({
-                'LEAN': lean,
-                'EVENT_TYPE': etype,
-                'N': len(cell),
-                'MEAN_ABN_SELL': cell.mean(),
-                'MEDIAN_ABN_SELL': cell.median(),
-                'PCT_POSITIVE': (cell > 0).mean() * 100,
-                'COHEN_D': d,
-                'T_STAT': t_stat,
-                'P_VALUE': t_p,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty and df['P_VALUE'].notna().any():
-        df['BH_SIGNIFICANT'] = _benjamini_hochberg(
-            df['P_VALUE'].fillna(1).values
-        ).astype(int)
-
-    # OLS with interaction terms for formal test
-    try:
-        reg_df = treatment.dropna(
-            subset=['ABN_SELL', 'ESTIMATED_POLITICAL_LEANING', 'EVENT_TYPE']
-        ).copy()
-        if len(reg_df) < 10:
-            return df
-
-        lean_dummies = pd.get_dummies(
-            reg_df['ESTIMATED_POLITICAL_LEANING'],
-            prefix='LEAN', drop_first=True
-        ).astype(float)
-        type_dummies = pd.get_dummies(
-            reg_df['EVENT_TYPE'],
-            prefix='TYPE', drop_first=True
-        ).astype(float)
-
-        # Interaction terms
-        interaction_cols = {}
-        for lc in lean_dummies.columns:
-            for tc in type_dummies.columns:
-                interaction_cols[f'{lc}_X_{tc}'] = (
-                    lean_dummies[lc] * type_dummies[tc])
-        interactions = pd.DataFrame(interaction_cols, index=reg_df.index)
-
-        X = sm.add_constant(
-            pd.concat([lean_dummies, type_dummies, interactions],
-                      axis=1).astype(float)
-        )
-        y = reg_df['ABN_SELL'].astype(float)
-        model = sm.OLS(y, X).fit()
-
-        for var in model.params.index:
-            if '_X_' in var or var == 'const':
-                interaction_row = {
-                    'LEAN': 'INTERACTION',
-                    'EVENT_TYPE': var,
-                    'N': int(model.nobs),
-                    'MEAN_ABN_SELL': model.params[var],
-                    'COHEN_D': np.nan,
-                    'T_STAT': model.tvalues[var],
-                    'P_VALUE': model.pvalues[var],
-                }
-                df = pd.concat([df, pd.DataFrame([interaction_row])],
-                               ignore_index=True)
-
-        # Store R-squared on last row
-        if not df.empty:
-            df.loc[df.index[-1], 'R_SQUARED'] = model.rsquared
-
-    except Exception as e:
-        logger.warning("Leaning × event type interaction OLS failed: %s", e)
-
-    return df
-
-
-def compute_tail_diagnostic(panel, events, form4, top_pct=0.20):
-    """
-    Master function: run all three tail-diagnostic tests plus the
-    enriched tail-firm identification.
-
-    Returns dict with keys:
-      'tail_firms'   — enriched top-quintile firms
-      'leaning_test' — chi-square / KW on leaning in tail
-      'event_type'   — planned vs reactive selling comparison
-      'interaction'  — leaning × event type 2×3 + OLS
-    """
-    logger.info("Running tail diagnostic (top %.0f%%)...", top_pct * 100)
-
-    tail_enriched, threshold = identify_tail_firms(
-        panel, events, top_pct=top_pct)
-
-    logger.info("Test 1: Leaning distribution in tail...")
-    leaning_test = test_leaning_in_tail(panel, events, top_pct=top_pct)
-
-    logger.info("Test 2: Planned vs reactive event type...")
-    event_type = test_event_type_vs_selling(panel, events)
-
-    logger.info("Test 3: Leaning × event type interaction...")
-    interaction = test_leaning_x_event_type(panel, events)
-
-    # Log summary
-    if not leaning_test.empty:
-        chi2_row = leaning_test[leaning_test['TEST'] == 'CHI2_LEANING_VS_TAIL']
-        if not chi2_row.empty:
-            logger.info("  Chi-square (leaning vs tail): chi2=%.2f, p=%.4f",
-                        chi2_row.iloc[0]['STAT'], chi2_row.iloc[0]['P_VALUE'])
-
-    if not event_type.empty:
-        pvr = event_type[event_type['COMPARISON'] == 'PLANNED_VS_REACTIVE']
-        if not pvr.empty:
-            logger.info("  Planned vs Reactive: d=%.3f, t-p=%.4f, MW-p=%.4f",
-                        pvr.iloc[0]['COHEN_D'],
-                        pvr.iloc[0]['T_PVALUE'],
-                        pvr.iloc[0]['MW_PVALUE'])
-
-    if not interaction.empty:
-        cells = interaction[interaction['LEAN'] != 'INTERACTION']
-        if not cells.empty:
-            best = cells.loc[cells['MEAN_ABN_SELL'].idxmax()]
-            logger.info("  Highest cell: %s × %s (d=%.3f, p=%.4f, n=%d)",
-                        best.get('LEAN', '?'), best.get('EVENT_TYPE', '?'),
-                        best.get('COHEN_D', 0), best.get('P_VALUE', 1),
-                        int(best.get('N', 0)))
-
-    return {
-        'tail_firms': tail_enriched,
-        'leaning_test': leaning_test,
-        'event_type': event_type,
-        'interaction': interaction,
+        cc = store.read_table('CONTROL_COMPANIES')
+        if not cc.empty and 'NAICS_CODE' in cc.columns:
+            col = 'CONTROL_TICKER' if 'CONTROL_TICKER' in cc.columns else 'TICKER'
+            for _, r in cc[[col, 'NAICS_CODE']].drop_duplicates(col).iterrows():
+                code = int(r['NAICS_CODE']) if pd.notna(r['NAICS_CODE']) else 0
+                ticker = r[col]
+                if code != 999999 and code > 0 and ticker not in naics_map:
+                    naics_map[ticker] = str(code)[:3]
+    except Exception:
+        pass
+
+    # Manual assignments for tickers missing from DB tables
+    # Based on publicly available SIC/NAICS classifications
+    manual = {
+        'AXP': '522',   # credit card issuing
+        'BBBY': '442',  # home furnishings
+        'BBWI': '453',  # specialty retail (Bath & Body Works)
+        'CAR': '532',   # car rental (Avis)
+        'CBRL': '722',  # restaurants (Cracker Barrel)
+        'CPB': '311',   # food manufacturing (Campbell's)
+        'DELL': '334',  # computer manufacturing
+        'DPZ': '722',   # restaurants (Domino's)
+        'ELF': '325',   # cosmetics
+        'EPC': '325',   # specialty chemicals
+        'HPE': '334',   # computer equipment
+        'HPQ': '334',   # computer equipment
+        'HSY': '311',   # food/candy (Hershey)
+        'HTZ': '532',   # car rental
+        'IBM': '541',   # IT services
+        'LULU': '315',  # apparel
+        'LYFT': '485',  # rideshare/transit
+        'MA': '522',    # payment processing
+        'MCD': '722',   # restaurants
+        'MDLZ': '311',  # food manufacturing (Mondelez)
+        'MET': '524',   # insurance
+        'PG': '325',    # consumer goods/chemicals (P&G)
+        'PTON': '339',  # fitness equipment
+        'PZZA': '722',  # restaurants (Papa John's)
+        'SONY': '334',  # electronics
+        'TSLA': '336',  # motor vehicles
+        'TWLO': '517',  # telecom/cloud
+        'ULTA': '446',  # health/beauty retail
+        'V': '522',     # payment processing
+        'W': '454',     # e-commerce (Wayfair)
+        'YUM': '722',   # restaurants
     }
+    for ticker, naics3 in manual.items():
+        if ticker not in naics_map:
+            naics_map[ticker] = naics3
+
+    return naics_map
 
 
-def compute_conservative_planned_deep_dive(panel, events, form4):
+# Module-level cache for the NAICS map
+_ticker_naics_map = None
+
+
+def _match_tickers_to_naics(tickers, naics_list, form4, event_date,
+                            max_per_event=15, store=None):
+    """Match Form 4 tickers to affected NAICS sectors.
+
+    Uses 3-digit NAICS prefix matching: a ticker is matched to an event
+    if the ticker's NAICS prefix appears in the event's AFFECTED_NAICS list.
+    Falls back to returning tickers active in the prior year only if no
+    NAICS codes are available for the event.
     """
-    Deep dive on the Conservative × Planned cell (d=0.751).
+    global _ticker_naics_map
+    if _ticker_naics_map is None and store is not None:
+        _ticker_naics_map = _build_ticker_naics_map(store)
+        logger.info("  Built ticker-NAICS map: %d tickers", len(_ticker_naics_map))
 
-    For each event in this cell, produces a case-study row with:
-    - Individual firm abnormal selling magnitude
-    - Pre-event and benchmark selling
-    - CAR (market reaction severity)
-    - C-suite insider presence and count
-    - Insider trade timing (median days before event)
-    - Transaction size relative to firm baseline
-    - Power diagnostic: observed d, n needed for 80% power, actual n
+    # Filter to tickers active in the prior year (baseline requirement)
+    window_start = event_date - pd.Timedelta(days=365)
+    active = set(form4[
+        (form4['transaction_date'] >= window_start) &
+        (form4['transaction_date'] <= event_date)
+    ]['ticker'].unique())
 
-    This table supports qualitative case-study discussion in the
-    dissertation even when the cell is too small for inference.
-    """
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+    # If no NAICS list or no NAICS map, cannot match — return empty
+    if not naics_list or _ticker_naics_map is None:
+        return []
 
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
+    # Parse event NAICS to 3-digit prefixes
+    event_naics_3 = set()
+    for code in naics_list:
+        code = str(code).strip()
+        if len(code) >= 3:
+            event_naics_3.add(code[:3])
+
+    if not event_naics_3:
+        return []
+
+    # Match: ticker's 3-digit NAICS prefix must appear in the event's NAICS list
+    matched = []
+    for ticker in active:
+        ticker_naics3 = _ticker_naics_map.get(ticker)
+        if ticker_naics3 and ticker_naics3 in event_naics_3:
+            matched.append(ticker)
+
+    # Cap at max_per_event using deterministic seed
+    if len(matched) > max_per_event:
+        seed = int(event_date.strftime('%Y%m%d'))
+        rng = np.random.RandomState(seed)
+        matched = list(rng.choice(matched, max_per_event, replace=False))
+
+    return matched
+
+
+def _stratify_panel(panel):
+    """Add stratification variables and create a matched subsample."""
+    panel = panel.copy()
+    panel['EVENT_YEAR'] = pd.to_datetime(panel['EVENT_DATE']).dt.year
+
+    bench_total = panel['BENCHMARK_DOLLAR_SOLD'].fillna(0) + panel['BENCHMARK_DOLLAR_BOUGHT'].fillna(0)
+    panel['BENCHMARK_TOTAL_VOLUME'] = bench_total
+    panel['ACTIVITY_TERCILE'] = 0
+    for cat in panel['EVENT_CATEGORY'].unique():
+        mask = panel['EVENT_CATEGORY'] == cat
+        vals = panel.loc[mask, 'BENCHMARK_TOTAL_VOLUME']
+        try:
+            panel.loc[mask, 'ACTIVITY_TERCILE'] = pd.qcut(
+                vals, q=3, labels=[1, 2, 3], duplicates='drop'
+            ).astype(int)
+        except (ValueError, TypeError):
+            panel.loc[mask, 'ACTIVITY_TERCILE'] = 2
+
+    # Matched subsample: 3:1 fundamental-to-cultural within strata
+    panel['MATCHED'] = False
+    cultural_mask = panel['EVENT_CATEGORY'] == 'CULTURAL'
+    panel.loc[cultural_mask, 'MATCHED'] = True
+
+    cultural_strata = (
+        panel.loc[cultural_mask]
+        .groupby(['EVENT_YEAR', 'ACTIVITY_TERCILE'])
+        .size().to_dict()
     )
-    treatment['PRE_DAILY'] = treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days
-    treatment['BENCH_DAILY'] = treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
 
-    # Merge event metadata + classify event type
-    evt = events[['TICKER', 'EVENT_DATE',
-                   'ESTIMATED_POLITICAL_LEANING',
-                   'COMPANY']].copy()
-    if 'CULTURE_WAR_EVENT' in events.columns:
-        evt['EVENT_TYPE'] = events['CULTURE_WAR_EVENT'].apply(
-            _classify_event_type)
-        evt['EVENT_DESCRIPTION'] = events['CULTURE_WAR_EVENT']
-    else:
+    fund_mask = panel['EVENT_CATEGORY'] == 'FUNDAMENTAL'
+    rng = np.random.RandomState(42)
+    matched_indices = []
+    for (year, tercile), n_cultural in cultural_strata.items():
+        stratum_mask = (fund_mask &
+                        (panel['EVENT_YEAR'] == year) &
+                        (panel['ACTIVITY_TERCILE'] == tercile))
+        available = panel.loc[stratum_mask].index.tolist()
+        n_draw = min(len(available), n_cultural * 3)
+        if n_draw > 0:
+            chosen = rng.choice(available, size=n_draw, replace=False)
+            matched_indices.extend(chosen)
+    panel.loc[matched_indices, 'MATCHED'] = True
+
+    n_mf = panel.loc[fund_mask & panel['MATCHED']].shape[0]
+    n_mc = panel.loc[cultural_mask & panel['MATCHED']].shape[0]
+    logger.info("  Stratified: %d strata, matched subsample: %d cultural + %d fundamental",
+                len(cultural_strata), n_mc, n_mf)
+    return panel
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §1 MEAN VS DISTRIBUTIONAL: THE CORE DIVERGENCE
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_mean_vs_distributional(panel):
+    """Run t-test AND Wilcoxon side-by-side across every analytical cut.
+
+    This is the core table that motivates the paper: mean tests (t) are null
+    everywhere, but distributional tests (Wilcoxon) are significant in specific
+    cells — revealing a narrow, concentrated channel.
+    """
+    if panel.empty:
         return pd.DataFrame()
 
-    merged = treatment.merge(
-        evt, on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    dv = 'ABNORMAL_NET_TRADING'
+    results = []
 
-    cell = merged[
-        (merged['ESTIMATED_POLITICAL_LEANING'] == 'Conservative') &
-        (merged['EVENT_TYPE'] == 'PLANNED')
-    ].copy()
-
-    if cell.empty:
-        logger.warning("  No Conservative × Planned events found")
-        return pd.DataFrame()
-
-    # Enrich with insider-level detail from form4
-    case_rows = []
-    for _, ev in cell.iterrows():
-        ticker = ev['TICKER']
-        event_date = pd.Timestamp(ev['EVENT_DATE'])
-        pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
-        pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
-
-        # Get pre-event trades for this firm
-        mask = (
-            (form4['ticker'] == ticker) &
-            (form4['transaction_date'] >= pre_start) &
-            (form4['transaction_date'] <= pre_end)
-        )
-        pre_trades = form4.loc[mask]
-
-        # C-suite detection
-        csuite_titles = {'ceo', 'cfo', 'coo', 'cto', 'president',
-                         'chief executive', 'chief financial',
-                         'chief operating', 'chief technology'}
-        n_csuite = 0
-        csuite_present = False
-        if 'insider_title' in pre_trades.columns:
-            titles = pre_trades['insider_title'].dropna().str.lower()
-            csuite_mask = titles.apply(
-                lambda t: any(cs in t for cs in csuite_titles))
-            n_csuite = csuite_mask.sum()
-            csuite_present = n_csuite > 0
-
-        # Median days before event
-        if not pre_trades.empty and 'transaction_date' in pre_trades.columns:
-            days_before = (event_date - pre_trades['transaction_date']).dt.days
-            median_days = days_before.median()
-        else:
-            median_days = np.nan
-
-        # Sell count in pre-event (use _trade_type consistent with panel builder)
-        n_sells = len(pre_trades[pre_trades['_trade_type'] == 'sell']) \
-            if '_trade_type' in pre_trades.columns else 0
-        n_total = len(pre_trades)
-
-        case_rows.append({
-            'TICKER': ticker,
-            'COMPANY': ev.get('COMPANY', ''),
-            'EVENT_DATE': event_date.strftime('%Y-%m-%d'),
-            'EVENT_DESCRIPTION': str(ev.get('EVENT_DESCRIPTION', ''))[:120],
-            'ABN_SELL_DAILY': ev['ABN_SELL'],
-            'PRE_DAILY_SELL': ev['PRE_DAILY'],
-            'BENCH_DAILY_SELL': ev['BENCH_DAILY'],
-            'PRE_FULL_NET_DOLLAR': ev.get('PRE_FULL_NET_DOLLAR_SOLD', np.nan),
-            'CAR_POST': ev.get('CAR_POST', np.nan),
-            'N_PRE_TRADES': n_total,
-            'N_PRE_SELLS': n_sells,
-            'N_CSUITE_TRADES': n_csuite,
-            'CSUITE_PRESENT': csuite_present,
-            'MEDIAN_DAYS_BEFORE': median_days,
+    def _add_cut(label, subset_label, vals):
+        if len(vals) < 10:
+            return
+        t_stat, t_pval = stats.ttest_1samp(vals, 0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            w_stat, w_pval = stats.wilcoxon(vals, alternative='two-sided', zero_method='pratt')
+        results.append({
+            'CUT': label, 'SUBSET': subset_label,
+            'N': len(vals), 'MEAN': vals.mean(), 'MEDIAN': vals.median(),
+            'STD': vals.std(), 'PCT_POSITIVE': (vals > 0).mean(),
+            'T_STAT': t_stat, 'T_PVALUE': t_pval,
+            'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+            'COHEN_D': np.mean(vals) / np.std(vals, ddof=1) if np.std(vals, ddof=1) > 0 else 0,
+            'DIVERGENCE': 'YES' if (t_pval > 0.10 and w_pval < 0.05) else 'NO',
         })
 
-    case_df = pd.DataFrame(case_rows)
-    case_df = case_df.sort_values('ABN_SELL_DAILY', ascending=False)
+    # Overall by category
+    for cat in ['FUNDAMENTAL', 'CULTURAL']:
+        vals = df.loc[df['EVENT_CATEGORY'] == cat, dv].dropna()
+        _add_cut('CATEGORY', cat, vals)
 
-    # Add power diagnostic as summary row
-    n_obs = len(case_df)
-    cell_vals = cell['ABN_SELL'].dropna()
-    if len(cell_vals) > 1:
-        observed_d = cell_vals.mean() / cell_vals.std()
-    else:
-        observed_d = np.nan
+    # By event type (fundamental only)
+    fund = df[df['EVENT_CATEGORY'] == 'FUNDAMENTAL']
+    for etype in fund['EVENT_TYPE'].unique():
+        vals = fund.loc[fund['EVENT_TYPE'] == etype, dv].dropna()
+        _add_cut('EVENT_TYPE', etype, vals)
 
-    # Min n for 80% power at observed d
-    if not np.isnan(observed_d) and observed_d > 0:
-        z_a = stats.norm.ppf(1 - 0.05 / 2)
-        z_b = stats.norm.ppf(0.80)
-        n_needed = int(np.ceil(((z_a + z_b) / observed_d) ** 2))
-    else:
-        n_needed = np.nan
+    # By policy area
+    for area in fund['POLICY_AREA'].unique():
+        vals = fund.loc[fund['POLICY_AREA'] == area, dv].dropna()
+        _add_cut('POLICY_AREA', area, vals)
 
-    # Append power diagnostic as metadata row
-    power_row = {
-        'TICKER': '_POWER_DIAGNOSTIC',
-        'COMPANY': '',
-        'EVENT_DATE': '',
-        'EVENT_DESCRIPTION': (
-            f'Cell n={n_obs}, d={observed_d:.3f}, '
-            f'need n={n_needed} for 80% power'
-            if not np.isnan(observed_d) else f'Cell n={n_obs}, d=N/A'
-        ),
-        'ABN_SELL_DAILY': cell_vals.mean() if len(cell_vals) > 0 else np.nan,
-        'PRE_DAILY_SELL': np.nan,
-        'BENCH_DAILY_SELL': np.nan,
-        'PRE_FULL_NET_DOLLAR': np.nan,
-        'CAR_POST': np.nan,
-        'N_PRE_TRADES': n_obs,
-        'N_PRE_SELLS': n_needed if not np.isnan(n_needed) else 0,
-        'N_CSUITE_TRADES': 0,
-        'CSUITE_PRESENT': False,
-        'MEDIAN_DAYS_BEFORE': observed_d,
-    }
-    case_df = pd.concat([case_df, pd.DataFrame([power_row])],
-                        ignore_index=True)
+    # By political connection
+    high = fund[fund['HIGH_POLITICAL_CONNECTION'] == True][dv].dropna()  # noqa: E712
+    low = fund[fund['HIGH_POLITICAL_CONNECTION'] == False][dv].dropna()  # noqa: E712
+    _add_cut('POLITICAL_CONNECTION', 'HIGH', high)
+    _add_cut('POLITICAL_CONNECTION', 'LOW', low)
 
-    logger.info("  Conservative × Planned deep dive: %d events, d=%.3f, "
-                "need n=%s for 80%% power",
-                n_obs,
-                observed_d if not np.isnan(observed_d) else 0,
-                str(n_needed) if not np.isnan(n_needed) else '?')
+    # By insider type
+    high_opp = fund[fund['HIGH_OPP'] == True][dv].dropna()  # noqa: E712
+    low_opp = fund[fund['HIGH_OPP'] == False][dv].dropna()  # noqa: E712
+    _add_cut('INSIDER_TYPE', 'HIGH_OPP', high_opp)
+    _add_cut('INSIDER_TYPE', 'LOW_OPP', low_opp)
 
-    return case_df
+    # By regulatory period
+    for period in ['PRE_SOX', 'SOX_ERA', 'DODD_FRANK', 'POST_AMENDMENTS']:
+        vals = fund.loc[fund['REGULATORY_PERIOD'] == period, dv].dropna()
+        _add_cut('REGULATORY_PERIOD', period, vals)
+
+    # By conditions met
+    for n_cond in range(5):
+        vals = fund.loc[fund['CONDITIONS_MET'] == n_cond, dv].dropna()
+        _add_cut('CONDITIONS_MET', str(n_cond), vals)
+
+    # By vote closeness (congressional only)
+    cong = fund[fund['EVENT_TYPE'] == 'CONGRESSIONAL_VOTE']
+    close = cong[cong['IS_CLOSE_VOTE'] == True][dv].dropna()  # noqa: E712
+    decisive = cong[cong['IS_CLOSE_VOTE'] == False][dv].dropna()  # noqa: E712
+    _add_cut('VOTE_CLOSENESS', 'CLOSE', close)
+    _add_cut('VOTE_CLOSENESS', 'DECISIVE', decisive)
+
+    # Cultural subsets
+    cult = df[df['EVENT_CATEGORY'] == 'CULTURAL']
+    cult_high_opp = cult[cult['HIGH_OPP'] == True][dv].dropna()  # noqa: E712
+    cult_low_opp = cult[cult['HIGH_OPP'] == False][dv].dropna()  # noqa: E712
+    _add_cut('CULTURAL_INSIDER_TYPE', 'HIGH_OPP', cult_high_opp)
+    _add_cut('CULTURAL_INSIDER_TYPE', 'LOW_OPP', cult_low_opp)
+
+    return pd.DataFrame(results)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# ROBUSTNESS EXTENSIONS (29-38)
-# ═══════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════
+# §2 FAMILY-LEVEL WILCOXON CORRECTION (GATING TEST)
+# ═════════════════════════════════════════════════════════════════════
 
-def _get_market_cap(stock_data, ticker, event_date, lookback_days=30):
-    """Estimate market cap from stock data (price × shares outstanding proxy).
+def compute_wilcoxon_family(mean_vs_dist):
+    """Apply Holm-Bonferroni and Benjamini-Hochberg to the full Wilcoxon family.
 
-    Uses average ADJ_CLOSE in the 30 days before the event as a rough proxy.
-    Returns NaN if no data.
+    This is the gating test for the paper. If fewer than 3 cells survive
+    at alpha=0.05 corrected, the distributional finding is noise.
     """
-    if stock_data is None or stock_data.empty:
-        return np.nan
-    mask = (
-        (stock_data['TICKER'] == ticker) &
-        (stock_data['DATE'] >= event_date - pd.Timedelta(days=lookback_days)) &
-        (stock_data['DATE'] < event_date)
-    )
-    sub = stock_data.loc[mask]
-    if sub.empty or 'ADJ_CLOSE' not in sub.columns:
-        return np.nan
-    return sub['ADJ_CLOSE'].mean()
+    if mean_vs_dist.empty:
+        return pd.DataFrame()
 
+    df = mean_vs_dist.copy()
+    w_pvals = df['WILCOXON_PVALUE'].values
 
-def compute_tail_logit(panel, events, stock_data=None, top_pct=0.20):
-    """
-    Analysis 29: Industry-controlled logit for tail membership.
+    # Replace NaN with 1.0 for correction
+    w_pvals_clean = np.where(np.isnan(w_pvals), 1.0, w_pvals)
 
-    logit(IN_TAIL) ~ LEAN + NAICS_2DIGIT + log(PRICE_PROXY) + YEAR_FE
+    holm_sig = _holm_bonferroni(w_pvals_clean, alpha=0.05)
+    bh_sig = _benjamini_hochberg(w_pvals_clean, alpha=0.05)
 
-    Tests whether Liberal overrepresentation in the tail survives after
-    controlling for industry, firm size, and year effects. If the Liberal
-    coefficient disappears, the finding is industry-in-political-clothing.
-    """
-    logger.info("Computing tail-membership logit with industry controls...")
+    df['HOLM_SIGNIFICANT'] = holm_sig.astype(int)
+    df['BH_SIGNIFICANT'] = bh_sig.astype(int)
+    df['N_TOTAL_TESTS'] = len(w_pvals_clean)
 
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+    # Summary stats
+    n_holm = holm_sig.sum()
+    n_bh = bh_sig.sum()
+    n_nominal = (w_pvals_clean < 0.05).sum()
+    n_divergent = (df['DIVERGENCE'] == 'YES').sum()
+    logger.info("  Wilcoxon family correction: %d tests, %d nominal p<0.05, "
+                "%d Holm-significant, %d BH-significant, %d t/W divergent",
+                len(w_pvals_clean), n_nominal, n_holm, n_bh, n_divergent)
 
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
-
-    # Merge event metadata (leaning, NAICS, year)
-    evt = events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']].copy()
-    if 'NAICS_CODE' in events.columns:
-        evt['NAICS_2D'] = events['NAICS_CODE'].astype(str).str[:2]
-    elif 'NAICS Code' in events.columns:
-        evt['NAICS_2D'] = events['NAICS Code'].astype(str).str[:2]
-    else:
-        evt['NAICS_2D'] = '99'
-
-    if 'INDUSTRY' in events.columns:
-        evt['INDUSTRY'] = events['INDUSTRY']
-    elif 'Industry' in events.columns:
-        evt['INDUSTRY'] = events['Industry']
-    else:
-        evt['INDUSTRY'] = 'Unknown'
-
-    treatment = treatment.merge(
-        evt, on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    # Year from event date
-    treatment['YEAR'] = treatment['EVENT_DATE'].dt.year
-
-    # Price proxy for size (log of mean price in benchmark window)
-    if stock_data is not None and not stock_data.empty:
-        price_vals = []
-        for _, row in treatment.iterrows():
-            price_vals.append(_get_market_cap(stock_data, row['TICKER'], row['EVENT_DATE']))
-        treatment['PRICE_PROXY'] = price_vals
-    else:
-        treatment['PRICE_PROXY'] = np.nan
-
-    treatment['LOG_PRICE'] = np.log(treatment['PRICE_PROXY'].clip(lower=1))
-    treatment.loc[treatment['PRICE_PROXY'].isna(), 'LOG_PRICE'] = np.nan
-
-    rows = []
-
-    # --- Model 1: Lean-only (replicates chi-square as logit) ---
-    try:
-        reg = treatment.dropna(subset=['IN_TAIL', 'ESTIMATED_POLITICAL_LEANING']).copy()
-        lean_dummies = pd.get_dummies(
-            reg['ESTIMATED_POLITICAL_LEANING'], prefix='LEAN', drop_first=True
-        ).astype(float)
-        X1 = sm.add_constant(lean_dummies)
-        m1 = sm.Logit(reg['IN_TAIL'].astype(float), X1).fit(disp=0)
-        for var in m1.params.index:
-            rows.append({
-                'MODEL': 'LEAN_ONLY',
-                'VARIABLE': var,
-                'COEFFICIENT': m1.params[var],
-                'STD_ERROR': m1.bse[var],
-                'Z_STAT': m1.tvalues[var],
-                'P_VALUE': m1.pvalues[var],
-                'N_OBS': int(m1.nobs),
-                'PSEUDO_R2': m1.prsquared,
-            })
-    except Exception as e:
-        logger.warning("Tail logit model 1 failed: %s", e)
-
-    # --- Model 2: Lean + industry ---
-    try:
-        reg2 = treatment.dropna(
-            subset=['IN_TAIL', 'ESTIMATED_POLITICAL_LEANING', 'NAICS_2D']
-        ).copy()
-        # Drop NAICS codes with < 3 observations to avoid perfect separation
-        naics_counts = reg2['NAICS_2D'].value_counts()
-        valid_naics = naics_counts[naics_counts >= 3].index
-        reg2 = reg2[reg2['NAICS_2D'].isin(valid_naics)]
-
-        lean_d = pd.get_dummies(
-            reg2['ESTIMATED_POLITICAL_LEANING'], prefix='LEAN', drop_first=True
-        ).astype(float)
-        naics_d = pd.get_dummies(
-            reg2['NAICS_2D'], prefix='NAICS', drop_first=True
-        ).astype(float)
-
-        X2 = sm.add_constant(pd.concat([lean_d, naics_d], axis=1))
-        m2 = sm.Logit(reg2['IN_TAIL'].astype(float), X2).fit(disp=0, maxiter=100)
-        for var in m2.params.index:
-            rows.append({
-                'MODEL': 'LEAN_INDUSTRY',
-                'VARIABLE': var,
-                'COEFFICIENT': m2.params[var],
-                'STD_ERROR': m2.bse[var],
-                'Z_STAT': m2.tvalues[var],
-                'P_VALUE': m2.pvalues[var],
-                'N_OBS': int(m2.nobs),
-                'PSEUDO_R2': m2.prsquared,
-            })
-    except Exception as e:
-        logger.warning("Tail logit model 2 failed: %s", e)
-
-    # --- Model 3: Full (lean + industry + size + year FE) ---
-    try:
-        reg3 = treatment.dropna(
-            subset=['IN_TAIL', 'ESTIMATED_POLITICAL_LEANING', 'NAICS_2D', 'LOG_PRICE']
-        ).copy()
-        naics_counts3 = reg3['NAICS_2D'].value_counts()
-        valid_naics3 = naics_counts3[naics_counts3 >= 3].index
-        reg3 = reg3[reg3['NAICS_2D'].isin(valid_naics3)]
-
-        lean_d3 = pd.get_dummies(
-            reg3['ESTIMATED_POLITICAL_LEANING'], prefix='LEAN', drop_first=True
-        ).astype(float)
-        naics_d3 = pd.get_dummies(
-            reg3['NAICS_2D'], prefix='NAICS', drop_first=True
-        ).astype(float)
-        year_d3 = pd.get_dummies(
-            reg3['YEAR'], prefix='YEAR', drop_first=True
-        ).astype(float)
-
-        X3 = sm.add_constant(
-            pd.concat([lean_d3, naics_d3, reg3[['LOG_PRICE']].reset_index(drop=True),
-                        year_d3], axis=1).reset_index(drop=True)
-        )
-        y3 = reg3['IN_TAIL'].astype(float).reset_index(drop=True)
-        m3 = sm.Logit(y3, X3).fit(disp=0, maxiter=200)
-        for var in m3.params.index:
-            rows.append({
-                'MODEL': 'FULL',
-                'VARIABLE': var,
-                'COEFFICIENT': m3.params[var],
-                'STD_ERROR': m3.bse[var],
-                'Z_STAT': m3.tvalues[var],
-                'P_VALUE': m3.pvalues[var],
-                'N_OBS': int(m3.nobs),
-                'PSEUDO_R2': m3.prsquared,
-            })
-    except Exception as e:
-        logger.warning("Tail logit model 3 (full) failed: %s", e)
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        logger.info("  Tail logit: %d models, %d coefficients",
-                    df['MODEL'].nunique(), len(df))
-        # Check if Liberal survives
-        lib_full = df[(df['MODEL'] == 'FULL') & (df['VARIABLE'] == 'LEAN_Liberal')]
-        lib_lean = df[(df['MODEL'] == 'LEAN_ONLY') & (df['VARIABLE'] == 'LEAN_Liberal')]
-        if not lib_lean.empty:
-            logger.info("    Liberal (lean-only): coef=%.3f, p=%.4f",
-                        lib_lean.iloc[0]['COEFFICIENT'], lib_lean.iloc[0]['P_VALUE'])
-        if not lib_full.empty:
-            logger.info("    Liberal (full): coef=%.3f, p=%.4f",
-                        lib_full.iloc[0]['COEFFICIENT'], lib_full.iloc[0]['P_VALUE'])
     return df
 
 
-def compute_propensity_score_matching(panel, events, form4, stock_data=None, top_pct=0.20):
+# ═════════════════════════════════════════════════════════════════════
+# §3 INSIDER CONCENTRATION (Cziraki-Gider 2021 style)
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_insider_concentration(panel, form4, insider_profits=None):
+    """Compute Gini, HHI, and top-K% profit shares at the insider level.
+
+    Matches insider-level trading to the event panel to measure whether
+    the dollar volume around political events is concentrated in a few hands.
     """
-    Analysis 30: Propensity score matching for tail analysis.
+    if panel.empty:
+        return pd.DataFrame()
 
-    Construct a propensity score for 'firm likely to experience a CW event'
-    using industry + size + prior insider activity, then re-do the tail
-    analysis conditional on matched pairs with similar propensity.
-    """
-    logger.info("Computing propensity score matching...")
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    if insider_profits is None:
+        insider_profits = _compute_insider_profits(df, form4)
+    results = []
 
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    control = panel[panel['IS_TREATMENT'] == False].copy()
-    full = pd.concat([treatment, control], ignore_index=True)
-
-    full['ABN_SELL'] = (
-        full['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        full['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Add covariates for propensity model
-    evt = events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']].copy()
-    if 'NAICS Code' in events.columns:
-        evt['NAICS_2D'] = events['NAICS Code'].astype(str).str[:2]
-    elif 'NAICS_CODE' in events.columns:
-        evt['NAICS_2D'] = events['NAICS_CODE'].astype(str).str[:2]
-    else:
-        evt['NAICS_2D'] = '99'
-
-    full = full.merge(evt, on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt'))
-
-    # Benchmark activity as covariate
-    full['BENCH_DAILY'] = full['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    full['N_BENCH_TXN'] = full.get('BENCHMARK_N_TRANSACTIONS', 0)
-    full['YEAR'] = full['EVENT_DATE'].dt.year
-
-    # Price proxy
-    if stock_data is not None and not stock_data.empty:
-        prices = []
-        for _, row in full.iterrows():
-            prices.append(_get_market_cap(stock_data, row['TICKER'], row['EVENT_DATE']))
-        full['LOG_PRICE'] = np.log(pd.Series(prices).clip(lower=1))
-    else:
-        full['LOG_PRICE'] = np.nan
-
-    rows = []
-
-    # Estimate propensity score: P(treatment | covariates)
-    try:
-        ps_df = full.dropna(subset=['IS_TREATMENT', 'BENCH_DAILY', 'LOG_PRICE']).copy()
-        if len(ps_df) < 20:
-            logger.warning("Propensity score: too few observations (%d)", len(ps_df))
-            return pd.DataFrame()
-
-        naics_d = pd.get_dummies(ps_df['NAICS_2D'], prefix='NAICS', drop_first=True).astype(float)
-        # Drop sparse categories
-        naics_d = naics_d.loc[:, naics_d.sum() >= 3]
-
-        X_ps = sm.add_constant(
-            pd.concat([
-                naics_d.reset_index(drop=True),
-                ps_df[['BENCH_DAILY', 'LOG_PRICE']].reset_index(drop=True),
-            ], axis=1)
-        )
-        y_ps = ps_df['IS_TREATMENT'].astype(float).reset_index(drop=True)
-
-        ps_model = sm.Logit(y_ps, X_ps).fit(disp=0, maxiter=100)
-        ps_df['PSCORE'] = ps_model.predict(X_ps)
-
-        # Nearest-neighbor matching (1:1, caliper = 0.1)
-        treat_ps = ps_df[ps_df['IS_TREATMENT'] == True].copy()
-        ctrl_ps = ps_df[ps_df['IS_TREATMENT'] == False].copy()
-
-        matched_pairs = []
-        used_ctrl = set()
-        for idx, t_row in treat_ps.iterrows():
-            diffs = (ctrl_ps['PSCORE'] - t_row['PSCORE']).abs()
-            diffs = diffs[~diffs.index.isin(used_ctrl)]
-            if diffs.empty:
-                continue
-            best_idx = diffs.idxmin()
-            if diffs[best_idx] <= 0.1:
-                matched_pairs.append((idx, best_idx))
-                used_ctrl.add(best_idx)
-
-        logger.info("  Propensity matching: %d/%d treatment events matched (caliper=0.1)",
-                    len(matched_pairs), len(treat_ps))
-
-        if len(matched_pairs) < 10:
-            rows.append({
-                'TEST': 'PS_MATCHING_FAILED',
-                'N_MATCHED': len(matched_pairs),
-                'N_TREATMENT': len(treat_ps),
-                'NOTE': 'Too few matched pairs for analysis',
-            })
+    for cat in ['FUNDAMENTAL', 'CULTURAL', 'ALL']:
+        if cat == 'ALL':
+            sub_profits = insider_profits
         else:
-            # Re-do tail analysis on matched sample
-            matched_t_idx = [p[0] for p in matched_pairs]
-            matched_c_idx = [p[1] for p in matched_pairs]
-            matched_treat = ps_df.loc[matched_t_idx]
-            matched_ctrl = ps_df.loc[matched_c_idx]
-
-            # Tail test on matched treatment
-            threshold = matched_treat['ABN_SELL'].quantile(1 - top_pct)
-            matched_treat = matched_treat.copy()
-            matched_treat['IN_TAIL'] = (matched_treat['ABN_SELL'] >= threshold).astype(int)
-
-            # Merge leaning
-            lean_col = 'ESTIMATED_POLITICAL_LEANING'
-            if lean_col not in matched_treat.columns:
-                matched_treat = matched_treat.merge(
-                    events[['TICKER', 'EVENT_DATE', lean_col]],
-                    on=['TICKER', 'EVENT_DATE'], how='left'
-                )
-
-            # Chi-square on matched sample
-            contingency = pd.crosstab(
-                matched_treat[lean_col],
-                matched_treat['IN_TAIL']
-            )
-            if contingency.shape[0] >= 2 and contingency.shape[1] >= 2:
-                chi2, chi2_p, dof, _ = stats.chi2_contingency(contingency)
-                rows.append({
-                    'TEST': 'PS_CHI2_LEANING_VS_TAIL',
-                    'STAT': chi2,
-                    'P_VALUE': chi2_p,
-                    'N_MATCHED': len(matched_pairs),
-                    'DOF': dof,
-                })
-
-            # Per-leaning tail share
-            for lean, grp in matched_treat.groupby(lean_col):
-                rows.append({
-                    'TEST': f'PS_LEANING_{lean.upper().replace(" ", "_")}',
-                    'N_MATCHED': len(grp),
-                    'MEAN_ABN_SELL': grp['ABN_SELL'].mean(),
-                    'PCT_IN_TAIL': grp['IN_TAIL'].mean() * 100,
-                })
-
-            # Pscore balance check (mean difference in pscore)
-            t_ps_vals = ps_df.loc[matched_t_idx, 'PSCORE']
-            c_ps_vals = ps_df.loc[matched_c_idx, 'PSCORE']
-            rows.append({
-                'TEST': 'PS_BALANCE',
-                'STAT': abs(t_ps_vals.mean() - c_ps_vals.mean()),
-                'N_MATCHED': len(matched_pairs),
-                'NOTE': f'Mean pscore: T={t_ps_vals.mean():.3f}, C={c_ps_vals.mean():.3f}',
-            })
-
-    except Exception as e:
-        logger.warning("Propensity score matching failed: %s", e)
-        rows.append({'TEST': 'PS_MATCHING_ERROR', 'NOTE': str(e)})
-
-    return pd.DataFrame(rows)
-
-
-def compute_winsorized_tail(panel, events, top_pct=0.20):
-    """
-    Analysis 31: Winsorize abnormal selling and re-run tail chi-square.
-
-    Clips at 1% and 5% to test whether the Liberal overrepresentation
-    is driven by a few mega-trades or is a population pattern.
-    """
-    logger.info("Computing winsorized tail analysis...")
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    rows = []
-
-    for clip_pct in [0.0, 0.01, 0.05]:
-        label = f'WINSOR_{int(clip_pct * 100)}PCT' if clip_pct > 0 else 'RAW'
-
-        if clip_pct > 0:
-            lo = treatment['ABN_SELL'].quantile(clip_pct)
-            hi = treatment['ABN_SELL'].quantile(1 - clip_pct)
-            abn = treatment['ABN_SELL'].clip(lower=lo, upper=hi)
-        else:
-            abn = treatment['ABN_SELL']
-
-        threshold = abn.quantile(1 - top_pct)
-        in_tail = (abn >= threshold).astype(int)
-
-        # Chi-square: leaning × tail
-        contingency = pd.crosstab(
-            treatment['ESTIMATED_POLITICAL_LEANING'], in_tail
-        )
-        if contingency.shape[0] >= 2 and contingency.shape[1] >= 2:
-            chi2, chi2_p, dof, _ = stats.chi2_contingency(contingency)
-            rows.append({
-                'WINSORIZATION': label,
-                'TEST': 'CHI2',
-                'STAT': chi2,
-                'P_VALUE': chi2_p,
-                'N': len(treatment),
-                'CLIP_PCT': clip_pct,
-            })
-
-        # Per-leaning tail share
-        for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-            mask = treatment['ESTIMATED_POLITICAL_LEANING'] == lean
-            lean_tail = in_tail[mask]
-            rows.append({
-                'WINSORIZATION': label,
-                'TEST': f'LEAN_{lean.upper().replace(" ", "_")}',
-                'PCT_IN_TAIL': lean_tail.mean() * 100 if len(lean_tail) > 0 else np.nan,
-                'MEAN_ABN_SELL': abn[mask].mean(),
-                'N': int(mask.sum()),
-                'CLIP_PCT': clip_pct,
-            })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        chi2_rows = df[df['TEST'] == 'CHI2']
-        for _, r in chi2_rows.iterrows():
-            logger.info("  %s chi2=%.2f, p=%.4f",
-                        r['WINSORIZATION'], r['STAT'], r['P_VALUE'])
-    return df
-
-
-def compute_size_stratified_tail(panel, events, stock_data=None, top_pct=0.20):
-    """
-    Analysis 32: Split tail analysis by firm size terciles.
-
-    If Liberal-tail only exists in top tercile → big-tech finding.
-    If it holds across all three → more robust political pattern.
-    """
-    logger.info("Computing size-stratified tail analysis...")
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
-    # Size proxy: benchmark-window dollar volume as proxy for firm size
-    # (larger firms have more trading activity)
-    treatment['SIZE_PROXY'] = treatment['BENCHMARK_NET_DOLLAR_SOLD'].abs()
-
-    # If stock_data available, use price as better size proxy
-    if stock_data is not None and not stock_data.empty:
-        prices = []
-        for _, row in treatment.iterrows():
-            prices.append(_get_market_cap(stock_data, row['TICKER'], row['EVENT_DATE']))
-        price_series = pd.Series(prices, index=treatment.index)
-        if price_series.notna().sum() >= 10:
-            treatment['SIZE_PROXY'] = price_series
-
-    rows = []
-
-    # Create size terciles
-    try:
-        treatment['SIZE_TERCILE'] = pd.qcut(
-            treatment['SIZE_PROXY'].rank(method='first'),
-            q=3, labels=['SMALL', 'MEDIUM', 'LARGE']
-        )
-    except ValueError:
-        logger.warning("Size stratification: could not create 3 equal groups")
-        treatment['SIZE_TERCILE'] = pd.qcut(
-            treatment['SIZE_PROXY'].rank(method='first'),
-            q=3, labels=['SMALL', 'MEDIUM', 'LARGE'],
-            duplicates='drop'
-        )
-
-    for tercile in ['SMALL', 'MEDIUM', 'LARGE', 'ALL']:
-        if tercile == 'ALL':
-            sub = treatment
-        else:
-            sub = treatment[treatment['SIZE_TERCILE'] == tercile]
-
-        if len(sub) < 10:
+            sub_profits = insider_profits[insider_profits['EVENT_CATEGORY'] == cat]
+        if sub_profits.empty:
             continue
 
-        threshold = sub['ABN_SELL'].quantile(1 - top_pct)
-        in_tail = (sub['ABN_SELL'] >= threshold).astype(int)
+        profits = sub_profits['NET_PROFIT'].values
+        abs_profits = np.abs(profits)
 
-        # Chi-square
-        contingency = pd.crosstab(sub['ESTIMATED_POLITICAL_LEANING'], in_tail)
-        if contingency.shape[0] >= 2 and contingency.shape[1] >= 2:
-            chi2, chi2_p, dof, _ = stats.chi2_contingency(contingency)
-            rows.append({
-                'SIZE_TERCILE': tercile,
-                'TEST': 'CHI2',
-                'STAT': chi2,
-                'P_VALUE': chi2_p,
-                'N': len(sub),
+        if len(abs_profits) < 5:
+            continue
+
+        # Sort descending by absolute profit
+        sorted_abs = np.sort(abs_profits)[::-1]
+        total_abs = sorted_abs.sum()
+
+        if total_abs == 0:
+            continue
+
+        n = len(sorted_abs)
+
+        # Top-K% shares
+        for k_pct in [1, 5, 10, 20, 50]:
+            k = max(1, int(np.ceil(n * k_pct / 100)))
+            share = sorted_abs[:k].sum() / total_abs
+            results.append({
+                'EVENT_CATEGORY': cat, 'METRIC': f'TOP_{k_pct}PCT_SHARE',
+                'VALUE': share, 'K': k, 'N_INSIDERS': n,
+                'TOTAL_ABS_PROFIT': total_abs,
             })
 
-        # Per-leaning tail share
-        for lean in sub['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-            mask = sub['ESTIMATED_POLITICAL_LEANING'] == lean
-            lean_tail = in_tail[mask]
-            rows.append({
-                'SIZE_TERCILE': tercile,
-                'TEST': f'LEAN_{lean.upper().replace(" ", "_")}',
-                'PCT_IN_TAIL': lean_tail.mean() * 100 if len(lean_tail) > 0 else np.nan,
-                'MEAN_ABN_SELL': sub.loc[mask, 'ABN_SELL'].mean(),
-                'N': int(mask.sum()),
-            })
+        # Gini coefficient
+        gini = _gini(abs_profits)
+        results.append({
+            'EVENT_CATEGORY': cat, 'METRIC': 'GINI',
+            'VALUE': gini, 'K': np.nan, 'N_INSIDERS': n,
+            'TOTAL_ABS_PROFIT': total_abs,
+        })
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        for tercile in ['SMALL', 'MEDIUM', 'LARGE']:
-            chi2_r = df[(df['SIZE_TERCILE'] == tercile) & (df['TEST'] == 'CHI2')]
-            if not chi2_r.empty:
-                logger.info("  %s tercile: chi2=%.2f, p=%.4f, n=%d",
-                            tercile, chi2_r.iloc[0]['STAT'],
-                            chi2_r.iloc[0]['P_VALUE'], chi2_r.iloc[0]['N'])
-    return df
+        # HHI
+        shares = abs_profits / total_abs
+        hhi = (shares ** 2).sum()
+        results.append({
+            'EVENT_CATEGORY': cat, 'METRIC': 'HHI',
+            'VALUE': hhi, 'K': np.nan, 'N_INSIDERS': n,
+            'TOTAL_ABS_PROFIT': total_abs,
+        })
+
+        # Summary stats
+        results.append({
+            'EVENT_CATEGORY': cat, 'METRIC': 'MEAN_ABS_PROFIT',
+            'VALUE': abs_profits.mean(), 'K': np.nan, 'N_INSIDERS': n,
+            'TOTAL_ABS_PROFIT': total_abs,
+        })
+        results.append({
+            'EVENT_CATEGORY': cat, 'METRIC': 'MEDIAN_ABS_PROFIT',
+            'VALUE': np.median(abs_profits), 'K': np.nan, 'N_INSIDERS': n,
+            'TOTAL_ABS_PROFIT': total_abs,
+        })
+
+    return pd.DataFrame(results)
 
 
-def compute_insider_level_analysis(panel, events, form4, top_pct=0.20):
-    """
-    Analysis 33: Insider-level analysis — are specific people driving the tail?
-
-    For each insider who sold before a CW event, check if they appear in
-    multiple events. If 3-4 insiders at big Liberal firms generate most of
-    the tail, that's a weaker finding than dispersed activity.
-    """
-    logger.info("Computing insider-level tail analysis...")
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
-
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
-
+def _compute_insider_profits(panel_sub, form4):
+    """Compute per-insider net dollar trading around events in the panel subset."""
     rows = []
-
-    # For each tail event, find which insiders sold in the pre-event window
-    tail_events = treatment[treatment['IN_TAIL'] == 1]
-    insider_sells = []
-    for _, ev in tail_events.iterrows():
+    for _, ev in panel_sub.iterrows():
         ticker = ev['TICKER']
         event_date = ev['EVENT_DATE']
         pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
         pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
+        bench_start = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][0])
+        bench_end = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][1])
 
-        pre_txns = form4[
+        tkr_txns = form4[form4['ticker'] == ticker]
+
+        pre_txns = tkr_txns[
+            (tkr_txns['transaction_date'] >= pre_start) &
+            (tkr_txns['transaction_date'] <= pre_end)
+        ]
+        bench_txns = tkr_txns[
+            (tkr_txns['transaction_date'] >= bench_start) &
+            (tkr_txns['transaction_date'] <= bench_end)
+        ]
+
+        # Use trading-day normalization (252/365) consistent with panel DV
+        pre_cal_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
+        bench_cal_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+        n_pre_tdays = max(1, int(round(pre_cal_days * 252 / 365)))
+        n_bench_tdays = max(1, int(round(bench_cal_days * 252 / 365)))
+
+        for owner in pre_txns['owner_name'].unique():
+            owner_pre = pre_txns[pre_txns['owner_name'] == owner]
+            owner_bench = bench_txns[bench_txns['owner_name'] == owner]
+
+            pre_net = _owner_net_dollar(owner_pre)
+            bench_net = _owner_net_dollar(owner_bench)
+
+            abnormal = pre_net / n_pre_tdays - bench_net / n_bench_tdays
+            rows.append({
+                'OWNER': owner, 'TICKER': ticker,
+                'EVENT_ID': ev['EVENT_ID'],
+                'EVENT_DATE': event_date,
+                'EVENT_CATEGORY': ev['EVENT_CATEGORY'],
+                'EVENT_TYPE': ev['EVENT_TYPE'],
+                'POLICY_AREA': ev['POLICY_AREA'],
+                'REGULATORY_PERIOD': ev['REGULATORY_PERIOD'],
+                'HIGH_POLITICAL_CONNECTION': ev['HIGH_POLITICAL_CONNECTION'],
+                'HIGH_OPP': ev.get('HIGH_OPP', False),
+                'NET_PROFIT': abnormal,
+                'PRE_NET_DOLLAR': pre_net,
+                'BENCH_NET_DOLLAR': bench_net,
+                'N_PRE_TXNS': len(owner_pre),
+            })
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _owner_net_dollar(txns):
+    """Net dollar: sells - buys for a set of transactions."""
+    sells = txns[txns['_trade_type'] == 'sell']['transaction_value'].sum()
+    buys = txns[txns['_trade_type'] == 'buy']['transaction_value'].sum()
+    return sells - buys
+
+
+def _gini(values):
+    """Compute Gini coefficient for an array of non-negative values."""
+    values = np.sort(np.abs(values))
+    n = len(values)
+    if n == 0 or values.sum() == 0:
+        return 0.0
+    index = np.arange(1, n + 1)
+    return (2 * (index * values).sum()) / (n * values.sum()) - (n + 1) / n
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §4 ACTIVE SUBSET CHARACTERIZATION
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_active_subset(panel, form4, insider_profits=None):
+    """Identify and characterize the insiders driving the Wilcoxon results.
+
+    'Active' = insiders whose abnormal net trading is in the top or bottom
+    decile of the distribution (the tails that shift the Wilcoxon).
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    if insider_profits is None:
+        insider_profits = _compute_insider_profits(df, form4)
+    if insider_profits.empty:
+        return pd.DataFrame()
+
+    profits = insider_profits['NET_PROFIT']
+    q10 = profits.quantile(0.10)
+    q90 = profits.quantile(0.90)
+
+    insider_profits['IS_ACTIVE'] = (
+        (profits <= q10) | (profits >= q90)
+    )
+
+    results = []
+
+    # Characterize active vs inactive
+    for active_label, mask in [('ACTIVE', True), ('INACTIVE', False)]:
+        sub = insider_profits[insider_profits['IS_ACTIVE'] == mask]
+        if sub.empty:
+            continue
+
+        row = {
+            'GROUP': active_label,
+            'N_INSIDER_EVENTS': len(sub),
+            'N_UNIQUE_INSIDERS': sub['OWNER'].nunique(),
+            'N_UNIQUE_TICKERS': sub['TICKER'].nunique(),
+            'MEAN_ABS_PROFIT': sub['NET_PROFIT'].abs().mean(),
+            'MEDIAN_ABS_PROFIT': sub['NET_PROFIT'].abs().median(),
+            'TOTAL_ABS_PROFIT': sub['NET_PROFIT'].abs().sum(),
+            'PCT_NET_SELLERS': (sub['NET_PROFIT'] > 0).mean(),
+        }
+
+        # Event type distribution
+        for etype in ['CONGRESSIONAL_VOTE', 'EXECUTIVE_ORDER', 'COURT_DECISION', 'CULTURE_WAR']:
+            n_type = (sub['EVENT_TYPE'] == etype).sum()
+            row[f'PCT_{etype}'] = n_type / len(sub) if len(sub) > 0 else 0
+
+        # High political connection rate
+        row['PCT_HIGH_CONN'] = sub['HIGH_POLITICAL_CONNECTION'].mean()
+
+        # High opportunistic rate
+        row['PCT_HIGH_OPP'] = sub['HIGH_OPP'].mean()
+
+        # Category distribution
+        row['PCT_FUNDAMENTAL'] = (sub['EVENT_CATEGORY'] == 'FUNDAMENTAL').mean()
+        row['PCT_CULTURAL'] = (sub['EVENT_CATEGORY'] == 'CULTURAL').mean()
+
+        results.append(row)
+
+    # Repeat trader analysis within active
+    active = insider_profits[insider_profits['IS_ACTIVE']]
+    if not active.empty:
+        owner_counts = active.groupby('OWNER').size()
+        results.append({
+            'GROUP': 'ACTIVE_REPEAT_STATS',
+            'N_INSIDER_EVENTS': len(active),
+            'N_UNIQUE_INSIDERS': active['OWNER'].nunique(),
+            'N_UNIQUE_TICKERS': active['TICKER'].nunique(),
+            'MEAN_ABS_PROFIT': owner_counts.mean(),   # mean events per active insider
+            'MEDIAN_ABS_PROFIT': owner_counts.median(),
+            'TOTAL_ABS_PROFIT': (owner_counts > 1).sum(),  # N repeat traders
+            'PCT_NET_SELLERS': (owner_counts > 1).mean(),   # pct repeat
+            'PCT_HIGH_CONN': np.nan, 'PCT_HIGH_OPP': np.nan,
+            'PCT_FUNDAMENTAL': np.nan, 'PCT_CULTURAL': np.nan,
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §5 QUANTILE REGRESSION
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_quantile_regression(panel):
+    """Median and quantile regressions: IS_FUNDAMENTAL on ABNORMAL_NET_TRADING.
+
+    If the channel operates through the tails, quantile regressions at
+    tau=0.10 and tau=0.90 should show significant coefficients even when
+    the median (tau=0.50) and mean (OLS) do not.
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    dv = 'ABNORMAL_NET_TRADING'
+    results = []
+
+    # Within fundamental only: test whether observable characteristics predict
+    # abnormal trading at different quantiles
+    fund = df[df['EVENT_CATEGORY'] == 'FUNDAMENTAL'].copy()
+    fund['HIGH_CONN_INT'] = fund['HIGH_POLITICAL_CONNECTION'].astype(int)
+    fund['HIGH_OPP_INT'] = fund['HIGH_OPP'].astype(int)
+    fund['IS_COURT'] = (fund['EVENT_TYPE'] == 'COURT_DECISION').astype(int)
+
+    X_cols = ['HIGH_CONN_INT', 'HIGH_OPP_INT', 'IS_COURT']
+    valid = fund[[dv] + X_cols].dropna()
+    if len(valid) < 30:
+        return pd.DataFrame()
+
+    X = sm.add_constant(valid[X_cols].astype(float))
+    y = valid[dv].astype(float)
+
+    # Use cluster-bootstrap SEs by resampling tickers (not observations)
+    # to account for within-ticker correlation
+    unique_tickers = fund.loc[valid.index, 'TICKER'].unique()
+    n_boot = 200
+
+    for tau in [0.10, 0.25, 0.50, 0.75, 0.90]:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = sm.QuantReg(y, X).fit(q=tau, max_iter=5000)
+            # Cluster-bootstrap: resample tickers, refit, collect coefficients
+            rng_qr = np.random.RandomState(42)
+            boot_coefs = {var: [] for var in X_cols}
+            for _ in range(n_boot):
+                boot_tickers = rng_qr.choice(unique_tickers, len(unique_tickers), replace=True)
+                boot_idx = []
+                for t in boot_tickers:
+                    t_idx = valid.index[fund.loc[valid.index, 'TICKER'] == t].tolist()
+                    boot_idx.extend(t_idx)
+                if len(boot_idx) < 30:
+                    continue
+                X_b = sm.add_constant(valid.loc[boot_idx, X_cols].astype(float))
+                y_b = valid.loc[boot_idx, dv].astype(float)
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        m_b = sm.QuantReg(y_b, X_b).fit(q=tau, max_iter=2000)
+                    for var in X_cols:
+                        boot_coefs[var].append(m_b.params.get(var, np.nan))
+                except Exception:
+                    continue
+
+            for var in X_cols:
+                coef = model.params.get(var, np.nan)
+                bc = np.array(boot_coefs[var])
+                bc = bc[~np.isnan(bc)]
+                if len(bc) >= 50:
+                    boot_se = np.std(bc, ddof=1)
+                    boot_t = coef / boot_se if boot_se > 0 else np.nan
+                    boot_p = 2 * (1 - stats.t.cdf(abs(boot_t), df=len(bc) - 1)) if not np.isnan(boot_t) else np.nan
+                else:
+                    boot_se = model.bse.get(var, np.nan)
+                    boot_t = model.tvalues.get(var, np.nan)
+                    boot_p = model.pvalues.get(var, np.nan)
+                results.append({
+                    'QUANTILE': tau, 'VARIABLE': var,
+                    'COEFFICIENT': coef,
+                    'STD_ERROR': boot_se,
+                    'T_STAT': boot_t,
+                    'P_VALUE': boot_p,
+                    'N_OBS': int(model.nobs),
+                })
+        except Exception as e:
+            logger.warning("QuantReg at tau=%.2f failed: %s", tau, e)
+
+    # Also OLS for comparison
+    try:
+        model = sm.OLS(y, X).fit(
+            cov_type='cluster',
+            cov_kwds={'groups': fund.loc[valid.index, 'TICKER']},
+        )
+        for var in X_cols:
+            results.append({
+                'QUANTILE': 0.0,  # sentinel for OLS
+                'VARIABLE': var,
+                'COEFFICIENT': model.params.get(var, np.nan),
+                'STD_ERROR': model.bse.get(var, np.nan),
+                'T_STAT': model.tvalues.get(var, np.nan),
+                'P_VALUE': model.pvalues.get(var, np.nan),
+                'N_OBS': int(model.nobs),
+            })
+    except Exception as e:
+        logger.warning("OLS comparison failed: %s", e)
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §6 TRIMMED ROBUSTNESS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_trimmed_robustness(panel):
+    """Re-run the core tests after trimming the top and bottom 1% of trades.
+
+    If the Wilcoxon result is driven by a handful of outlier observations,
+    trimming kills the finding. If it survives, the distributional shift
+    is real and not an artifact of extreme values.
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    dv = 'ABNORMAL_NET_TRADING'
+
+    results = []
+
+    for trim_pct in [1, 5]:
+        vals_all = df[dv].dropna()
+        lo = vals_all.quantile(trim_pct / 100)
+        hi = vals_all.quantile(1 - trim_pct / 100)
+        trimmed = df[(df[dv] >= lo) & (df[dv] <= hi)].copy()
+
+        # Overall fundamental
+        fund_vals = trimmed.loc[trimmed['EVENT_CATEGORY'] == 'FUNDAMENTAL', dv].dropna()
+        if len(fund_vals) >= 10:
+            t_stat, t_pval = stats.ttest_1samp(fund_vals, 0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                w_stat, w_pval = stats.wilcoxon(fund_vals, alternative='two-sided', zero_method='pratt')
+            results.append({
+                'TRIM_PCT': trim_pct, 'CUT': 'FUNDAMENTAL_ALL',
+                'N': len(fund_vals), 'MEAN': fund_vals.mean(),
+                'MEDIAN': fund_vals.median(),
+                'T_STAT': t_stat, 'T_PVALUE': t_pval,
+                'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+                'PCT_POSITIVE': (fund_vals > 0).mean(),
+            })
+
+        # Court decisions
+        court_vals = trimmed.loc[
+            (trimmed['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (trimmed['EVENT_TYPE'] == 'COURT_DECISION'),
+            dv
+        ].dropna()
+        if len(court_vals) >= 10:
+            t_stat, t_pval = stats.ttest_1samp(court_vals, 0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                w_stat, w_pval = stats.wilcoxon(court_vals, alternative='two-sided', zero_method='pratt')
+            results.append({
+                'TRIM_PCT': trim_pct, 'CUT': 'COURT_DECISION',
+                'N': len(court_vals), 'MEAN': court_vals.mean(),
+                'MEDIAN': court_vals.median(),
+                'T_STAT': t_stat, 'T_PVALUE': t_pval,
+                'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+                'PCT_POSITIVE': (court_vals > 0).mean(),
+            })
+
+        # High political connection
+        high_conn = trimmed.loc[
+            (trimmed['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (trimmed['HIGH_POLITICAL_CONNECTION'] == True),  # noqa: E712
+            dv
+        ].dropna()
+        if len(high_conn) >= 10:
+            t_stat, t_pval = stats.ttest_1samp(high_conn, 0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                w_stat, w_pval = stats.wilcoxon(high_conn, alternative='two-sided', zero_method='pratt')
+            results.append({
+                'TRIM_PCT': trim_pct, 'CUT': 'HIGH_POLITICAL_CONNECTION',
+                'N': len(high_conn), 'MEAN': high_conn.mean(),
+                'MEDIAN': high_conn.median(),
+                'T_STAT': t_stat, 'T_PVALUE': t_pval,
+                'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+                'PCT_POSITIVE': (high_conn > 0).mean(),
+            })
+
+        # High opportunistic
+        high_opp = trimmed.loc[
+            (trimmed['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (trimmed['HIGH_OPP'] == True),  # noqa: E712
+            dv
+        ].dropna()
+        if len(high_opp) >= 10:
+            t_stat, t_pval = stats.ttest_1samp(high_opp, 0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                w_stat, w_pval = stats.wilcoxon(high_opp, alternative='two-sided', zero_method='pratt')
+            results.append({
+                'TRIM_PCT': trim_pct, 'CUT': 'HIGH_OPP',
+                'N': len(high_opp), 'MEAN': high_opp.mean(),
+                'MEDIAN': high_opp.median(),
+                'T_STAT': t_stat, 'T_PVALUE': t_pval,
+                'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+                'PCT_POSITIVE': (high_opp > 0).mean(),
+            })
+
+        # 4 conditions met
+        cond4 = trimmed.loc[
+            (trimmed['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (trimmed['CONDITIONS_MET'] == 4),
+            dv
+        ].dropna()
+        if len(cond4) >= 10:
+            t_stat, t_pval = stats.ttest_1samp(cond4, 0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                w_stat, w_pval = stats.wilcoxon(cond4, alternative='two-sided', zero_method='pratt')
+            results.append({
+                'TRIM_PCT': trim_pct, 'CUT': 'CONDITIONS_MET_4',
+                'N': len(cond4), 'MEAN': cond4.mean(),
+                'MEDIAN': cond4.median(),
+                'T_STAT': t_stat, 'T_PVALUE': t_pval,
+                'WILCOXON_STAT': w_stat, 'WILCOXON_PVALUE': w_pval,
+                'PCT_POSITIVE': (cond4 > 0).mean(),
+            })
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §7 BOOTSTRAPPED WILCOXON
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_bootstrap_wilcoxon(panel, n_bootstrap=1000, seed=42):
+    """Bootstrap the Wilcoxon test statistic to verify parametric inference.
+
+    For each Wilcoxon-significant cut, resample with replacement and
+    recompute the statistic. Report the empirical p-value distribution.
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    dv = 'ABNORMAL_NET_TRADING'
+    rng = np.random.RandomState(seed)
+    results = []
+
+    cuts = {
+        'FUNDAMENTAL_ALL': df.loc[df['EVENT_CATEGORY'] == 'FUNDAMENTAL', dv].dropna(),
+        'COURT_DECISION': df.loc[
+            (df['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (df['EVENT_TYPE'] == 'COURT_DECISION'),
+            dv
+        ].dropna(),
+        'HIGH_CONN': df.loc[
+            (df['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (df['HIGH_POLITICAL_CONNECTION'] == True),  # noqa: E712
+            dv
+        ].dropna(),
+        'HIGH_OPP': df.loc[
+            (df['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (df['HIGH_OPP'] == True),  # noqa: E712
+            dv
+        ].dropna(),
+        'CONDITIONS_4': df.loc[
+            (df['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+            (df['CONDITIONS_MET'] == 4),
+            dv
+        ].dropna(),
+    }
+
+    for label, vals in cuts.items():
+        if len(vals) < 10:
+            continue
+
+        # Observed Wilcoxon
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            obs_stat, obs_pval = stats.wilcoxon(vals, alternative='two-sided', zero_method='pratt')
+
+        # Bootstrap under H0: center the data (subtract median) so the null
+        # hypothesis of symmetry around zero holds, then resample
+        centered = vals.values - np.median(vals.values)
+        boot_stats = []
+        boot_pvals = []
+        for _ in range(n_bootstrap):
+            sample = rng.choice(centered, size=len(centered), replace=True)
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    bs, bp = stats.wilcoxon(sample, alternative='two-sided', zero_method='pratt')
+                boot_stats.append(bs)
+                boot_pvals.append(bp)
+            except Exception:
+                continue
+
+        if not boot_stats:
+            continue
+
+        boot_stats = np.array(boot_stats)
+        boot_pvals = np.array(boot_pvals)
+
+        results.append({
+            'CUT': label, 'N': len(vals),
+            'OBSERVED_STAT': obs_stat, 'OBSERVED_PVALUE': obs_pval,
+            'BOOT_STAT_MEAN': boot_stats.mean(),
+            'BOOT_STAT_STD': boot_stats.std(),
+            'BOOT_PVALUE_MEAN': boot_pvals.mean(),
+            'BOOT_PVALUE_MEDIAN': np.median(boot_pvals),
+            'BOOT_PCT_SIG_005': (boot_pvals < 0.05).mean(),
+            'BOOT_PCT_SIG_010': (boot_pvals < 0.10).mean(),
+            'N_BOOTSTRAP': n_bootstrap,
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §8 INSIDER FIXED EFFECTS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_insider_panel(panel, form4, insider_profits=None):
+    """Within-insider variation: do the same insiders trade differently
+    around political vs non-political periods?
+
+    Uses insider fixed effects (demeaning) to absorb time-invariant
+    insider characteristics and test whether the *within-insider* shift
+    around political events is significant.
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    if insider_profits is None:
+        insider_profits = _compute_insider_profits(df, form4)
+    if insider_profits.empty or len(insider_profits) < 30:
+        return pd.DataFrame()
+
+    results = []
+
+    # Add dummies
+    ip = insider_profits.copy()
+    ip['IS_FUNDAMENTAL'] = (ip['EVENT_CATEGORY'] == 'FUNDAMENTAL').astype(int)
+    ip['IS_COURT'] = (ip['EVENT_TYPE'] == 'COURT_DECISION').astype(int)
+    ip['HIGH_CONN_INT'] = ip['HIGH_POLITICAL_CONNECTION'].astype(int)
+    ip['HIGH_OPP_INT'] = ip['HIGH_OPP'].astype(int)
+
+    # Only keep insiders with >= 2 events (needed for within-insider variation)
+    owner_counts = ip.groupby('OWNER').size()
+    repeat_owners = owner_counts[owner_counts >= 2].index
+    ip_repeat = ip[ip['OWNER'].isin(repeat_owners)].copy()
+
+    if len(ip_repeat) < 20 or ip_repeat['OWNER'].nunique() < 10:
+        logger.warning("Insufficient repeat insiders for FE analysis")
+        return pd.DataFrame()
+
+    # Insider FE via linearmodels.PanelOLS (proper dof adjustment)
+    X_cols_fe = ['IS_FUNDAMENTAL', 'IS_COURT']
+    valid_fe = ip_repeat[['OWNER', 'EVENT_DATE', 'NET_PROFIT'] + X_cols_fe].dropna()
+    if len(valid_fe) < 20:
+        return pd.DataFrame()
+
+    valid_fe = valid_fe.copy()
+
+    try:
+        from linearmodels.panel import PanelOLS
+        # Use EVENT_DATE binned to month (as integer YYYYMM) for the time
+        # dimension so entity effects absorb time-invariant insider heterogeneity
+        event_dt = pd.to_datetime(valid_fe['EVENT_DATE'])
+        valid_fe['_time'] = event_dt.dt.year * 100 + event_dt.dt.month
+        valid_fe = valid_fe.drop(columns=['EVENT_DATE'])
+        # Average duplicate (OWNER, month) pairs — PanelOLS needs unique index
+        if valid_fe.duplicated(subset=['OWNER', '_time']).any():
+            valid_fe = valid_fe.groupby(['OWNER', '_time'], as_index=False).mean()
+        valid_fe = valid_fe.set_index(['OWNER', '_time'])
+
+        y = valid_fe['NET_PROFIT']
+        X_fe = valid_fe[X_cols_fe].astype(float)
+        model = PanelOLS(y, X_fe, entity_effects=True).fit(
+            cov_type='clustered', cluster_entity=True
+        )
+        for var in X_cols_fe:
+            results.append({
+                'SPECIFICATION': 'INSIDER_FE',
+                'VARIABLE': var,
+                'COEFFICIENT': model.params.get(var, np.nan),
+                'STD_ERROR': model.std_errors.get(var, np.nan),
+                'T_STAT': model.tstats.get(var, np.nan),
+                'P_VALUE': model.pvalues.get(var, np.nan),
+                'N_OBS': int(model.nobs),
+                'N_INSIDERS': ip_repeat['OWNER'].nunique(),
+                'R_SQUARED': model.rsquared_within,
+            })
+    except Exception as e:
+        logger.warning("PanelOLS insider FE failed: %s", e)
+        # Fallback to demeaned OLS if linearmodels fails
+        for col in ['NET_PROFIT'] + X_cols_fe:
+            owner_means = ip_repeat.groupby('OWNER')[col].transform('mean')
+            ip_repeat[f'{col}_DM'] = ip_repeat[col] - owner_means
+        valid_dm = ip_repeat[['NET_PROFIT_DM'] + [f'{c}_DM' for c in X_cols_fe]].dropna()
+        if len(valid_dm) >= 20:
+            X = sm.add_constant(valid_dm[[f'{c}_DM' for c in X_cols_fe]].astype(float))
+            y_dm = valid_dm['NET_PROFIT_DM'].astype(float)
+            model_dm = sm.OLS(y_dm, X).fit(
+                cov_type='cluster',
+                cov_kwds={'groups': ip_repeat.loc[valid_dm.index, 'OWNER']},
+            )
+            for var in X_cols_fe:
+                var_dm = f'{var}_DM'
+                results.append({
+                    'SPECIFICATION': 'INSIDER_FE_DEMEANED',
+                    'VARIABLE': var,
+                    'COEFFICIENT': model_dm.params.get(var_dm, np.nan),
+                    'STD_ERROR': model_dm.bse.get(var_dm, np.nan),
+                    'T_STAT': model_dm.tvalues.get(var_dm, np.nan),
+                    'P_VALUE': model_dm.pvalues.get(var_dm, np.nan),
+                    'N_OBS': int(model_dm.nobs),
+                    'N_INSIDERS': ip_repeat['OWNER'].nunique(),
+                    'R_SQUARED': model_dm.rsquared,
+                })
+
+    # Pooled OLS for comparison
+    try:
+        X_cols_pooled = ['IS_FUNDAMENTAL', 'IS_COURT', 'HIGH_CONN_INT', 'HIGH_OPP_INT']
+        valid_p = ip[[col for col in ['NET_PROFIT'] + X_cols_pooled]].dropna()
+        X = sm.add_constant(valid_p[X_cols_pooled].astype(float))
+        y = valid_p['NET_PROFIT'].astype(float)
+        model = sm.OLS(y, X).fit(
+            cov_type='cluster',
+            cov_kwds={'groups': ip.loc[valid_p.index, 'OWNER']},
+        )
+        for var in X_cols_pooled:
+            results.append({
+                'SPECIFICATION': 'POOLED_OLS',
+                'VARIABLE': var,
+                'COEFFICIENT': model.params.get(var, np.nan),
+                'STD_ERROR': model.bse.get(var, np.nan),
+                'T_STAT': model.tvalues.get(var, np.nan),
+                'P_VALUE': model.pvalues.get(var, np.nan),
+                'N_OBS': int(model.nobs),
+                'N_INSIDERS': ip['OWNER'].nunique(),
+                'R_SQUARED': model.rsquared,
+            })
+    except Exception as e:
+        logger.warning("Pooled OLS failed: %s", e)
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §9 CONCENTRATION BY DIMENSION
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_concentration_cuts(panel, form4, insider_profits=None):
+    """Concentration metrics broken out by event type, policy area, connection."""
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[
+        (panel['HAS_SUFFICIENT_DATA'] == 1) &
+        (panel['EVENT_CATEGORY'] == 'FUNDAMENTAL')
+    ].copy()
+
+    # Compute or filter insider profits to fundamental events only
+    if insider_profits is not None:
+        fund_event_ids = set(df['EVENT_ID'])
+        fund_profits = insider_profits[insider_profits['EVENT_ID'].isin(fund_event_ids)]
+    else:
+        fund_profits = _compute_insider_profits(df, form4)
+
+    results = []
+
+    # Build cuts keyed by column filters on the insider profits (not panel)
+    cut_filters = {}
+    for etype in df['EVENT_TYPE'].unique():
+        sub_ids = set(df.loc[df['EVENT_TYPE'] == etype, 'EVENT_ID'])
+        if len(sub_ids) >= 20:
+            cut_filters[f'EVENT_TYPE:{etype}'] = fund_profits[fund_profits['EVENT_ID'].isin(sub_ids)]
+
+    cut_filters['CONN:HIGH'] = fund_profits[fund_profits['HIGH_POLITICAL_CONNECTION'] == True]  # noqa: E712
+    cut_filters['CONN:LOW'] = fund_profits[fund_profits['HIGH_POLITICAL_CONNECTION'] == False]  # noqa: E712
+    cut_filters['OPP:HIGH'] = fund_profits[fund_profits['HIGH_OPP'] == True]  # noqa: E712
+    cut_filters['OPP:LOW'] = fund_profits[fund_profits['HIGH_OPP'] == False]  # noqa: E712
+
+    for area in ['tax', 'defense', 'healthcare', 'finance', 'energy', 'environment']:
+        sub_ids = set(df.loc[df['POLICY_AREA'] == area, 'EVENT_ID'])
+        if len(sub_ids) >= 20:
+            cut_filters[f'POLICY:{area}'] = fund_profits[fund_profits['EVENT_ID'].isin(sub_ids)]
+
+    for label, sub_profits in cut_filters.items():
+        if sub_profits.empty or len(sub_profits) < 5:
+            continue
+
+        abs_profits = np.abs(sub_profits['NET_PROFIT'].values)
+        total = abs_profits.sum()
+        if total == 0:
+            continue
+
+        n = len(abs_profits)
+        sorted_abs = np.sort(abs_profits)[::-1]
+        top10_k = max(1, int(np.ceil(n * 0.10)))
+        top10_share = sorted_abs[:top10_k].sum() / total
+
+        gini = _gini(abs_profits)
+
+        results.append({
+            'CUT': label, 'N_INSIDER_EVENTS': n,
+            'N_UNIQUE_INSIDERS': sub_profits['OWNER'].nunique(),
+            'TOTAL_ABS_PROFIT': total,
+            'TOP_10PCT_SHARE': top10_share,
+            'GINI': gini,
+            'MEAN_ABS_PROFIT': abs_profits.mean(),
+            'MEDIAN_ABS_PROFIT': np.median(abs_profits),
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §10 REPEAT TRADERS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_repeat_traders(panel, form4, insider_profits=None):
+    """Analyze whether repeat traders (same insider across multiple events)
+    drive the distributional results disproportionately.
+    """
+    if panel.empty:
+        return pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    if insider_profits is None:
+        insider_profits = _compute_insider_profits(df, form4)
+    if insider_profits.empty:
+        return pd.DataFrame()
+
+    owner_counts = insider_profits.groupby('OWNER').size().reset_index(name='N_EVENTS')
+    owner_stats = insider_profits.groupby('OWNER').agg(
+        TOTAL_ABS_PROFIT=('NET_PROFIT', lambda x: x.abs().sum()),
+        MEAN_NET_PROFIT=('NET_PROFIT', 'mean'),
+        N_TICKERS=('TICKER', 'nunique'),
+        PCT_POSITIVE=('NET_PROFIT', lambda x: (x > 0).mean()),
+    ).reset_index()
+    owner_stats = owner_stats.merge(owner_counts, on='OWNER')
+
+    results = []
+
+    # Overall stats
+    results.append({
+        'GROUP': 'ALL_INSIDERS',
+        'N_INSIDERS': len(owner_stats),
+        'MEAN_EVENTS': owner_stats['N_EVENTS'].mean(),
+        'MEDIAN_EVENTS': owner_stats['N_EVENTS'].median(),
+        'MAX_EVENTS': owner_stats['N_EVENTS'].max(),
+        'N_REPEAT': (owner_stats['N_EVENTS'] > 1).sum(),
+        'PCT_REPEAT': (owner_stats['N_EVENTS'] > 1).mean(),
+        'TOTAL_ABS_PROFIT': owner_stats['TOTAL_ABS_PROFIT'].sum(),
+        'REPEAT_SHARE_OF_PROFIT': np.nan,
+    })
+
+    # Repeat vs one-time
+    repeat = owner_stats[owner_stats['N_EVENTS'] > 1]
+    onetime = owner_stats[owner_stats['N_EVENTS'] == 1]
+    total_profit = owner_stats['TOTAL_ABS_PROFIT'].sum()
+
+    if total_profit > 0 and not repeat.empty:
+        results.append({
+            'GROUP': 'REPEAT_TRADERS',
+            'N_INSIDERS': len(repeat),
+            'MEAN_EVENTS': repeat['N_EVENTS'].mean(),
+            'MEDIAN_EVENTS': repeat['N_EVENTS'].median(),
+            'MAX_EVENTS': repeat['N_EVENTS'].max(),
+            'N_REPEAT': len(repeat),
+            'PCT_REPEAT': 1.0,
+            'TOTAL_ABS_PROFIT': repeat['TOTAL_ABS_PROFIT'].sum(),
+            'REPEAT_SHARE_OF_PROFIT': repeat['TOTAL_ABS_PROFIT'].sum() / total_profit,
+        })
+
+    if not onetime.empty:
+        results.append({
+            'GROUP': 'ONE_TIME_TRADERS',
+            'N_INSIDERS': len(onetime),
+            'MEAN_EVENTS': 1.0,
+            'MEDIAN_EVENTS': 1.0,
+            'MAX_EVENTS': 1,
+            'N_REPEAT': 0,
+            'PCT_REPEAT': 0.0,
+            'TOTAL_ABS_PROFIT': onetime['TOTAL_ABS_PROFIT'].sum(),
+            'REPEAT_SHARE_OF_PROFIT': onetime['TOTAL_ABS_PROFIT'].sum() / total_profit if total_profit > 0 else 0,
+        })
+
+    # Wilcoxon on repeat vs one-time profits
+    repeat_ids = repeat['OWNER'].values if not repeat.empty else []
+    onetime_ids = onetime['OWNER'].values if not onetime.empty else []
+    repeat_profits = insider_profits[insider_profits['OWNER'].isin(repeat_ids)]['NET_PROFIT']
+    onetime_profits = insider_profits[insider_profits['OWNER'].isin(onetime_ids)]['NET_PROFIT']
+
+    if len(repeat_profits) >= 10 and len(onetime_profits) >= 10:
+        u_stat, u_pval = stats.mannwhitneyu(repeat_profits, onetime_profits, alternative='two-sided')
+        t_stat, t_pval = stats.ttest_ind(repeat_profits, onetime_profits, equal_var=False)
+        results.append({
+            'GROUP': 'REPEAT_VS_ONETIME_TEST',
+            'N_INSIDERS': len(repeat_profits) + len(onetime_profits),
+            'U_STAT': u_stat,
+            'U_PVALUE': u_pval,
+            'T_STAT': t_stat,
+            'T_PVALUE': t_pval,
+            'REPEAT_MEAN_PROFIT': repeat_profits.mean(),
+            'ONETIME_MEAN_PROFIT': onetime_profits.mean(),
+            'DIFF_MEAN_PROFIT': repeat_profits.mean() - onetime_profits.mean(),
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §11 CRSP PROFIT ANALYSIS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_crsp_profits(panel, form4, store, insider_profits=None):
+    """Compute forward-looking abnormal returns for insider trades.
+
+    For each insider trade in the pre-event window [-180, -1], compute the
+    FF5-adjusted abnormal return over [+1, +30] and [+1, +60] trading days
+    after the trade date. A trade is 'directionally profitable' if:
+      - Buy and post-trade CAR > 0
+      - Sell and post-trade CAR < 0
+
+    Then compare active-subset trades (top/bottom decile of abnormal net
+    trading) vs inactive trades across event type, connection, regulatory
+    period, and insider type.
+
+    This is the test that determines economic significance: do active-subset
+    trades actually earn abnormal returns, or is the distributional shift
+    economically empty?
+    """
+    if panel.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    logger.info("  CRSP profit analysis: %d panel events with data", len(df))
+
+    # Build insider-level profits to identify active subset
+    if insider_profits is None:
+        insider_profits = _compute_insider_profits(df, form4)
+    if insider_profits.empty:
+        logger.warning("  No insider profits to compute CRSP returns for")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # Identify active insiders (top/bottom decile of abnormal net trading)
+    profits = insider_profits['NET_PROFIT']
+    q10 = profits.quantile(0.10)
+    q90 = profits.quantile(0.90)
+    active_owners = insider_profits[
+        (profits <= q10) | (profits >= q90)
+    ][['OWNER', 'TICKER', 'EVENT_ID']].copy()
+    active_keys = set(
+        zip(active_owners['OWNER'], active_owners['TICKER'], active_owners['EVENT_ID'])
+    )
+    logger.info("  Active subset: %d insider-event pairs (q10=%.0f, q90=%.0f)",
+                len(active_keys), q10, q90)
+
+    # Collect all individual trades in the pre-event window
+    trade_rows = []
+    done = 0
+    n_events = len(df)
+    for _, ev in df.iterrows():
+        ticker = ev['TICKER']
+        event_date = ev['EVENT_DATE']
+        event_id = ev['EVENT_ID']
+        pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
+        pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
+
+        tkr_txns = form4[
             (form4['ticker'] == ticker) &
-            (form4['_trade_type'] == 'sell') &
             (form4['transaction_date'] >= pre_start) &
             (form4['transaction_date'] <= pre_end)
         ]
-        for _, txn in pre_txns.iterrows():
-            insider_sells.append({
+
+        for _, txn in tkr_txns.iterrows():
+            trade_type = txn.get('_trade_type', 'other')
+            if trade_type not in ('buy', 'sell'):
+                continue
+
+            owner = txn['owner_name']
+            is_active = (owner, ticker, event_id) in active_keys
+            trade_value = txn.get('transaction_value', 0)
+            if pd.isna(trade_value) or trade_value == 0:
+                continue
+
+            trade_rows.append({
+                'OWNER': owner,
                 'TICKER': ticker,
+                'EVENT_ID': event_id,
                 'EVENT_DATE': event_date,
-                'LEAN': ev.get('ESTIMATED_POLITICAL_LEANING', 'Unknown'),
-                'OWNER_NAME': txn['owner_name'],
-                'DOLLAR_SOLD': txn.get('transaction_value', 0),
+                'TRADE_DATE': txn['transaction_date'],
+                'TRADE_TYPE': trade_type,
+                'TRANSACTION_CODE': txn.get('transaction_code', ''),
+                'TRADE_VALUE': trade_value,
+                'SHARES': txn.get('shares', 0),
+                'PRICE': txn.get('price_per_share', np.nan),
+                'IS_ACTIVE': is_active,
+                'EVENT_CATEGORY': ev['EVENT_CATEGORY'],
+                'EVENT_TYPE': ev['EVENT_TYPE'],
+                'POLICY_AREA': ev.get('POLICY_AREA', 'unknown'),
+                'REGULATORY_PERIOD': ev['REGULATORY_PERIOD'],
+                'HIGH_POLITICAL_CONNECTION': ev['HIGH_POLITICAL_CONNECTION'],
+                'HIGH_OPP': ev.get('HIGH_OPP', False),
             })
 
-    if not insider_sells:
-        return pd.DataFrame([{'TEST': 'NO_TAIL_SELLS', 'N': 0}])
+        done += 1
+        if done % 500 == 0:
+            logger.info("  Collected trades: %d/%d events (%d trades so far)",
+                        done, n_events, len(trade_rows))
 
-    sells_df = pd.DataFrame(insider_sells)
+    if not trade_rows:
+        logger.warning("  No trades found in pre-event windows")
+        return pd.DataFrame(), pd.DataFrame()
 
-    # Concentration: how many unique insiders drive the tail?
-    n_unique_insiders = sells_df['OWNER_NAME'].nunique()
-    n_tail_events = len(tail_events)
-    total_dollar = sells_df['DOLLAR_SOLD'].sum()
+    trades = pd.DataFrame(trade_rows)
+    logger.info("  Total pre-event trades (pre-dedup): %d", len(trades))
 
-    # Top insiders by total selling
-    insider_totals = sells_df.groupby('OWNER_NAME').agg(
-        TOTAL_SOLD=('DOLLAR_SOLD', 'sum'),
-        N_EVENTS=('EVENT_DATE', 'nunique'),
-        TICKERS=('TICKER', lambda x: ','.join(sorted(x.unique()))),
-        LEANS=('LEAN', lambda x: ','.join(sorted(x.unique()))),
-    ).sort_values('TOTAL_SOLD', ascending=False)
+    # Deduplicate: same (OWNER, TICKER, TRADE_DATE, TRADE_TYPE) across events
+    # Keep the first occurrence; assign a unique trade ID for clustering
+    n_before = len(trades)
+    trades['TRADE_ID'] = (trades['OWNER'] + '|' + trades['TICKER'] + '|' +
+                          trades['TRADE_DATE'].astype(str) + '|' + trades['TRADE_TYPE'])
+    # For IS_ACTIVE: a trade is active if active in ANY event (conservative)
+    active_by_trade = trades.groupby('TRADE_ID')['IS_ACTIVE'].any().reset_index()
+    active_by_trade.columns = ['TRADE_ID', 'IS_ACTIVE_ANY']
+    trades = trades.drop_duplicates(subset='TRADE_ID', keep='first')
+    trades = trades.drop(columns=['IS_ACTIVE']).merge(
+        active_by_trade, on='TRADE_ID'
+    ).rename(columns={'IS_ACTIVE_ANY': 'IS_ACTIVE'})
+    logger.info("  After dedup: %d trades (%d removed), %d active, %d inactive",
+                len(trades), n_before - len(trades),
+                trades['IS_ACTIVE'].sum(), (~trades['IS_ACTIVE']).sum())
 
-    rows.append({
-        'TEST': 'TAIL_CONCENTRATION',
-        'N_TAIL_EVENTS': n_tail_events,
-        'N_UNIQUE_INSIDERS': n_unique_insiders,
-        'TOTAL_DOLLAR_SOLD': total_dollar,
-        'TOP1_PCT': insider_totals.iloc[0]['TOTAL_SOLD'] / total_dollar * 100
-            if total_dollar > 0 and len(insider_totals) > 0 else np.nan,
-        'TOP5_PCT': insider_totals.head(5)['TOTAL_SOLD'].sum() / total_dollar * 100
-            if total_dollar > 0 and len(insider_totals) >= 5 else np.nan,
-    })
+    # Compute forward-looking abnormal returns for each trade
+    from .essay2_did import _estimate_normal_returns, _FF5_ALL
 
-    # How many insiders appear in multiple tail events?
-    multi_event = insider_totals[insider_totals['N_EVENTS'] > 1]
-    rows.append({
-        'TEST': 'MULTI_EVENT_INSIDERS',
-        'N_MULTI': len(multi_event),
-        'N_UNIQUE_INSIDERS': n_unique_insiders,
-        'MULTI_PCT': len(multi_event) / n_unique_insiders * 100
-            if n_unique_insiders > 0 else 0,
-    })
+    # Note: trade-value truncation is handled upstream by _load_form4's $1B
+    # cap.  No additional winsorization here — applying 1%/99% clipping to
+    # political trades but not control trades creates an asymmetry that
+    # distorts the pooled decile thresholds in §12.
 
-    # By leaning: number of unique insiders in tail
-    for lean, grp in sells_df.groupby('LEAN'):
-        rows.append({
-            'TEST': f'INSIDER_LEAN_{lean.upper().replace(" ", "_")}',
-            'N_UNIQUE_INSIDERS': grp['OWNER_NAME'].nunique(),
-            'TOTAL_DOLLAR_SOLD': grp['DOLLAR_SOLD'].sum(),
-            'N_TAIL_EVENTS': grp['EVENT_DATE'].nunique(),
-        })
+    # Compute post-trade CARs for unique (ticker, trade_date) pairs
+    unique_trades = trades[['TICKER', 'TRADE_DATE']].drop_duplicates()
+    logger.info("  Computing post-trade CARs for %d unique (ticker, trade_date) pairs...",
+                len(unique_trades))
 
-    # Top 10 insiders detail
-    for i, (owner, row_data) in enumerate(insider_totals.head(10).iterrows()):
-        rows.append({
-            'TEST': f'TOP_INSIDER_{i + 1}',
-            'OWNER_NAME': owner,
-            'TOTAL_DOLLAR_SOLD': row_data['TOTAL_SOLD'],
-            'N_TAIL_EVENTS': row_data['N_EVENTS'],
-            'TICKERS': row_data['TICKERS'],
-            'LEANS': row_data['LEANS'],
-        })
+    car_cache = {}
+    done = 0
+    for _, row in unique_trades.iterrows():
+        ticker = row['TICKER']
+        trade_date = pd.Timestamp(row['TRADE_DATE'])
+        key = (ticker, trade_date)
 
-    return pd.DataFrame(rows)
+        estimate = _estimate_normal_returns(ticker, store, trade_date)
+        if estimate is None:
+            car_cache[key] = (np.nan, np.nan)
+            done += 1
+            continue
 
+        merged = estimate.event_data
+        ols_fit = estimate.fit
 
-def compute_time_series_tail(panel, events, top_pct=0.20):
-    """
-    Analysis 34: Time-series decomposition of tail membership by leaning.
+        cars = {}
+        for horizon_label, horizon_end in [('CAR_30', 30), ('CAR_60', 60)]:
+            post_obs = merged[
+                (merged['TD_OFFSET'] >= 1) &
+                (merged['TD_OFFSET'] <= horizon_end)
+            ]
+            if len(post_obs) < 5:
+                cars[horizon_label] = np.nan
+                continue
 
-    Are CW events concentrated in 2019-2024 (DEI era)? Plot tail membership
-    over time by leaning. If Liberal-tail is a 2020-2023 phenomenon, it's a
-    period effect. If stable across 2010-2024, it's durable.
-    """
-    logger.info("Computing time-series tail decomposition...")
+            X_event = sm.add_constant(post_obs[_FF5_ALL])
+            expected = ols_fit.predict(X_event)
+            ar = post_obs['EXCESS_RETURN'].values - expected.values
+            cars[horizon_label] = ar.sum()
 
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+        car_cache[key] = (cars.get('CAR_30', np.nan), cars.get('CAR_60', np.nan))
+        done += 1
+        if done % 500 == 0:
+            logger.info("  Post-trade CARs: %d/%d pairs computed",
+                        done, len(unique_trades))
 
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
+    # Merge CARs back to trades
+    trades['CAR_30'] = trades.apply(
+        lambda r: car_cache.get((r['TICKER'], pd.Timestamp(r['TRADE_DATE'])), (np.nan, np.nan))[0],
+        axis=1
     )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
-
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
+    trades['CAR_60'] = trades.apply(
+        lambda r: car_cache.get((r['TICKER'], pd.Timestamp(r['TRADE_DATE'])), (np.nan, np.nan))[1],
+        axis=1
     )
 
-    treatment['YEAR'] = treatment['EVENT_DATE'].dt.year
+    # Compute directional profitability
+    # Buy is profitable if CAR > 0 (price went up after buying)
+    # Sell is profitable if CAR < 0 (price went down after selling)
+    # Trades with NaN CARs get NaN profitability (excluded from stats)
+    trades['PROFITABLE_30'] = np.where(
+        trades['CAR_30'].isna(), np.nan,
+        np.where(trades['TRADE_TYPE'] == 'buy',
+                 (trades['CAR_30'] > 0).astype(float),
+                 (trades['CAR_30'] < 0).astype(float))
+    )
+    trades['PROFITABLE_60'] = np.where(
+        trades['CAR_60'].isna(), np.nan,
+        np.where(trades['TRADE_TYPE'] == 'buy',
+                 (trades['CAR_60'] > 0).astype(float),
+                 (trades['CAR_60'] < 0).astype(float))
+    )
 
-    rows = []
+    # Signed profit: CAR * trade_value (positive = profitable direction)
+    trades['SIGNED_PROFIT_30'] = np.where(
+        trades['TRADE_TYPE'] == 'buy',
+        trades['CAR_30'] * trades['TRADE_VALUE'],
+        -trades['CAR_30'] * trades['TRADE_VALUE']   # sells profit when CAR < 0
+    )
+    trades['SIGNED_PROFIT_60'] = np.where(
+        trades['TRADE_TYPE'] == 'buy',
+        trades['CAR_60'] * trades['TRADE_VALUE'],
+        -trades['CAR_60'] * trades['TRADE_VALUE']
+    )
 
-    # Overall year distribution
-    for year, grp in treatment.groupby('YEAR'):
-        rows.append({
-            'LEAN': 'ALL',
-            'YEAR': int(year),
-            'N_EVENTS': len(grp),
-            'N_TAIL': int(grp['IN_TAIL'].sum()),
-            'PCT_IN_TAIL': grp['IN_TAIL'].mean() * 100,
-            'MEAN_ABN_SELL': grp['ABN_SELL'].mean(),
+    n_with_car = trades['CAR_30'].notna().sum()
+    logger.info("  Trades with valid CAR_30: %d / %d (%.1f%%)",
+                n_with_car, len(trades), 100 * n_with_car / len(trades) if len(trades) > 0 else 0)
+
+    # Build summary table
+    summary_rows = []
+
+    def _summarize_group(sub, label):
+        """Summarize a group of trades for the CRSP summary table."""
+        valid_30 = sub['CAR_30'].dropna()
+        valid_60 = sub['CAR_60'].dropna()
+        prof_30 = sub['PROFITABLE_30'].dropna()
+        prof_60 = sub['PROFITABLE_60'].dropna()
+        sp_30 = sub['SIGNED_PROFIT_30'].dropna()
+        sp_60 = sub['SIGNED_PROFIT_60'].dropna()
+
+        row = {
+            'CUT': label,
+            'N_TRADES': len(sub),
+            'N_WITH_CAR': len(valid_30),
+        }
+
+        # CAR stats
+        if len(valid_30) >= 5:
+            row['MEAN_CAR_30'] = valid_30.mean()
+            row['MEDIAN_CAR_30'] = valid_30.median()
+            t_stat, t_pval = stats.ttest_1samp(valid_30, 0)
+            row['CAR_30_TSTAT'] = t_stat
+            row['CAR_30_PVAL'] = t_pval
+        else:
+            row['MEAN_CAR_30'] = np.nan
+            row['MEDIAN_CAR_30'] = np.nan
+            row['CAR_30_TSTAT'] = np.nan
+            row['CAR_30_PVAL'] = np.nan
+
+        if len(valid_60) >= 5:
+            row['MEAN_CAR_60'] = valid_60.mean()
+            row['MEDIAN_CAR_60'] = valid_60.median()
+            t_stat, t_pval = stats.ttest_1samp(valid_60, 0)
+            row['CAR_60_TSTAT'] = t_stat
+            row['CAR_60_PVAL'] = t_pval
+        else:
+            row['MEAN_CAR_60'] = np.nan
+            row['MEDIAN_CAR_60'] = np.nan
+            row['CAR_60_TSTAT'] = np.nan
+            row['CAR_60_PVAL'] = np.nan
+
+        # Directional profitability
+        if len(prof_30) >= 5:
+            row['PCT_PROFITABLE_30'] = prof_30.mean()
+            # Binomial test against 50%
+            n_prof = int(prof_30.sum())
+            n_total = len(prof_30)
+            row['BINOM_PVAL_30'] = stats.binomtest(n_prof, n_total, 0.5).pvalue
+        else:
+            row['PCT_PROFITABLE_30'] = np.nan
+            row['BINOM_PVAL_30'] = np.nan
+
+        if len(prof_60) >= 5:
+            row['PCT_PROFITABLE_60'] = prof_60.mean()
+            n_prof = int(prof_60.sum())
+            n_total = len(prof_60)
+            row['BINOM_PVAL_60'] = stats.binomtest(n_prof, n_total, 0.5).pvalue
+        else:
+            row['PCT_PROFITABLE_60'] = np.nan
+            row['BINOM_PVAL_60'] = np.nan
+
+        # Dollar-weighted profits
+        if len(sp_30) >= 5:
+            row['MEAN_SIGNED_PROFIT_30'] = sp_30.mean()
+            row['TOTAL_SIGNED_PROFIT_30'] = sp_30.sum()
+        else:
+            row['MEAN_SIGNED_PROFIT_30'] = np.nan
+            row['TOTAL_SIGNED_PROFIT_30'] = np.nan
+
+        if len(sp_60) >= 5:
+            row['MEAN_SIGNED_PROFIT_60'] = sp_60.mean()
+            row['TOTAL_SIGNED_PROFIT_60'] = sp_60.sum()
+        else:
+            row['MEAN_SIGNED_PROFIT_60'] = np.nan
+            row['TOTAL_SIGNED_PROFIT_60'] = np.nan
+
+        return row
+
+    # Active vs inactive (headline comparison)
+    for is_active, label in [(True, 'ACTIVE'), (False, 'INACTIVE')]:
+        sub = trades[trades['IS_ACTIVE'] == is_active]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, label))
+
+    # Active only: by trade direction
+    active_trades = trades[trades['IS_ACTIVE']]
+    for ttype, label in [('buy', 'ACTIVE_BUYS'), ('sell', 'ACTIVE_SELLS')]:
+        sub = active_trades[active_trades['TRADE_TYPE'] == ttype]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, label))
+
+    # Fundamental only
+    fund_trades = trades[trades['EVENT_CATEGORY'] == 'FUNDAMENTAL']
+    active_fund = fund_trades[fund_trades['IS_ACTIVE']]
+
+    if len(active_fund) >= 5:
+        summary_rows.append(_summarize_group(active_fund, 'ACTIVE_FUNDAMENTAL'))
+
+    # By event type (active only)
+    for etype in active_fund['EVENT_TYPE'].unique():
+        sub = active_fund[active_fund['EVENT_TYPE'] == etype]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, f'ACTIVE_ETYPE:{etype}'))
+
+    # By political connection (active only)
+    for conn, label in [(True, 'ACTIVE_HIGH_CONN'), (False, 'ACTIVE_LOW_CONN')]:
+        sub = active_fund[active_fund['HIGH_POLITICAL_CONNECTION'] == conn]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, label))
+
+    # By insider type (active only)
+    for opp, label in [(True, 'ACTIVE_HIGH_OPP'), (False, 'ACTIVE_LOW_OPP')]:
+        sub = active_fund[active_fund['HIGH_OPP'] == opp]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, label))
+
+    # By regulatory period (active only)
+    for period in active_fund['REGULATORY_PERIOD'].unique():
+        sub = active_fund[active_fund['REGULATORY_PERIOD'] == period]
+        if len(sub) >= 5:
+            summary_rows.append(_summarize_group(sub, f'ACTIVE_REG:{period}'))
+
+    # Active vs inactive two-sample comparison (abs CARs at both horizons)
+    active_cars_30 = trades.loc[trades['IS_ACTIVE'], 'CAR_30'].dropna()
+    inactive_cars_30 = trades.loc[~trades['IS_ACTIVE'], 'CAR_30'].dropna()
+    active_cars_60 = trades.loc[trades['IS_ACTIVE'], 'CAR_60'].dropna()
+    inactive_cars_60 = trades.loc[~trades['IS_ACTIVE'], 'CAR_60'].dropna()
+    if len(active_cars_30) >= 10 and len(inactive_cars_30) >= 10:
+        t30, p30 = stats.ttest_ind(
+            active_cars_30.abs(), inactive_cars_30.abs(), equal_var=False
+        )
+        t60, p60 = (
+            stats.ttest_ind(active_cars_60.abs(), inactive_cars_60.abs(), equal_var=False)
+            if len(active_cars_60) >= 10 and len(inactive_cars_60) >= 10
+            else (np.nan, np.nan)
+        )
+        summary_rows.append({
+            'CUT': 'ACTIVE_VS_INACTIVE_ABS_CAR',
+            'N_TRADES': len(active_cars_30) + len(inactive_cars_30),
+            'N_WITH_CAR': len(active_cars_30) + len(inactive_cars_30),
+            'MEAN_CAR_30': active_cars_30.abs().mean(),
+            'MEDIAN_CAR_30': active_cars_30.abs().median(),
+            'CAR_30_TSTAT': t30, 'CAR_30_PVAL': p30,
+            'MEAN_CAR_60': active_cars_60.abs().mean() if len(active_cars_60) >= 5 else np.nan,
+            'MEDIAN_CAR_60': active_cars_60.abs().median() if len(active_cars_60) >= 5 else np.nan,
+            'CAR_60_TSTAT': t60, 'CAR_60_PVAL': p60,
+            'PCT_PROFITABLE_30': np.nan, 'BINOM_PVAL_30': np.nan,
+            'PCT_PROFITABLE_60': np.nan, 'BINOM_PVAL_60': np.nan,
+            'MEAN_SIGNED_PROFIT_30': np.nan, 'TOTAL_SIGNED_PROFIT_30': np.nan,
+            'MEAN_SIGNED_PROFIT_60': np.nan, 'TOTAL_SIGNED_PROFIT_60': np.nan,
         })
 
-    # By leaning × year
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        lean_sub = treatment[treatment['ESTIMATED_POLITICAL_LEANING'] == lean]
-        for year, grp in lean_sub.groupby('YEAR'):
-            rows.append({
-                'LEAN': lean,
-                'YEAR': int(year),
-                'N_EVENTS': len(grp),
-                'N_TAIL': int(grp['IN_TAIL'].sum()),
-                'PCT_IN_TAIL': grp['IN_TAIL'].mean() * 100,
-                'MEAN_ABN_SELL': grp['ABN_SELL'].mean(),
-            })
+    crsp_summary = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
 
-    # Period comparison: pre-DEI (<2019) vs DEI era (2019-2024)
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        lean_sub = treatment[treatment['ESTIMATED_POLITICAL_LEANING'] == lean]
-        pre_dei = lean_sub[lean_sub['YEAR'] < 2019]
-        dei_era = lean_sub[(lean_sub['YEAR'] >= 2019) & (lean_sub['YEAR'] <= 2024)]
+    # Trade-level table: save a compact version
+    save_cols = [
+        'OWNER', 'TICKER', 'EVENT_ID', 'TRADE_DATE', 'TRADE_TYPE',
+        'TRANSACTION_CODE', 'TRADE_VALUE', 'IS_ACTIVE',
+        'EVENT_CATEGORY', 'EVENT_TYPE',
+        'REGULATORY_PERIOD', 'HIGH_POLITICAL_CONNECTION', 'HIGH_OPP',
+        'CAR_30', 'CAR_60', 'PROFITABLE_30', 'PROFITABLE_60',
+        'SIGNED_PROFIT_30', 'SIGNED_PROFIT_60',
+    ]
+    # Only include columns that exist (backwards-compatible)
+    save_cols = [c for c in save_cols if c in trades.columns]
+    crsp_profits = trades[save_cols].copy()
 
-        if len(pre_dei) >= 3 and len(dei_era) >= 3:
-            rows.append({
-                'LEAN': lean,
-                'YEAR': -1,  # sentinel for period comparison
-                'N_EVENTS': len(pre_dei) + len(dei_era),
-                'N_TAIL': -1,
-                'PCT_IN_TAIL': np.nan,
-                'MEAN_ABN_SELL': np.nan,
-                'PRE_DEI_PCT_TAIL': pre_dei['IN_TAIL'].mean() * 100,
-                'DEI_ERA_PCT_TAIL': dei_era['IN_TAIL'].mean() * 100,
-                'PRE_DEI_N': len(pre_dei),
-                'DEI_ERA_N': len(dei_era),
-            })
+    logger.info("  CRSP profit analysis complete: %d trades, %d summary rows",
+                len(crsp_profits), len(crsp_summary))
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        period_rows = df[df['YEAR'] == -1]
-        for _, r in period_rows.iterrows():
-            logger.info("  %s: pre-DEI tail=%.1f%% (n=%s), DEI-era tail=%.1f%% (n=%s)",
-                        r['LEAN'],
-                        r.get('PRE_DEI_PCT_TAIL', 0), r.get('PRE_DEI_N', 0),
-                        r.get('DEI_ERA_PCT_TAIL', 0), r.get('DEI_ERA_N', 0))
-    return df
+    return crsp_profits, crsp_summary
 
 
-def compute_placebo_stratified_by_lean(panel, events, n_iterations=500, seed=42):
+# ═════════════════════════════════════════════════════════════════════
+# §12 DIRECTIONAL ACCURACY REVERSAL (Cziraki-Gider 2021 test)
+# ═════════════════════════════════════════════════════════════════════
+
+def _build_control_trades(panel, form4, store, political_trades):
+    """Build matched non-political control trades with forward CARs.
+
+    For each political-event trade, draws a same-firm trade outside any
+    political-event window, matched on calendar quarter. Computes
+    FF5-adjusted forward CARs for matched controls.
     """
-    Analysis 35: Placebo test stratified by political leaning.
-
-    Run the permutation test separately within Conservative, Liberal, and
-    Mixed subsamples. If Liberal firms show tail-like behavior on random
-    dates too, they just have higher baseline volatility.
-    """
-    logger.info("Computing lean-stratified placebo test...")
-
-    pre_col = 'PRE_FULL_NET_DOLLAR_SOLD'
-    bench_col = 'BENCHMARK_NET_DOLLAR_SOLD'
-    if pre_col not in panel.columns or bench_col not in panel.columns:
+    if political_trades.empty:
         return pd.DataFrame()
 
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+    # Exclude the full event footprint: [benchmark_start, post_end] = [-365, +60]
+    # This prevents control trades from containing:
+    #   - post-event reactive trades (day 0 to +60)
+    #   - benchmark-window trades used to calibrate active/inactive status
+    #   - pre-event window trades already in the political sample
+    ticker_windows = {}
+    for _, ev in panel.iterrows():
+        ticker = ev['TICKER']
+        ed = pd.Timestamp(ev['EVENT_DATE'])
+        w_start = ed + pd.Timedelta(days=WINDOWS['BENCHMARK'][0])   # -365
+        w_end = ed + pd.Timedelta(days=WINDOWS['POST'][1])          # +60
+        ticker_windows.setdefault(ticker, []).append((w_start, w_end))
 
-    # Merge leaning
-    merged = panel.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
+    # Filter Form 4 to relevant tickers, buys/sells with value
+    political_tickers = set(political_trades['TICKER'].unique())
+    f4 = form4[
+        form4['ticker'].isin(political_tickers) &
+        form4['_trade_type'].isin(['buy', 'sell']) &
+        form4['transaction_value'].notna() &
+        (form4['transaction_value'] > 0)
+    ].copy()
 
-    rows = []
-    rng = np.random.RandomState(seed)
+    if f4.empty:
+        return pd.DataFrame()
 
-    for lean in ['Conservative', 'Liberal', 'Mixed', 'ALL']:
-        if lean == 'ALL':
-            sub = merged
+    # Mark trades inside any political window (vectorized)
+    in_window = pd.Series(False, index=f4.index)
+    for ticker, windows in ticker_windows.items():
+        tkr_mask = f4['ticker'] == ticker
+        if not tkr_mask.any():
+            continue
+        for ws, we in windows:
+            in_window |= (tkr_mask &
+                          (f4['transaction_date'] >= ws) &
+                          (f4['transaction_date'] <= we))
+
+    # Control pool: trades NOT in any political window
+    pool = f4[~in_window].copy()
+    pool = pool.rename(columns={
+        'ticker': 'TICKER', 'owner_name': 'OWNER',
+        'transaction_date': 'TRADE_DATE', '_trade_type': 'TRADE_TYPE',
+        'transaction_code': 'TRANSACTION_CODE',
+        'transaction_value': 'TRADE_VALUE', 'shares': 'SHARES',
+        'price_per_share': 'PRICE',
+    })[['TICKER', 'OWNER', 'TRADE_DATE', 'TRADE_TYPE', 'TRANSACTION_CODE',
+        'TRADE_VALUE', 'SHARES', 'PRICE']]
+
+    logger.info("  Control pool: %d non-political trades, %d tickers",
+                len(pool), pool['TICKER'].nunique())
+
+    # Match by ticker: sample N control trades per firm, proportional
+    # to political trade count.  Ticker-quarter matching produced a
+    # degenerate sample (N<100) because the 425-day exclusion window
+    # [-365, +60] removes most quarters with political activity.
+    # Ticker-only matching gives a large control sample; year FE in
+    # the LPM specifications absorb time-period variation.
+    pol_counts = political_trades.groupby('TICKER').size()
+    pool_grouped = {k: v for k, v in pool.groupby('TICKER')}
+
+    rng = np.random.RandomState(42)
+    matched_parts = []
+    for ticker, n_needed in pol_counts.items():
+        cand = pool_grouped.get(ticker)
+        if cand is None or cand.empty:
+            continue
+        n_draw = min(len(cand), n_needed)
+        chosen_idx = rng.choice(cand.index, size=n_draw, replace=False)
+        matched_parts.append(pool.loc[chosen_idx])
+
+    if not matched_parts:
+        logger.warning("  No matched control trades found")
+        return pd.DataFrame()
+
+    control = pd.concat(matched_parts, ignore_index=True)
+
+    # Cap to keep CAR computation tractable
+    MAX_CONTROL = 40000
+    if len(control) > MAX_CONTROL:
+        control = control.sample(n=MAX_CONTROL, random_state=rng).reset_index(drop=True)
+        logger.info("  Capped control sample to %d trades", MAX_CONTROL)
+
+    logger.info("  Matched %d control trades (target: %d)",
+                len(control), len(political_trades))
+
+    # Compute forward-looking CARs for control trades
+    from .essay2_did import _estimate_normal_returns, _FF5_ALL
+
+    unique_ct = control[['TICKER', 'TRADE_DATE']].drop_duplicates()
+    logger.info("  Computing CARs for %d unique control (ticker, date) pairs...",
+                len(unique_ct))
+
+    car_cache = {}
+    done = 0
+    for _, row in unique_ct.iterrows():
+        ticker = row['TICKER']
+        trade_date = pd.Timestamp(row['TRADE_DATE'])
+        key = (ticker, trade_date)
+
+        estimate = _estimate_normal_returns(ticker, store, trade_date)
+        if estimate is None:
+            car_cache[key] = (np.nan, np.nan)
         else:
-            sub = merged[merged['ESTIMATED_POLITICAL_LEANING'] == lean]
+            merged = estimate.event_data
+            ols_fit = estimate.fit
+            cars = {}
+            for hl, he in [('CAR_30', 30), ('CAR_60', 60)]:
+                post = merged[
+                    (merged['TD_OFFSET'] >= 1) & (merged['TD_OFFSET'] <= he)
+                ]
+                if len(post) < 5:
+                    cars[hl] = np.nan
+                    continue
+                X_ev = sm.add_constant(post[_FF5_ALL])
+                expected = ols_fit.predict(X_ev)
+                cars[hl] = (post['EXCESS_RETURN'].values - expected.values).sum()
+            car_cache[key] = (cars.get('CAR_30', np.nan), cars.get('CAR_60', np.nan))
 
-        if len(sub) < 10:
-            continue
+        done += 1
+        if done % 500 == 0:
+            logger.info("  Control CARs: %d/%d", done, len(unique_ct))
 
-        pre_daily = sub[pre_col] / pre_days
-        bench_daily = sub[bench_col] / bench_days
-        diff = (pre_daily - bench_daily).values
-        treatment_mask = sub['IS_TREATMENT'].values
-
-        if treatment_mask.sum() < 3 or (~treatment_mask).sum() < 3:
-            continue
-
-        observed = diff[treatment_mask].mean() - diff[~treatment_mask].mean()
-
-        placebo_stats = []
-        for _ in range(n_iterations):
-            shuffled = rng.permutation(treatment_mask)
-            p_stat = diff[shuffled].mean() - diff[~shuffled].mean()
-            placebo_stats.append(p_stat)
-
-        placebo_stats = np.array(placebo_stats)
-        empirical_p = (np.abs(placebo_stats) >= np.abs(observed)).mean()
-
-        rows.append({
-            'LEAN': lean,
-            'OBSERVED_STAT': observed,
-            'PLACEBO_MEAN': placebo_stats.mean(),
-            'PLACEBO_STD': placebo_stats.std(),
-            'EMPIRICAL_P_TWO_SIDED': empirical_p,
-            'N_TREATMENT': int(treatment_mask.sum()),
-            'N_CONTROL': int((~treatment_mask).sum()),
-            'N_ITERATIONS': n_iterations,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        for _, r in df.iterrows():
-            logger.info("  %s: observed=%.0f, placebo_p=%.4f",
-                        r['LEAN'], r['OBSERVED_STAT'], r['EMPIRICAL_P_TWO_SIDED'])
-    return df
-
-
-def compute_within_firm_temporal(panel, events, form4, top_pct=0.20):
-    """
-    Analysis 36: Within-firm temporal clustering.
-
-    For each firm with multiple events, ask whether tail-selling episodes
-    cluster around CW events specifically or occur uniformly across the
-    firm's history.
-    """
-    logger.info("Computing within-firm temporal clustering...")
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
+    # Merge CARs back
+    control['CAR_30'] = control.apply(
+        lambda r: car_cache.get(
+            (r['TICKER'], pd.Timestamp(r['TRADE_DATE'])), (np.nan, np.nan)
+        )[0], axis=1
     )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
-
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
+    control['CAR_60'] = control.apply(
+        lambda r: car_cache.get(
+            (r['TICKER'], pd.Timestamp(r['TRADE_DATE'])), (np.nan, np.nan)
+        )[1], axis=1
     )
 
-    # Firms with multiple events
-    firm_event_counts = treatment.groupby('TICKER').size()
-    multi_event_firms = firm_event_counts[firm_event_counts >= 2].index
+    # Directional profitability
+    control['PROFITABLE_30'] = np.where(
+        control['CAR_30'].isna(), np.nan,
+        np.where(control['TRADE_TYPE'] == 'buy',
+                 (control['CAR_30'] > 0).astype(float),
+                 (control['CAR_30'] < 0).astype(float)))
+    control['PROFITABLE_60'] = np.where(
+        control['CAR_60'].isna(), np.nan,
+        np.where(control['TRADE_TYPE'] == 'buy',
+                 (control['CAR_60'] > 0).astype(float),
+                 (control['CAR_60'] < 0).astype(float)))
 
-    rows = []
+    n_car = control['CAR_30'].notna().sum()
+    logger.info("  Control trades with CAR: %d/%d (%.1f%%)",
+                n_car, len(control),
+                100 * n_car / len(control) if len(control) > 0 else 0)
 
-    for ticker in multi_event_firms:
-        firm_events = treatment[treatment['TICKER'] == ticker]
-        n_events = len(firm_events)
-        n_tail = int(firm_events['IN_TAIL'].sum())
-        lean = firm_events['ESTIMATED_POLITICAL_LEANING'].mode()
-        lean = lean.iloc[0] if len(lean) > 0 else 'Unknown'
-
-        # Check if tail episodes cluster on specific events
-        rows.append({
-            'TICKER': ticker,
-            'LEAN': lean,
-            'N_EVENTS': n_events,
-            'N_TAIL': n_tail,
-            'TAIL_RATE': n_tail / n_events if n_events > 0 else 0,
-            'MEAN_ABN_SELL': firm_events['ABN_SELL'].mean(),
-            'STD_ABN_SELL': firm_events['ABN_SELL'].std() if n_events > 1 else np.nan,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        # Summary by leaning
-        for lean in df['LEAN'].unique():
-            lean_sub = df[df['LEAN'] == lean]
-            logger.info("  %s: %d multi-event firms, mean tail rate=%.1f%%",
-                        lean, len(lean_sub), lean_sub['TAIL_RATE'].mean() * 100)
-
-        # Fisher exact test: do Liberal multi-event firms have higher tail rates?
-        if len(df) >= 10:
-            df['HIGH_TAIL'] = (df['TAIL_RATE'] > 0).astype(int)
-            liberal_high = df[df['LEAN'] == 'Liberal']['HIGH_TAIL'].sum()
-            liberal_n = len(df[df['LEAN'] == 'Liberal'])
-            other_high = df[df['LEAN'] != 'Liberal']['HIGH_TAIL'].sum()
-            other_n = len(df[df['LEAN'] != 'Liberal'])
-            if liberal_n > 0 and other_n > 0:
-                table = np.array([[liberal_high, liberal_n - liberal_high],
-                                  [other_high, other_n - other_high]])
-                if table.min() >= 0:
-                    _, fisher_p = stats.fisher_exact(table)
-                    summary_row = pd.DataFrame([{
-                        'TICKER': '_FISHER_TEST',
-                        'LEAN': 'SUMMARY',
-                        'N_EVENTS': len(df),
-                        'N_TAIL': -1,
-                        'TAIL_RATE': fisher_p,
-                        'MEAN_ABN_SELL': liberal_high / liberal_n if liberal_n > 0 else 0,
-                        'STD_ABN_SELL': other_high / other_n if other_n > 0 else 0,
-                    }])
-                    df = pd.concat([df, summary_row], ignore_index=True)
-
-    return df
+    return control
 
 
-def compute_disclosure_channel(panel, events, form4, top_pct=0.20):
+def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None):
+    """Test the Cziraki-Gider (2021) trade-size/accuracy reversal.
+
+    Headline test: does directional accuracy decrease with trade size around
+    political events, reversing the unconditional CG regularity?
+
+    Runs:
+      1. Trade-size decile × sample accuracy table
+      2. LPM: Pr(accurate) ~ log(trade_value) + controls, separately on
+         political and control samples, then pooled with interaction
+      3. Pre/post 2023 amendments interaction (regulatory architecture test)
+      4. Ticker FE specification (absorbs firm-level variation)
+
+    Returns (size_accuracy, size_accuracy_slopes, reversal_regression, control_trades).
     """
-    Analysis 37: 10b5-1 disclosure channel by political leaning.
+    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if crsp_profits is None or crsp_profits.empty:
+        logger.warning("  No CRSP profits for directional accuracy analysis")
+        return empty
 
-    Did Liberal firms in the tail file 10b5-1 plans more or less than
-    Conservative firms? If Liberal-tail trades were scheduled, the
-    foreknowledge story is dead.
-    """
-    logger.info("Computing disclosure channel analysis (10b5-1 × leaning)...")
+    political = crsp_profits.copy()
+    logger.info("  §12 Directional accuracy reversal: %d political trades",
+                len(political))
 
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
+    # ── Step 1: Build matched control sample ──────────────────────────
+    control = _build_control_trades(panel, form4, store, political)
 
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-    threshold = treatment['ABN_SELL'].quantile(1 - top_pct)
-    treatment['IN_TAIL'] = (treatment['ABN_SELL'] >= threshold).astype(int)
+    # ── Step 2: Trade-size decile classification ──────────────────────
+    # Pool thresholds across both samples so decile N means the same
+    # dollar range in political and control (comparability requirement)
+    political['SAMPLE'] = 'POLITICAL'
 
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
-    )
+    if not control.empty:
+        control['SAMPLE'] = 'CONTROL'
 
-    # Identify likely 10b5-1 tickers (reuse logic from compute_10b5_1_filter)
-    plan_tickers = set()
-    for ticker in treatment['TICKER'].unique():
-        ticker_txns = form4[form4['ticker'] == ticker]
-        for owner in ticker_txns['owner_name'].unique():
-            trades = ticker_txns[ticker_txns['owner_name'] == owner]['transaction_date'].dropna()
-            if len(trades) < 8:
-                continue
-            quarters = trades.dt.to_period('Q').nunique()
-            if quarters < 4:
-                continue
-            q_start_month = ((trades.dt.month - 1) // 3) * 3 + 1
-            day_of_quarter = (trades.dt.month - q_start_month) * 30 + trades.dt.day
-            week_in_q = day_of_quarter // 7
-            if week_in_q.std() < 3:
-                plan_tickers.add(ticker)
-                break
-
-    treatment['LIKELY_10B5_1'] = treatment['TICKER'].isin(plan_tickers).astype(int)
-
-    rows = []
-
-    # By leaning: 10b5-1 rate in tail vs non-tail
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        lean_sub = treatment[treatment['ESTIMATED_POLITICAL_LEANING'] == lean]
-        tail_sub = lean_sub[lean_sub['IN_TAIL'] == 1]
-        nontail_sub = lean_sub[lean_sub['IN_TAIL'] == 0]
-
-        rows.append({
-            'LEAN': lean,
-            'GROUP': 'TAIL',
-            'N': len(tail_sub),
-            'N_10B5_1': int(tail_sub['LIKELY_10B5_1'].sum()),
-            'PCT_10B5_1': tail_sub['LIKELY_10B5_1'].mean() * 100 if len(tail_sub) > 0 else np.nan,
-            'MEAN_ABN_SELL': tail_sub['ABN_SELL'].mean() if len(tail_sub) > 0 else np.nan,
-        })
-        rows.append({
-            'LEAN': lean,
-            'GROUP': 'NON_TAIL',
-            'N': len(nontail_sub),
-            'N_10B5_1': int(nontail_sub['LIKELY_10B5_1'].sum()),
-            'PCT_10B5_1': nontail_sub['LIKELY_10B5_1'].mean() * 100 if len(nontail_sub) > 0 else np.nan,
-            'MEAN_ABN_SELL': nontail_sub['ABN_SELL'].mean() if len(nontail_sub) > 0 else np.nan,
-        })
-
-    # Fisher exact: tail × 10b5-1 across all firms
-    tail_all = treatment[treatment['IN_TAIL'] == 1]
-    nontail_all = treatment[treatment['IN_TAIL'] == 0]
-    a = int(tail_all['LIKELY_10B5_1'].sum())
-    b = len(tail_all) - a
-    c = int(nontail_all['LIKELY_10B5_1'].sum())
-    d = len(nontail_all) - c
-    if min(a + b, c + d) > 0:
-        _, fisher_p = stats.fisher_exact(np.array([[a, b], [c, d]]))
-        rows.append({
-            'LEAN': 'ALL',
-            'GROUP': 'FISHER_TEST',
-            'N': len(treatment),
-            'N_10B5_1': a + c,
-            'PCT_10B5_1': fisher_p,  # stores p-value
-            'MEAN_ABN_SELL': np.nan,
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        tail_rows = df[df['GROUP'] == 'TAIL']
-        for _, r in tail_rows.iterrows():
-            logger.info("  %s tail: %d events, %.0f%% likely 10b5-1",
-                        r['LEAN'], r['N'], r['PCT_10B5_1'] if pd.notna(r['PCT_10B5_1']) else 0)
-    return df
-
-
-def compute_buy_analysis(panel, form4, events, top_pct=0.20):
-    """
-    Analysis 38: Buy-side analysis — do insiders reduce buying before CW events?
-
-    An informed insider with negative information sells (already tested).
-    They also reduce buying. Check whether buy reduction correlates with
-    sell increase by leaning.
-    """
-    logger.info("Computing buy-side analysis...")
-
-    pre_days = abs(WINDOWS['PRE_FULL'][1] - WINDOWS['PRE_FULL'][0]) + 1
-    bench_days = abs(WINDOWS['BENCHMARK'][1] - WINDOWS['BENCHMARK'][0]) + 1
-
-    treatment = panel[panel['IS_TREATMENT'] == True].copy()
-
-    # Abnormal selling (existing)
-    treatment['ABN_SELL'] = (
-        treatment['PRE_FULL_NET_DOLLAR_SOLD'] / pre_days -
-        treatment['BENCHMARK_NET_DOLLAR_SOLD'] / bench_days
-    )
-
-    # Abnormal buying (mirror of sell logic using dollar_bought columns)
-    buy_pre_col = 'PRE_FULL_DOLLAR_BOUGHT'
-    buy_bench_col = 'BENCHMARK_DOLLAR_BOUGHT'
-
-    if buy_pre_col in treatment.columns and buy_bench_col in treatment.columns:
-        treatment['ABN_BUY'] = (
-            treatment[buy_pre_col] / pre_days -
-            treatment[buy_bench_col] / bench_days
-        )
+        pooled_tv = pd.concat([political['TRADE_VALUE'], control['TRADE_VALUE']])
+        try:
+            _, bins = pd.qcut(pooled_tv, 10, retbins=True, duplicates='drop')
+            bins[0] = 0           # include minimum
+            bins[-1] = np.inf     # include maximum
+            political['SIZE_DECILE'] = pd.cut(
+                political['TRADE_VALUE'], bins=bins, labels=False
+            ) + 1
+            control['SIZE_DECILE'] = pd.cut(
+                control['TRADE_VALUE'], bins=bins, labels=False
+            ) + 1
+        except ValueError:
+            political['SIZE_DECILE'] = 1
+            control['SIZE_DECILE'] = 1
     else:
-        # If separate buy columns don't exist, compute from net and gross
-        # Gross sold = (NET + GROSS) / 2 ... but we may not have GROSS
-        # Fall back: compute buys directly from form4
-        logger.info("  Computing buy volumes directly from Form 4...")
-        buy_rows = []
-        for _, ev in treatment.iterrows():
-            ticker = ev['TICKER']
-            event_date = ev['EVENT_DATE']
-            bench_start = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][0])
-            bench_end = event_date + pd.Timedelta(days=WINDOWS['BENCHMARK'][1])
-            pre_start = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][0])
-            pre_end = event_date + pd.Timedelta(days=WINDOWS['PRE_FULL'][1])
+        try:
+            political['SIZE_DECILE'] = pd.qcut(
+                political['TRADE_VALUE'], 10, labels=False, duplicates='drop'
+            ) + 1
+        except ValueError:
+            political['SIZE_DECILE'] = 1
 
-            ticker_buys = form4[
-                (form4['ticker'] == ticker) &
-                (form4['_trade_type'] == 'buy')
-            ]
-
-            bench_buys = ticker_buys[
-                (ticker_buys['transaction_date'] >= bench_start) &
-                (ticker_buys['transaction_date'] <= bench_end)
-            ]['transaction_value'].sum()
-
-            pre_buys = ticker_buys[
-                (ticker_buys['transaction_date'] >= pre_start) &
-                (ticker_buys['transaction_date'] <= pre_end)
-            ]['transaction_value'].sum()
-
-            buy_rows.append({
-                'TICKER': ticker,
-                'EVENT_DATE': event_date,
-                'PRE_BUY_DAILY': pre_buys / pre_days,
-                'BENCH_BUY_DAILY': bench_buys / bench_days,
+    # ── Step 3: Accuracy by trade-size decile ─────────────────────────
+    size_rows = []
+    slope_rows = []
+    for sample_label, df in [('POLITICAL', political), ('CONTROL', control)]:
+        if df.empty:
+            continue
+        valid = df[df['PROFITABLE_30'].notna()]
+        for decile in sorted(valid['SIZE_DECILE'].unique()):
+            dec = valid[valid['SIZE_DECILE'] == decile]
+            n = len(dec)
+            if n < 5:
+                continue
+            pct = dec['PROFITABLE_30'].mean()
+            n_acc = int(dec['PROFITABLE_30'].sum())
+            size_rows.append({
+                'SAMPLE': sample_label,
+                'SIZE_DECILE': int(decile),
+                'N_TRADES': n,
+                'MEAN_TRADE_VALUE': dec['TRADE_VALUE'].mean(),
+                'MEDIAN_TRADE_VALUE': dec['TRADE_VALUE'].median(),
+                'PCT_ACCURATE': pct,
+                'N_ACCURATE': n_acc,
+                'BINOM_PVAL': stats.binomtest(n_acc, n, 0.5).pvalue,
+                'MEAN_CAR_30': dec['CAR_30'].mean(),
             })
 
-        buy_df = pd.DataFrame(buy_rows)
-        treatment = treatment.merge(buy_df, on=['TICKER', 'EVENT_DATE'], how='left')
-        treatment['ABN_BUY'] = treatment['PRE_BUY_DAILY'] - treatment['BENCH_BUY_DAILY']
+        # Slope test: regress decile-level accuracy on log(median_tv)
+        # (not on decile rank, which isn't comparable across samples)
+        if len(valid['SIZE_DECILE'].unique()) >= 3:
+            decile_data = valid.groupby('SIZE_DECILE').agg(
+                accuracy=('PROFITABLE_30', 'mean'),
+                log_tv=('TRADE_VALUE', lambda x: np.log(x.median())),
+            )
+            slope, _, r_val, p_val, _ = stats.linregress(
+                decile_data['log_tv'].values, decile_data['accuracy'].values
+            )
+            slope_rows.append({
+                'SAMPLE': sample_label,
+                'SLOPE': slope,
+                'SLOPE_PVAL': p_val,
+                'SLOPE_R2': r_val ** 2,
+                'N_TRADES': len(valid),
+                'N_DECILES': len(decile_data),
+            })
 
-    # Merge leaning
-    treatment = treatment.merge(
-        events[['TICKER', 'EVENT_DATE', 'ESTIMATED_POLITICAL_LEANING']],
-        on=['TICKER', 'EVENT_DATE'], how='left', suffixes=('', '_evt')
+    size_accuracy = pd.DataFrame(size_rows)
+    size_accuracy_slopes = pd.DataFrame(slope_rows)
+
+    # ── Step 4: LPM regressions ───────────────────────────────────────
+    regression_rows = []
+
+    # Ensure NAICS map for industry FE
+    global _ticker_naics_map
+    if _ticker_naics_map is None and store is not None:
+        _ticker_naics_map = _build_ticker_naics_map(store)
+
+    # Prepare combined dataset
+    if not control.empty:
+        combined = pd.concat([political, control], ignore_index=True)
+    else:
+        combined = political.copy()
+
+    valid = combined[combined['PROFITABLE_30'].notna()].copy()
+    if len(valid) < 30:
+        logger.warning("  Too few valid trades for LPM regression")
+        return size_accuracy, size_accuracy_slopes, pd.DataFrame(), control
+
+    valid['IS_POLITICAL'] = (valid['SAMPLE'] == 'POLITICAL').astype(int)
+    valid['LOG_TV'] = np.log(valid['TRADE_VALUE'])
+    valid['IS_BUY'] = (valid['TRADE_TYPE'] == 'buy').astype(int)
+    valid['LOG_TV_x_POL'] = valid['LOG_TV'] * valid['IS_POLITICAL']
+
+    td = pd.to_datetime(valid['TRADE_DATE'])
+    valid['YEAR'] = td.dt.year
+    valid['POST_2023'] = (valid['YEAR'] >= 2023).astype(int)
+    valid['LOG_TV_x_POST2023'] = valid['LOG_TV'] * valid['POST_2023']
+
+    # Insider-type controls (available in political trades from CRSP profits)
+    for col in ['HIGH_POLITICAL_CONNECTION', 'HIGH_OPP']:
+        if col in valid.columns:
+            valid[f'{col}_INT'] = valid[col].fillna(False).astype(int)
+        else:
+            valid[f'{col}_INT'] = 0
+
+    # Year dummies for time FE (drop first to avoid collinearity)
+    year_dummies = pd.get_dummies(valid['YEAR'], prefix='Y', drop_first=True,
+                                  dtype=float)
+    year_dummy_cols = list(year_dummies.columns)
+    valid = pd.concat([valid, year_dummies], axis=1)
+
+    def _run_lpm(subset, spec_name, x_cols, results_list, include_year_fe=True):
+        """Run LPM with ticker-clustered SEs and year FE, append results."""
+        if len(subset) < 30:
+            return
+        # Drop columns with no variation
+        x_use = [c for c in x_cols if c in subset.columns and subset[c].nunique() > 1]
+        if not x_use:
+            return
+        # Add year FE (drop any year columns with no variation in subset)
+        if include_year_fe:
+            yr_use = [c for c in year_dummy_cols
+                      if c in subset.columns and subset[c].nunique() > 1]
+            x_all = x_use + yr_use
+        else:
+            x_all = x_use
+        X = sm.add_constant(subset[x_all].astype(float))
+        y = subset['PROFITABLE_30'].astype(float)
+        try:
+            model = sm.OLS(y, X).fit(
+                cov_type='cluster',
+                cov_kwds={'groups': subset['TICKER']},
+            )
+            # Report coefficients for main variables (not year dummies)
+            for var in x_use:
+                results_list.append({
+                    'SPECIFICATION': spec_name,
+                    'VARIABLE': var,
+                    'COEFFICIENT': model.params.get(var, np.nan),
+                    'STD_ERROR': model.bse.get(var, np.nan),
+                    'T_STAT': model.tvalues.get(var, np.nan),
+                    'P_VALUE': model.pvalues.get(var, np.nan),
+                    'N_OBS': int(model.nobs),
+                    'R_SQUARED': model.rsquared,
+                })
+        except Exception as e:
+            logger.warning("  LPM '%s' failed: %s", spec_name, e)
+
+    # ── Spec 1: Political-only ────────────────────────────────────────
+    pol = valid[valid['IS_POLITICAL'] == 1]
+    _run_lpm(pol, 'POLITICAL_ONLY',
+             ['LOG_TV', 'IS_BUY', 'HIGH_POLITICAL_CONNECTION_INT', 'HIGH_OPP_INT'],
+             regression_rows)
+
+    # ── Spec 1b/1c: Political buys-only and sells-only ───────────────
+    # Buy/sell asymmetry: 10b5-1 and blackout periods bind hardest on
+    # sells, so the reversal may be sell-driven
+    pol_buys = pol[pol['IS_BUY'] == 1]
+    pol_sells = pol[pol['IS_BUY'] == 0]
+    _run_lpm(pol_buys, 'POLITICAL_BUYS_ONLY',
+             ['LOG_TV', 'HIGH_POLITICAL_CONNECTION_INT', 'HIGH_OPP_INT'],
+             regression_rows)
+    _run_lpm(pol_sells, 'POLITICAL_SELLS_ONLY',
+             ['LOG_TV', 'HIGH_POLITICAL_CONNECTION_INT', 'HIGH_OPP_INT'],
+             regression_rows)
+
+    # ── Spec 2: Control-only (Cziraki-Gider replication) ─────────────
+    ctrl = valid[valid['IS_POLITICAL'] == 0]
+    _run_lpm(ctrl, 'CONTROL_ONLY',
+             ['LOG_TV', 'IS_BUY'],
+             regression_rows)
+
+    # ── Spec 2b/2c: Control buys-only and sells-only ─────────────────
+    # Mirror the political buy/sell split for symmetric comparison
+    if len(ctrl) >= 30:
+        ctrl_buys = ctrl[ctrl['IS_BUY'] == 1]
+        ctrl_sells = ctrl[ctrl['IS_BUY'] == 0]
+        _run_lpm(ctrl_buys, 'CONTROL_BUYS_ONLY', ['LOG_TV'], regression_rows)
+        _run_lpm(ctrl_sells, 'CONTROL_SELLS_ONLY', ['LOG_TV'], regression_rows)
+
+    # ── Spec 3: Pooled with interaction ───────────────────────────────
+    if not control.empty:
+        _run_lpm(valid, 'POOLED_INTERACTION',
+                 ['LOG_TV', 'IS_POLITICAL', 'LOG_TV_x_POL', 'IS_BUY'],
+                 regression_rows)
+
+    # ── Spec 3b: Pooled with ticker + year FE ─────────────────────────
+    # If LOG_TV_x_POL survives ticker FE absorption, the interaction is
+    # real.  If it goes to zero, the pooled result is a between-firm
+    # composition artifact.
+    if not control.empty and valid['TICKER'].nunique() >= 10:
+        fe_x_cols = ['LOG_TV', 'IS_POLITICAL', 'LOG_TV_x_POL', 'IS_BUY']
+        yr_fe_cols = [c for c in year_dummy_cols
+                      if c in valid.columns and valid[c].nunique() > 1]
+        all_fe_x = fe_x_cols + yr_fe_cols
+        pooled_fe = valid[['TICKER', 'TRADE_DATE', 'PROFITABLE_30'] + all_fe_x].dropna().copy()
+        pooled_fe = pooled_fe.reset_index(drop=True)
+        pooled_fe['_row_id'] = range(len(pooled_fe))
+        try:
+            from linearmodels.panel import PanelOLS as _PanelOLS
+            pooled_fe_idx = pooled_fe.set_index(['TICKER', '_row_id'])
+            y_fe = pooled_fe_idx['PROFITABLE_30']
+            X_fe = pooled_fe_idx[all_fe_x].astype(float)
+            model = _PanelOLS(y_fe, X_fe, entity_effects=True).fit(
+                cov_type='clustered', cluster_entity=True
+            )
+            for var in fe_x_cols:
+                regression_rows.append({
+                    'SPECIFICATION': 'POOLED_TICKER_FE',
+                    'VARIABLE': var,
+                    'COEFFICIENT': model.params.get(var, np.nan),
+                    'STD_ERROR': model.std_errors.get(var, np.nan),
+                    'T_STAT': model.tstats.get(var, np.nan),
+                    'P_VALUE': model.pvalues.get(var, np.nan),
+                    'N_OBS': int(model.nobs),
+                    'R_SQUARED': model.rsquared_within,
+                })
+        except Exception as e:
+            logger.warning("  PanelOLS pooled ticker FE failed: %s", e)
+
+    # ── Spec 4: Political with post-2023 interaction ──────────────────
+    if (len(pol) >= 30 and pol['POST_2023'].sum() >= 20 and
+            (1 - pol['POST_2023']).sum() >= 20):
+        _run_lpm(pol, 'POLITICAL_POST2023',
+                 ['LOG_TV', 'POST_2023', 'LOG_TV_x_POST2023', 'IS_BUY'],
+                 regression_rows)
+
+    # ── Spec 5: Ticker FE via PanelOLS (proper DOF adjustment) ─────────
+    # Includes year dummies for consistency with other specs
+    if len(pol) >= 50 and pol['TICKER'].nunique() >= 10:
+        fe_x_cols = ['LOG_TV', 'IS_BUY']
+        # Include year dummies (same as other specs)
+        yr_fe_cols = [c for c in year_dummy_cols
+                      if c in pol.columns and pol[c].nunique() > 1]
+        all_fe_x = fe_x_cols + yr_fe_cols
+        pol_fe = pol[['TICKER', 'TRADE_DATE', 'PROFITABLE_30'] + all_fe_x].dropna().copy()
+        # Need unique (entity, time) index — use trade-level row ID as time
+        pol_fe = pol_fe.reset_index(drop=True)
+        pol_fe['_row_id'] = range(len(pol_fe))
+        try:
+            from linearmodels.panel import PanelOLS as _PanelOLS
+            pol_fe_idx = pol_fe.set_index(['TICKER', '_row_id'])
+            y_fe = pol_fe_idx['PROFITABLE_30']
+            X_fe = pol_fe_idx[all_fe_x].astype(float)
+            model = _PanelOLS(y_fe, X_fe, entity_effects=True).fit(
+                cov_type='clustered', cluster_entity=True
+            )
+            # Report main variables only (not year dummies)
+            for var in fe_x_cols:
+                regression_rows.append({
+                    'SPECIFICATION': 'POLITICAL_TICKER_FE',
+                    'VARIABLE': var,
+                    'COEFFICIENT': model.params.get(var, np.nan),
+                    'STD_ERROR': model.std_errors.get(var, np.nan),
+                    'T_STAT': model.tstats.get(var, np.nan),
+                    'P_VALUE': model.pvalues.get(var, np.nan),
+                    'N_OBS': int(model.nobs),
+                    'R_SQUARED': model.rsquared_within,
+                })
+        except Exception as e:
+            logger.warning("  PanelOLS ticker FE failed: %s", e)
+
+    # ── Spec 5b: Control ticker FE (symmetric to POLITICAL_TICKER_FE) ─
+    # If CONTROL_TICKER_FE β >> POLITICAL_TICKER_FE β, you have a
+    # within-firm reversal.  If they're similar, the pooled flattening
+    # is between-firm composition.
+    if len(ctrl) >= 50 and ctrl['TICKER'].nunique() >= 10:
+        fe_x_cols = ['LOG_TV', 'IS_BUY']
+        yr_fe_cols = [c for c in year_dummy_cols
+                      if c in ctrl.columns and ctrl[c].nunique() > 1]
+        all_fe_x = fe_x_cols + yr_fe_cols
+        ctrl_fe = ctrl[['TICKER', 'TRADE_DATE', 'PROFITABLE_30'] + all_fe_x].dropna().copy()
+        ctrl_fe = ctrl_fe.reset_index(drop=True)
+        ctrl_fe['_row_id'] = range(len(ctrl_fe))
+        try:
+            from linearmodels.panel import PanelOLS as _PanelOLS
+            ctrl_fe_idx = ctrl_fe.set_index(['TICKER', '_row_id'])
+            y_fe = ctrl_fe_idx['PROFITABLE_30']
+            X_fe = ctrl_fe_idx[all_fe_x].astype(float)
+            model = _PanelOLS(y_fe, X_fe, entity_effects=True).fit(
+                cov_type='clustered', cluster_entity=True
+            )
+            for var in fe_x_cols:
+                regression_rows.append({
+                    'SPECIFICATION': 'CONTROL_TICKER_FE',
+                    'VARIABLE': var,
+                    'COEFFICIENT': model.params.get(var, np.nan),
+                    'STD_ERROR': model.std_errors.get(var, np.nan),
+                    'T_STAT': model.tstats.get(var, np.nan),
+                    'P_VALUE': model.pvalues.get(var, np.nan),
+                    'N_OBS': int(model.nobs),
+                    'R_SQUARED': model.rsquared_within,
+                })
+        except Exception as e:
+            logger.warning("  PanelOLS control ticker FE failed: %s", e)
+
+    # ── Spec 6: P/S-only robustness (exclude mechanical codes F, A, M) ──
+    # Mechanical trades (F=tax withholding, A=grant, M=exercise) are bigger
+    # on average and less informationally accurate by construction.  If the
+    # reversal survives on discretionary Purchase/Sale codes only, it's not
+    # an artifact of trade-code definition.
+    if 'TRANSACTION_CODE' in pol.columns:
+        ps_only = pol[pol['TRANSACTION_CODE'].isin(['P', 'S'])]
+        if len(ps_only) >= 30:
+            _run_lpm(ps_only, 'POLITICAL_PS_ONLY',
+                     ['LOG_TV', 'IS_BUY'], regression_rows)
+            logger.info("  Spec 6 (P/S-only): %d discretionary trades "
+                        "(of %d total)", len(ps_only), len(pol))
+        else:
+            logger.info("  Spec 6 (P/S-only): only %d discretionary trades — "
+                        "skipped (need ≥30)", len(ps_only))
+    else:
+        logger.info("  Spec 6 (P/S-only): TRANSACTION_CODE not available — skipped")
+
+    # Control-side P/S-only for symmetric comparison
+    if 'TRANSACTION_CODE' in ctrl.columns:
+        ctrl_ps = ctrl[ctrl['TRANSACTION_CODE'].isin(['P', 'S'])]
+        if len(ctrl_ps) >= 30:
+            _run_lpm(ctrl_ps, 'CONTROL_PS_ONLY',
+                     ['LOG_TV', 'IS_BUY'], regression_rows)
+            logger.info("  Spec 6 control (P/S-only): %d discretionary trades "
+                        "(of %d total)", len(ctrl_ps), len(ctrl))
+        else:
+            logger.info("  Spec 6 control (P/S-only): only %d trades — "
+                        "skipped (need ≥30)", len(ctrl_ps))
+
+    reversal_regression = pd.DataFrame(regression_rows)
+
+    logger.info("  §12 complete: %d accuracy rows, %d slope rows, "
+                "%d regression rows, %d control trades",
+                len(size_accuracy), len(size_accuracy_slopes),
+                len(reversal_regression), len(control))
+
+    return size_accuracy, size_accuracy_slopes, reversal_regression, control
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §12b INFORMED TRADING TEST (HEADLINE)
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_informed_trading_test(panel, crsp_profits, control_trades):
+    """Headline test: do insiders trade on advance knowledge of political decisions?
+
+    Uses event-window CAR (panel CAR_POST) to define event-profitability,
+    avoiding the mechanical overlap between trade-window CARs and event
+    windows for trades near the event date.
+
+    A trade is "event-profitable" if:
+      - Sell and CAR_POST < 0 (sold before price drop)
+      - Buy and CAR_POST > 0 (bought before price rise)
+
+    Returns (informed_trading, informed_proximity, informed_dollars).
+    """
+    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if crsp_profits is None or crsp_profits.empty:
+        logger.warning("  No CRSP profits for informed trading test")
+        return empty
+
+    # ── Merge event-level CAR and EVENT_DATE onto trades ──────────────
+    event_info = panel[['EVENT_ID', 'EVENT_DATE', 'CAR_POST']].copy()
+    event_info = event_info.rename(columns={
+        'EVENT_DATE': 'EVENT_DATE_PANEL',
+        'CAR_POST': 'EVENT_CAR',
+    })
+
+    pol = crsp_profits.merge(event_info, on='EVENT_ID', how='left')
+    pol['EVENT_DATE_PANEL'] = pd.to_datetime(pol['EVENT_DATE_PANEL'])
+    pol['TRADE_DATE'] = pd.to_datetime(pol['TRADE_DATE'])
+
+    # Compute proximity
+    pol['DAYS_BEFORE_EVENT'] = (pol['EVENT_DATE_PANEL'] - pol['TRADE_DATE']).dt.days
+
+    # Event-profitability (uses EVENT CAR, not trade-window CAR)
+    pol['EVENT_CAR'] = pd.to_numeric(pol['EVENT_CAR'], errors='coerce')
+    has_event_car = pol['EVENT_CAR'].notna()
+    pol['EVENT_PROFITABLE'] = np.nan
+    pol.loc[has_event_car & (pol['TRADE_TYPE'] == 'sell'),
+            'EVENT_PROFITABLE'] = (pol.loc[has_event_car & (pol['TRADE_TYPE'] == 'sell'),
+                                           'EVENT_CAR'] < 0).astype(float)
+    pol.loc[has_event_car & (pol['TRADE_TYPE'] == 'buy'),
+            'EVENT_PROFITABLE'] = (pol.loc[has_event_car & (pol['TRADE_TYPE'] == 'buy'),
+                                           'EVENT_CAR'] > 0).astype(float)
+
+    # Event-level signed profit: CAR_event * trade_value (direction-adjusted)
+    pol['EVENT_PROFIT'] = np.where(
+        pol['TRADE_TYPE'] == 'sell',
+        -pol['EVENT_CAR'] * pol['TRADE_VALUE'],  # sell profits when CAR < 0
+        pol['EVENT_CAR'] * pol['TRADE_VALUE'],   # buy profits when CAR > 0
     )
 
-    rows = []
+    valid_pol = pol[pol['EVENT_PROFITABLE'].notna()].copy()
+    logger.info("  Informed trading test: %d political trades with event CAR "
+                "(of %d total)", len(valid_pol), len(crsp_profits))
 
-    # Aggregate: do buys decrease before CW events?
-    abn_buy = treatment['ABN_BUY'].dropna()
-    if len(abn_buy) > 1:
-        t_stat, t_p = stats.ttest_1samp(abn_buy, 0)
-        d = abn_buy.mean() / abn_buy.std() if abn_buy.std() > 0 else 0
-        rows.append({
-            'TEST': 'ABN_BUY_VS_ZERO',
-            'LEAN': 'ALL',
-            'N': len(abn_buy),
-            'MEAN_ABN_BUY': abn_buy.mean(),
-            'COHEN_D': d,
-            'T_STAT': t_stat,
-            'P_VALUE': t_p,
-        })
+    # ── Helper: summarize a subset ────────────────────────────────────
+    def _summarize(sub, label, sample='POLITICAL'):
+        n = len(sub)
+        if n < 5:
+            return None
+        pct = sub['EVENT_PROFITABLE'].mean()
+        n_prof = int(sub['EVENT_PROFITABLE'].sum())
+        binom_p = stats.binomtest(n_prof, n, 0.5).pvalue
+        sp = sub['EVENT_PROFIT'].dropna()
+        tv = sub['TRADE_VALUE'].dropna()
+        return {
+            'CUT': label,
+            'SAMPLE': sample,
+            'METRIC_TYPE': 'PROPORTION',
+            'N_TRADES': n,
+            'METRIC_VALUE': pct,
+            'METRIC_PVAL': binom_p,
+            'MEAN_TRADE_VALUE': tv.mean() if len(tv) > 0 else np.nan,
+            'MEAN_EVENT_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+            'TOTAL_EVENT_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+            'MEAN_EVENT_CAR': sub['EVENT_CAR'].mean()
+            if 'EVENT_CAR' in sub.columns and sub['EVENT_CAR'].notna().any()
+            else np.nan,
+        }
 
-    # By leaning
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        lean_sub = treatment[treatment['ESTIMATED_POLITICAL_LEANING'] == lean]
-        abn = lean_sub['ABN_BUY'].dropna()
-        if len(abn) > 1:
-            t_s, t_p = stats.ttest_1samp(abn, 0)
-            d = abn.mean() / abn.std() if abn.std() > 0 else 0
-            rows.append({
-                'TEST': 'ABN_BUY_VS_ZERO',
-                'LEAN': lean,
-                'N': len(abn),
-                'MEAN_ABN_BUY': abn.mean(),
-                'COHEN_D': d,
-                'T_STAT': t_s,
-                'P_VALUE': t_p,
+    # ── Table 1: INFORMED_TRADING — headline summary by cut ──────────
+    summary_rows = []
+
+    # All pre-event trades
+    r = _summarize(valid_pol, 'ALL')
+    if r:
+        summary_rows.append(r)
+
+    # By direction
+    sells = valid_pol[valid_pol['TRADE_TYPE'] == 'sell']
+    buys = valid_pol[valid_pol['TRADE_TYPE'] == 'buy']
+    for sub, label in [(sells, 'SELLS_ONLY'), (buys, 'BUYS_ONLY')]:
+        r = _summarize(sub, label)
+        if r:
+            summary_rows.append(r)
+
+    # Control sample comparison (uses trade-window CAR, not event CAR)
+    if control_trades is not None and not control_trades.empty:
+        ctrl = control_trades[control_trades['PROFITABLE_30'].notna()].copy()
+        if len(ctrl) >= 5:
+            n_ctrl = len(ctrl)
+            pct_ctrl = ctrl['PROFITABLE_30'].mean()
+            n_prof_ctrl = int(ctrl['PROFITABLE_30'].sum())
+            binom_ctrl = stats.binomtest(n_prof_ctrl, n_ctrl, 0.5).pvalue
+            summary_rows.append({
+                'CUT': 'ALL', 'SAMPLE': 'CONTROL',
+                'METRIC_TYPE': 'PROPORTION',
+                'N_TRADES': n_ctrl,
+                'METRIC_VALUE': pct_ctrl,
+                'METRIC_PVAL': binom_ctrl,
+                'MEAN_TRADE_VALUE': ctrl['TRADE_VALUE'].mean(),
+                'MEAN_EVENT_PROFIT': np.nan,
+                'TOTAL_EVENT_PROFIT': np.nan,
+                'MEAN_EVENT_CAR': np.nan,
+            })
+            # Control by direction
+            for ttype, label in [('sell', 'SELLS_ONLY'), ('buy', 'BUYS_ONLY')]:
+                csub = ctrl[ctrl['TRADE_TYPE'] == ttype]
+                if len(csub) >= 5:
+                    n_cs = len(csub)
+                    pct_cs = csub['PROFITABLE_30'].mean()
+                    summary_rows.append({
+                        'CUT': label, 'SAMPLE': 'CONTROL',
+                        'METRIC_TYPE': 'PROPORTION',
+                        'N_TRADES': n_cs,
+                        'METRIC_VALUE': pct_cs,
+                        'METRIC_PVAL': stats.binomtest(
+                            int(csub['PROFITABLE_30'].sum()), n_cs, 0.5
+                        ).pvalue,
+                        'MEAN_TRADE_VALUE': csub['TRADE_VALUE'].mean(),
+                        'MEAN_EVENT_PROFIT': np.nan,
+                        'TOTAL_EVENT_PROFIT': np.nan,
+                        'MEAN_EVENT_CAR': np.nan,
+                    })
+
+    # Political vs control difference (sells)
+    pol_sell_pct = sells['EVENT_PROFITABLE'].mean() if len(sells) >= 5 else np.nan
+    if (control_trades is not None and not control_trades.empty):
+        ctrl_sells = control_trades[
+            (control_trades['TRADE_TYPE'] == 'sell') &
+            control_trades['PROFITABLE_30'].notna()
+        ]
+        ctrl_sell_pct = ctrl_sells['PROFITABLE_30'].mean() if len(ctrl_sells) >= 5 else np.nan
+        if not np.isnan(pol_sell_pct) and not np.isnan(ctrl_sell_pct):
+            premium = pol_sell_pct - ctrl_sell_pct
+            # Two-proportion z-test
+            n1, n2 = len(sells), len(ctrl_sells)
+            p_pool = (sells['EVENT_PROFITABLE'].sum() + ctrl_sells['PROFITABLE_30'].sum()) / (n1 + n2)
+            se = np.sqrt(p_pool * (1 - p_pool) * (1/n1 + 1/n2))
+            z = premium / se if se > 0 else np.nan
+            z_pval = 2 * (1 - stats.norm.cdf(abs(z))) if not np.isnan(z) else np.nan
+            summary_rows.append({
+                'CUT': 'SELLS_PREMIUM', 'SAMPLE': 'DIFFERENCE',
+                'METRIC_TYPE': 'DIFFERENCE',
+                'N_TRADES': n1 + n2,
+                'METRIC_VALUE': premium,
+                'METRIC_PVAL': z_pval,
+                'MEAN_TRADE_VALUE': np.nan,
+                'MEAN_EVENT_PROFIT': np.nan,
+                'TOTAL_EVENT_PROFIT': np.nan,
+                'MEAN_EVENT_CAR': np.nan,
             })
 
-    # Correlation between sell increase and buy decrease
-    valid = treatment[['ABN_SELL', 'ABN_BUY']].dropna()
-    if len(valid) >= 10:
-        corr, corr_p = stats.pearsonr(valid['ABN_SELL'], valid['ABN_BUY'])
-        rows.append({
-            'TEST': 'SELL_BUY_CORRELATION',
-            'LEAN': 'ALL',
-            'N': len(valid),
-            'MEAN_ABN_BUY': corr,
-            'T_STAT': corr_p,
-            'P_VALUE': corr_p,
-            'COHEN_D': np.nan,
-        })
-
-    # By leaning: sell-buy asymmetry
-    for lean in treatment['ESTIMATED_POLITICAL_LEANING'].dropna().unique():
-        lean_sub = treatment[treatment['ESTIMATED_POLITICAL_LEANING'] == lean].dropna(
-            subset=['ABN_SELL', 'ABN_BUY'])
-        if len(lean_sub) >= 5:
-            rows.append({
-                'TEST': 'SELL_BUY_ASYMMETRY',
-                'LEAN': lean,
-                'N': len(lean_sub),
-                'MEAN_ABN_BUY': lean_sub['ABN_BUY'].mean(),
-                'COHEN_D': lean_sub['ABN_SELL'].mean(),  # store sell for comparison
-                'T_STAT': np.nan,
-                'P_VALUE': np.nan,
+    # Apples-to-apples comparison using trade-window CAR_30 for both samples
+    if ('PROFITABLE_30' in crsp_profits.columns and
+            control_trades is not None and not control_trades.empty):
+        pol_sells_pt = crsp_profits[
+            (crsp_profits['TRADE_TYPE'] == 'sell') &
+            crsp_profits['PROFITABLE_30'].notna()
+        ]
+        ctrl_sells_pt = control_trades[
+            (control_trades['TRADE_TYPE'] == 'sell') &
+            control_trades['PROFITABLE_30'].notna()
+        ]
+        if len(pol_sells_pt) >= 5 and len(ctrl_sells_pt) >= 5:
+            pct_pol = pol_sells_pt['PROFITABLE_30'].mean()
+            pct_ctrl = ctrl_sells_pt['PROFITABLE_30'].mean()
+            premium_pt = pct_pol - pct_ctrl
+            n1, n2 = len(pol_sells_pt), len(ctrl_sells_pt)
+            p_pool = (pol_sells_pt['PROFITABLE_30'].sum()
+                      + ctrl_sells_pt['PROFITABLE_30'].sum()) / (n1 + n2)
+            se = np.sqrt(p_pool * (1 - p_pool) * (1/n1 + 1/n2))
+            z = premium_pt / se if se > 0 else np.nan
+            z_p = 2 * (1 - stats.norm.cdf(abs(z))) if not np.isnan(z) else np.nan
+            summary_rows.append({
+                'CUT': 'SELLS_PREMIUM_TRADE_CAR', 'SAMPLE': 'DIFFERENCE',
+                'METRIC_TYPE': 'DIFFERENCE',
+                'N_TRADES': n1 + n2,
+                'METRIC_VALUE': premium_pt,
+                'METRIC_PVAL': z_p,
+                'MEAN_TRADE_VALUE': np.nan,
+                'MEAN_EVENT_PROFIT': np.nan,
+                'TOTAL_EVENT_PROFIT': np.nan,
+                'MEAN_EVENT_CAR': np.nan,
             })
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        agg = df[(df['TEST'] == 'ABN_BUY_VS_ZERO') & (df['LEAN'] == 'ALL')]
-        if not agg.empty:
-            logger.info("  Aggregate abnormal buy: mean=$%.0f/day, d=%.3f, p=%.4f",
-                        agg.iloc[0]['MEAN_ABN_BUY'], agg.iloc[0]['COHEN_D'],
-                        agg.iloc[0]['P_VALUE'])
-    return df
+    # By regulatory period (min 30 trades for meaningful inference)
+    for period in sorted(valid_pol['REGULATORY_PERIOD'].dropna().unique()):
+        sub = valid_pol[valid_pol['REGULATORY_PERIOD'] == period]
+        if len(sub) >= 30:
+            r = _summarize(sub, f'REG:{period}')
+            if r:
+                summary_rows.append(r)
+        # Sells only by period
+        sub_sells = sub[sub['TRADE_TYPE'] == 'sell']
+        if len(sub_sells) >= 30:
+            r = _summarize(sub_sells, f'REG_SELLS:{period}')
+            if r:
+                summary_rows.append(r)
+
+    # Control by regulatory period (for within-period comparison)
+    if control_trades is not None and not control_trades.empty:
+        ctrl_valid = control_trades[control_trades['PROFITABLE_30'].notna()].copy()
+        if len(ctrl_valid) > 0:
+            ctrl_valid['TRADE_DATE'] = pd.to_datetime(ctrl_valid['TRADE_DATE'])
+            ctrl_valid['REG_PERIOD'] = ctrl_valid['TRADE_DATE'].apply(
+                _assign_regulatory_period)
+            for period in sorted(ctrl_valid['REG_PERIOD'].unique()):
+                csub = ctrl_valid[ctrl_valid['REG_PERIOD'] == period]
+                if len(csub) >= 30:
+                    pct = csub['PROFITABLE_30'].mean()
+                    n_p = int(csub['PROFITABLE_30'].sum())
+                    summary_rows.append({
+                        'CUT': f'REG:{period}', 'SAMPLE': 'CONTROL',
+                        'METRIC_TYPE': 'PROPORTION',
+                        'N_TRADES': len(csub),
+                        'METRIC_VALUE': pct,
+                        'METRIC_PVAL': stats.binomtest(n_p, len(csub), 0.5).pvalue,
+                        'MEAN_TRADE_VALUE': csub['TRADE_VALUE'].mean(),
+                        'MEAN_EVENT_PROFIT': np.nan,
+                        'TOTAL_EVENT_PROFIT': np.nan,
+                        'MEAN_EVENT_CAR': np.nan,
+                    })
+                # Control sells by period
+                csub_sells = csub[csub['TRADE_TYPE'] == 'sell']
+                if len(csub_sells) >= 30:
+                    pct = csub_sells['PROFITABLE_30'].mean()
+                    n_p = int(csub_sells['PROFITABLE_30'].sum())
+                    summary_rows.append({
+                        'CUT': f'REG_SELLS:{period}', 'SAMPLE': 'CONTROL',
+                        'METRIC_TYPE': 'PROPORTION',
+                        'N_TRADES': len(csub_sells),
+                        'METRIC_VALUE': pct,
+                        'METRIC_PVAL': stats.binomtest(
+                            n_p, len(csub_sells), 0.5).pvalue,
+                        'MEAN_TRADE_VALUE': csub_sells['TRADE_VALUE'].mean(),
+                        'MEAN_EVENT_PROFIT': np.nan,
+                        'TOTAL_EVENT_PROFIT': np.nan,
+                        'MEAN_EVENT_CAR': np.nan,
+                    })
+
+    # By event category
+    for cat in valid_pol['EVENT_CATEGORY'].dropna().unique():
+        sub = valid_pol[valid_pol['EVENT_CATEGORY'] == cat]
+        r = _summarize(sub, f'CAT:{cat}')
+        if r:
+            summary_rows.append(r)
+
+    # Year distribution for diagnostic
+    valid_pol['YEAR'] = valid_pol['TRADE_DATE'].dt.year
+    for year in sorted(valid_pol['YEAR'].unique()):
+        sub = valid_pol[valid_pol['YEAR'] == year]
+        r = _summarize(sub, f'YEAR:{year}')
+        if r:
+            summary_rows.append(r)
+
+    informed_trading = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
+
+    # ── Table 2: INFORMED_PROXIMITY — by days-before-event window ────
+    proximity_rows = []
+    windows = [(0, 30), (31, 60), (61, 90), (91, 180)]
+    for w_start, w_end in windows:
+        sub = valid_pol[
+            (valid_pol['DAYS_BEFORE_EVENT'] >= w_start) &
+            (valid_pol['DAYS_BEFORE_EVENT'] <= w_end)
+        ]
+        label = f'{w_start}-{w_end}d'
+        r = _summarize(sub, label)
+        if r:
+            r['WINDOW_START'] = w_start
+            r['WINDOW_END'] = w_end
+            proximity_rows.append(r)
+        # Sells only
+        sub_sells = sub[sub['TRADE_TYPE'] == 'sell']
+        r = _summarize(sub_sells, f'{label}_SELLS')
+        if r:
+            r['WINDOW_START'] = w_start
+            r['WINDOW_END'] = w_end
+            proximity_rows.append(r)
+        # Buys only
+        sub_buys = sub[sub['TRADE_TYPE'] == 'buy']
+        r = _summarize(sub_buys, f'{label}_BUYS')
+        if r:
+            r['WINDOW_START'] = w_start
+            r['WINDOW_END'] = w_end
+            proximity_rows.append(r)
+
+    # Control reference rows (no event date, so unconditional baseline)
+    if control_trades is not None and not control_trades.empty:
+        ctrl_valid = control_trades[control_trades['PROFITABLE_30'].notna()].copy()
+        for ttype, suffix in [('sell', '_SELLS'), ('buy', '_BUYS'), (None, '')]:
+            csub = ctrl_valid if ttype is None else ctrl_valid[ctrl_valid['TRADE_TYPE'] == ttype]
+            if len(csub) >= 5:
+                pct = csub['PROFITABLE_30'].mean()
+                n_p = int(csub['PROFITABLE_30'].sum())
+                proximity_rows.append({
+                    'CUT': f'CONTROL_ALL{suffix}',
+                    'SAMPLE': 'CONTROL',
+                    'METRIC_TYPE': 'PROPORTION',
+                    'N_TRADES': len(csub),
+                    'METRIC_VALUE': pct,
+                    'METRIC_PVAL': stats.binomtest(n_p, len(csub), 0.5).pvalue,
+                    'MEAN_TRADE_VALUE': csub['TRADE_VALUE'].mean(),
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': np.nan,
+                    'WINDOW_START': 0,
+                    'WINDOW_END': 180,
+                })
+
+    informed_proximity = pd.DataFrame(proximity_rows) if proximity_rows else pd.DataFrame()
+
+    # ── Table 3: INFORMED_DOLLARS — by severity and proximity ────────
+    dollar_rows = []
+
+    # Sells by proximity window (dollar magnitudes)
+    for w_start, w_end in windows:
+        sub_sells = valid_pol[
+            (valid_pol['TRADE_TYPE'] == 'sell') &
+            (valid_pol['DAYS_BEFORE_EVENT'] >= w_start) &
+            (valid_pol['DAYS_BEFORE_EVENT'] <= w_end)
+        ]
+        if len(sub_sells) >= 5:
+            sp = sub_sells['EVENT_PROFIT'].dropna()
+            dollar_rows.append({
+                'CUT': f'SELLS_{w_start}-{w_end}d',
+                'N_SELLS': len(sub_sells),
+                'MEAN_EVENT_CAR': sub_sells['EVENT_CAR'].mean(),
+                'MEAN_TRADE_VALUE': sub_sells['TRADE_VALUE'].mean(),
+                'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+                'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+                'METRIC_VALUE': sub_sells['EVENT_PROFITABLE'].mean(),
+            })
+
+    # Sells before events with negative CARs (severity cuts)
+    for car_threshold in [-0.05, -0.10, -0.15]:
+        for w_start, w_end in [(0, 30), (0, 60), (0, 180)]:
+            sub = valid_pol[
+                (valid_pol['TRADE_TYPE'] == 'sell') &
+                (valid_pol['EVENT_CAR'] <= car_threshold) &
+                (valid_pol['DAYS_BEFORE_EVENT'] >= w_start) &
+                (valid_pol['DAYS_BEFORE_EVENT'] <= w_end)
+            ]
+            if len(sub) >= 5:
+                sp = sub['EVENT_PROFIT'].dropna()
+                dollar_rows.append({
+                    'CUT': f'SELLS_{w_start}-{w_end}d_CAR<={int(car_threshold*100)}pct',
+                    'N_SELLS': len(sub),
+                    'MEAN_EVENT_CAR': sub['EVENT_CAR'].mean(),
+                    'MEAN_TRADE_VALUE': sub['TRADE_VALUE'].mean(),
+                    'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+                    'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+                    # PCT_EVENT_PROFITABLE omitted: mechanically 1.0
+                    # (sells with CAR ≤ threshold < 0 are always event-profitable)
+                    'METRIC_VALUE': np.nan,
+                })
+
+    # Aggregate totals
+    all_sells = valid_pol[valid_pol['TRADE_TYPE'] == 'sell']
+    if len(all_sells) >= 5:
+        sp = all_sells['EVENT_PROFIT'].dropna()
+        # Restrict to directionally-correct sells for "informed profit" total
+        correct_sells = all_sells[all_sells['EVENT_PROFITABLE'] == 1.0]
+        correct_sp = correct_sells['EVENT_PROFIT'].dropna()
+        dollar_rows.append({
+            'CUT': 'ALL_SELLS_TOTAL',
+            'N_SELLS': len(all_sells),
+            'MEAN_EVENT_CAR': all_sells['EVENT_CAR'].mean(),
+            'MEAN_TRADE_VALUE': all_sells['TRADE_VALUE'].mean(),
+            'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+            'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+            'METRIC_VALUE': all_sells['EVENT_PROFITABLE'].mean(),
+        })
+        if len(correct_sells) >= 5:
+            dollar_rows.append({
+                'CUT': 'CORRECT_SELLS_TOTAL',
+                'N_SELLS': len(correct_sells),
+                'MEAN_EVENT_CAR': correct_sells['EVENT_CAR'].mean(),
+                'MEAN_TRADE_VALUE': correct_sells['TRADE_VALUE'].mean(),
+                'MEAN_PROFIT': correct_sp.mean() if len(correct_sp) > 0 else np.nan,
+                'TOTAL_PROFIT': correct_sp.sum() if len(correct_sp) > 0 else np.nan,
+                'METRIC_VALUE': np.nan,  # mechanically 1.0 by definition
+            })
+
+    informed_dollars = pd.DataFrame(dollar_rows) if dollar_rows else pd.DataFrame()
+
+    logger.info("  Informed trading test complete: %d summary rows, "
+                "%d proximity rows, %d dollar rows",
+                len(informed_trading), len(informed_proximity),
+                len(informed_dollars))
+
+    return informed_trading, informed_proximity, informed_dollars
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# SAVE RESULTS
-# ═══════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════
+# CARRIED-FORWARD ROBUSTNESS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_tost_equivalence(panel):
+    """TOST equivalence tests for both categories."""
+    if panel.empty:
+        return pd.DataFrame()
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1]
+    dv = 'ABNORMAL_NET_TRADING'
+    results = []
+    for cat in ['CULTURAL', 'FUNDAMENTAL']:
+        vals = df.loc[df['EVENT_CATEGORY'] == cat, dv].dropna()
+        if len(vals) >= 10:
+            t = _compute_tost(vals, SESOI_D)
+            t.update({'EVENT_CATEGORY': cat, 'TEST': 'TOST'})
+            results.append(t)
+    matched_fund = df[(df['EVENT_CATEGORY'] == 'FUNDAMENTAL') &
+                      (df['MATCHED'] == True)]  # noqa: E712
+    vals = matched_fund[dv].dropna()
+    if len(vals) >= 10:
+        t = _compute_tost(vals, SESOI_D)
+        t.update({'EVENT_CATEGORY': 'FUNDAMENTAL_MATCHED', 'TEST': 'TOST'})
+        results.append(t)
+    return pd.DataFrame(results)
+
+
+def compute_placebo_test(panel, n_iterations=500, seed=42):
+    """Permutation test: shuffle event category labels."""
+    if panel.empty:
+        return pd.DataFrame()
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1]
+    dv = 'ABNORMAL_NET_TRADING'
+    fund = df.loc[df['EVENT_CATEGORY'] == 'FUNDAMENTAL', dv].dropna()
+    cult = df.loc[df['EVENT_CATEGORY'] == 'CULTURAL', dv].dropna()
+    if len(fund) < 5 or len(cult) < 5:
+        return pd.DataFrame()
+    observed = fund.mean() - cult.mean()
+    rng = np.random.RandomState(seed)
+    all_vals = pd.concat([fund, cult]).values
+    n_fund = len(fund)
+    null_diffs = np.array([
+        (lambda s: s[:n_fund].mean() - s[n_fund:].mean())(rng.permutation(all_vals))
+        for _ in range(n_iterations)
+    ])
+    p_value = (np.abs(null_diffs) >= np.abs(observed)).mean()
+    return pd.DataFrame([{
+        'TEST': 'PLACEBO_PERMUTATION',
+        'OBSERVED_DIFF': observed, 'NULL_MEAN': null_diffs.mean(),
+        'NULL_STD': null_diffs.std(), 'P_VALUE': p_value,
+        'N_ITERATIONS': n_iterations,
+        'CI_2_5': np.percentile(null_diffs, 2.5),
+        'CI_97_5': np.percentile(null_diffs, 97.5),
+    }])
+
+
+def compute_bootstrap_ci(panel, n_bootstrap=1000, seed=42):
+    """Bootstrap confidence intervals for the fundamental-cultural contrast."""
+    if panel.empty:
+        return pd.DataFrame()
+    df = panel[panel['HAS_SUFFICIENT_DATA'] == 1]
+    dv = 'ABNORMAL_NET_TRADING'
+    fund = df.loc[df['EVENT_CATEGORY'] == 'FUNDAMENTAL', dv].dropna().values
+    cult = df.loc[df['EVENT_CATEGORY'] == 'CULTURAL', dv].dropna().values
+    if len(fund) < 5 or len(cult) < 5:
+        return pd.DataFrame()
+    rng = np.random.RandomState(seed)
+    boot_diffs = np.array([
+        rng.choice(fund, len(fund), replace=True).mean() -
+        rng.choice(cult, len(cult), replace=True).mean()
+        for _ in range(n_bootstrap)
+    ])
+    observed = fund.mean() - cult.mean()
+    return pd.DataFrame([{
+        'TEST': 'BOOTSTRAP_CI', 'OBSERVED_DIFF': observed,
+        'BOOT_MEAN': boot_diffs.mean(), 'BOOT_STD': boot_diffs.std(),
+        'CI_2_5': np.percentile(boot_diffs, 2.5),
+        'CI_97_5': np.percentile(boot_diffs, 97.5),
+        'CI_5': np.percentile(boot_diffs, 5),
+        'CI_95': np.percentile(boot_diffs, 95),
+        'N_BOOTSTRAP': n_bootstrap,
+        'ZERO_IN_95CI': int(np.percentile(boot_diffs, 2.5) <= 0 <= np.percentile(boot_diffs, 97.5)),
+    }])
+
+
+# ═════════════════════════════════════════════════════════════════════
+# RESULTS PERSISTENCE
+# ═════════════════════════════════════════════════════════════════════
 
 def save_essay3_results(store, results_dict):
-    """Save all Essay 3 tables to the database."""
-    timestamp = pd.Timestamp.now().isoformat() + 'Z'
-    tables = {
-        'ESSAY3_INSIDER_PANEL': results_dict.get('panel'),
-        'ESSAY3_WINDOW_SUMMARY': results_dict.get('window_summary'),
-        'ESSAY3_ABNORMAL_SELLING': results_dict.get('abnormal'),
-        'ESSAY3_TREATMENT_VS_CONTROL': results_dict.get('treatment_ctrl'),
-        'ESSAY3_LEANING_ANALYSIS': results_dict.get('leaning'),
-        'ESSAY3_REGIME_INTERACTION': results_dict.get('regime'),
-        'ESSAY3_ROUTINE_VS_OPPORTUNISTIC': results_dict.get('rvo'),
-        'ESSAY3_PLACEBO_TEST': results_dict.get('placebo'),
-        'ESSAY3_ACCELERATION_TEST': results_dict.get('accel'),
-        'ESSAY3_CAR_INSIDER_REGRESSION': results_dict.get('car_reg'),
-        'ESSAY3_INFORMATION_GRADIENT': results_dict.get('gradient'),
-        'ESSAY3_DIFF_IN_DIFF': results_dict.get('did'),
-        'ESSAY3_10B5_1_FILTER': results_dict.get('plan_filter'),
-        'ESSAY3_MATCH_QUALITY': results_dict.get('match_quality'),
-        'ESSAY3_EVENT_CLUSTERING': results_dict.get('event_clustering'),
-        'ESSAY3_INTENSIVE_EXTENSIVE': results_dict.get('margins'),
-        'ESSAY3_ABNORMAL_VOLUME_RATIO': results_dict.get('avr'),
-        'ESSAY3_FIRM_FIXED_EFFECTS': results_dict.get('firm_fe'),
-        'ESSAY3_CROSS_SECTIONAL': results_dict.get('cross_section'),
-        'ESSAY3_POST_EVENT_REVERSAL': results_dict.get('reversal'),
-        'ESSAY3_BOOTSTRAP_CI': results_dict.get('bootstrap'),
-        'ESSAY3_FAMA_MACBETH': results_dict.get('fama_macbeth'),
-        'ESSAY3_SHORT_SWING': results_dict.get('short_swing'),
-        'ESSAY3_TOST_EQUIVALENCE': results_dict.get('tost'),
-        'ESSAY3_SUBGROUP_ANALYSIS': results_dict.get('subgroup'),
-        'ESSAY3_VOL_SHIFT': results_dict.get('vol_shift'),
-        'ESSAY3_TAIL_FIRMS': results_dict.get('tail_firms'),
-        'ESSAY3_TAIL_LEANING': results_dict.get('tail_leaning'),
-        'ESSAY3_TAIL_EVENT_TYPE': results_dict.get('tail_event_type'),
-        'ESSAY3_TAIL_INTERACTION': results_dict.get('tail_interaction'),
-        'ESSAY3_CONS_PLANNED': results_dict.get('cons_planned'),
-        # Robustness extensions (29-38)
-        'ESSAY3_TAIL_LOGIT': results_dict.get('tail_logit'),
-        'ESSAY3_PROPENSITY_MATCH': results_dict.get('propensity_match'),
-        'ESSAY3_WINSORIZED_TAIL': results_dict.get('winsorized_tail'),
-        'ESSAY3_SIZE_STRATIFIED_TAIL': results_dict.get('size_stratified'),
-        'ESSAY3_INSIDER_LEVEL': results_dict.get('insider_level'),
-        'ESSAY3_TIME_SERIES_TAIL': results_dict.get('time_series_tail'),
-        'ESSAY3_PLACEBO_STRATIFIED': results_dict.get('placebo_stratified'),
-        'ESSAY3_WITHIN_FIRM_TEMPORAL': results_dict.get('within_firm_temporal'),
-        'ESSAY3_DISCLOSURE_CHANNEL': results_dict.get('disclosure_channel'),
-        'ESSAY3_BUY_ANALYSIS': results_dict.get('buy_analysis'),
+    """Save all Essay 3 results to database and drop orphaned tables."""
+    table_map = {
+        'panel': 'ESSAY3_PANEL',
+        'stratification': 'ESSAY3_STRATIFICATION',
+        'mean_vs_distributional': 'ESSAY3_MEAN_VS_DISTRIBUTIONAL',
+        'wilcoxon_family': 'ESSAY3_WILCOXON_FAMILY',
+        'insider_concentration': 'ESSAY3_INSIDER_CONCENTRATION',
+        'active_subset': 'ESSAY3_ACTIVE_SUBSET',
+        'quantile_regression': 'ESSAY3_QUANTILE_REGRESSION',
+        'trimmed_robustness': 'ESSAY3_TRIMMED_ROBUSTNESS',
+        'bootstrap_wilcoxon': 'ESSAY3_BOOTSTRAP_WILCOXON',
+        'insider_panel': 'ESSAY3_INSIDER_PANEL',
+        'concentration_cuts': 'ESSAY3_CONCENTRATION_CUTS',
+        'repeat_traders': 'ESSAY3_REPEAT_TRADERS',
+        'tost': 'ESSAY3_TOST',
+        'placebo': 'ESSAY3_PLACEBO',
+        'bootstrap_ci': 'ESSAY3_BOOTSTRAP_CI',
+        'crsp_profits': 'ESSAY3_CRSP_PROFITS',
+        'crsp_summary': 'ESSAY3_CRSP_SUMMARY',
+        'informed_trading': 'ESSAY3_INFORMED_TRADING',
+        'informed_proximity': 'ESSAY3_INFORMED_PROXIMITY',
+        'informed_dollars': 'ESSAY3_INFORMED_DOLLARS',
+        'size_accuracy': 'ESSAY3_SIZE_ACCURACY',
+        'size_accuracy_slopes': 'ESSAY3_SIZE_ACCURACY_SLOPES',
+        'reversal_regression': 'ESSAY3_REVERSAL_REGRESSION',
+        'control_trades': 'ESSAY3_CONTROL_TRADES',
     }
+    current_tables = set(table_map.values())
 
-    for table_name, df in tables.items():
-        if table_name == 'ESSAY3_INSIDER_PANEL' and df is not None:
-            mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
-            logger.info("  Panel size: %d rows x %d cols (%.1f MB in memory)",
-                        len(df), len(df.columns), mb)
-        if df is not None and not df.empty:
-            df = df.copy()
-            df['RUN_TIMESTAMP'] = timestamp
-            store.write_table(df, table_name, replace=True)
-            logger.info("  Saved %s: %d rows", table_name, len(df))
-        else:
-            logger.warning("  Skipped %s (empty)", table_name)
+    # Drop orphaned ESSAY3_* tables from prior schema versions
+    if store._conn is not None:
+        try:
+            cursor = store._conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ESSAY3_%'")
+            existing = {r[0] for r in cursor.fetchall()}
+            orphaned = existing - current_tables
+            for orphan in sorted(orphaned):
+                cursor.execute(f'DROP TABLE IF EXISTS "{orphan}"')
+                logger.info("  Dropped orphaned table: %s", orphan)
+            if orphaned:
+                store._conn.commit()
+        except Exception as e:
+            logger.warning("  Could not clean orphaned tables: %s", e)
+
+    for key, table_name in table_map.items():
+        df = results_dict.get(key)
+        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+            continue
+        if not isinstance(df, pd.DataFrame):
+            continue
+        try:
+            save_df = df.drop(columns=['DESCRIPTION'], errors='ignore') if key == 'panel' else df
+            store._loader.write_table(save_df, table_name, replace=True)
+            logger.info("  Saved %s: %d rows", table_name, len(save_df))
+        except Exception as e:
+            logger.warning("  Failed to save %s: %s", table_name, e)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# MAIN ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════
+# MAIN RUNNER
+# ═════════════════════════════════════════════════════════════════════
 
 def run_essay3(store=None):
-    """Run the complete Essay 3 insider trading analysis."""
+    """Run the complete Essay 3 analysis.
+
+    Informed Insider Trading Around Political Decisions: tests whether
+    insiders trade on advance knowledge of political decisions that move
+    firm equity values. Headline claim (§12b): pre-event sells are ~56%
+    directionally accurate vs ~53% in matched non-political windows,
+    with billions in aggregate informed-trading profits.
+
+    Supporting evidence: CG size-accuracy attenuation (§12), distributional
+    tests (§1-§11), concentration metrics, insider fixed effects.
+    """
     logger.info("=" * 60)
-    logger.info("  Essay 3: Insider Trading Around Culture War Events")
+    logger.info("  Essay 3: Informed Insider Trading Around Political Decisions")
+    logger.info("  Foreknowledge, Profits, and the Limits of Regulatory Architecture")
     logger.info("=" * 60)
 
-    # Connect to data
     if store is None:
         store = DataStore()
 
-    # Load Form 4 data
+    # Reset module-level caches for clean run
+    global _ticker_naics_map
+    _ticker_naics_map = None
+
+    # ── Load data ────────────────────────────────────────────────────
     form4 = _load_form4()
     if form4.empty:
-        logger.error("No Form 4 data available. Run the Form 4 downloader first.")
+        logger.error("No Form 4 data.")
         return
-
-    # Load events
-    events = store.events
-    if events.empty:
-        logger.error("No events data available.")
-        return
-
-    # Load CAR results from Event Study
-    car_df = store.read_table('EVENT_STUDY_RESULTS')
-
-    # Load VIX for regime analysis
-    vix_df = store.vix
-
-    # Load stock data for volume-based analyses
-    stock_data = store.stocks if hasattr(store, 'stocks') and store.stocks is not None else None
-
-    # Tag form4 with trade type for downstream analyses (short-swing, 10b5-1)
     form4['_trade_type'] = form4.apply(
         lambda r: _classify_trade(r['transaction_code'], r['acquired_disposed']),
         axis=1
     )
 
-    # 1. Build panel
-    panel = build_insider_panel(form4, events, car_df, vix_df)
+    culture_events = store.events
+    if culture_events.empty:
+        logger.error("No culture war events data.")
+        return
 
-    # 2. Window summary
-    logger.info("Computing window summary...")
-    window_summary = compute_window_summary(panel)
+    political_events = store.read_table('POLITICAL_EVENTS', parse_dates=['EVENT_DATE'])
+    if political_events.empty:
+        logger.warning("No political events data.")
 
-    # 3. Abnormal selling
-    logger.info("Computing abnormal selling tests...")
-    abnormal = compute_abnormal_selling(panel)
+    political_exposure = store.read_table('POLITICAL_EXPOSURE')
+    car_df = store.read_table('EVENT_STUDY_RESULTS')
 
-    # 4. Treatment vs control
-    logger.info("Computing treatment vs control regression...")
-    treatment_ctrl = compute_treatment_vs_control(panel)
+    # ── Compute CARs for fundamental political events ─────────────
+    car_df = _compute_fundamental_cars(
+        car_df, political_events, form4, store
+    )
 
-    # 5. Leaning analysis
-    logger.info("Computing leaning analysis...")
-    leaning = compute_leaning_analysis(panel)
+    # ── Build panel ──────────────────────────────────────────────────
+    panel = build_insider_panel(
+        form4, culture_events, political_events,
+        political_exposure, car_df, store=store,
+    )
+    if panel.empty:
+        logger.error("Panel is empty.")
+        return
 
-    # 6. Regime interaction
-    logger.info("Computing regime interaction...")
-    regime = compute_regime_interaction(panel, vix_df)
+    # ── §1 Mean vs Distributional (core table) ──────────────────────
+    logger.info("§1 Mean vs distributional analysis...")
+    mean_vs_dist = compute_mean_vs_distributional(panel)
 
-    # 7. Routine vs opportunistic
-    logger.info("Computing routine vs opportunistic...")
-    rvo = compute_routine_vs_opportunistic(panel)
+    # ── §2 Family-level Wilcoxon correction (GATING TEST) ───────────
+    logger.info("§2 Wilcoxon family correction (gating test)...")
+    wilcoxon_family = compute_wilcoxon_family(mean_vs_dist)
 
-    # 8. Placebo test
-    logger.info("Computing placebo permutation test...")
-    placebo = compute_placebo_test(panel)
+    n_bh = wilcoxon_family['BH_SIGNIFICANT'].sum() if not wilcoxon_family.empty else 0
+    n_holm = wilcoxon_family['HOLM_SIGNIFICANT'].sum() if not wilcoxon_family.empty else 0
+    logger.info("  GATING TEST: %d BH-significant, %d Holm-significant", n_bh, n_holm)
 
-    # 9. Acceleration test
-    logger.info("Computing acceleration tests...")
-    accel = compute_acceleration_test(panel)
+    # ── Pre-compute insider profits once (used by §3, §4, §8, §9, §10, §11) ──
+    logger.info("Pre-computing insider-level profits...")
+    df_with_data = panel[panel['HAS_SUFFICIENT_DATA'] == 1].copy()
+    insider_profits = _compute_insider_profits(df_with_data, form4)
 
-    # 10. CAR-insider regression
-    logger.info("Computing CAR-insider regression...")
-    car_reg = compute_car_insider_regression(panel)
+    # ── §3 Insider concentration ────────────────────────────────────
+    logger.info("§3 Insider concentration (Cziraki-Gider style)...")
+    insider_concentration = compute_insider_concentration(panel, form4, insider_profits=insider_profits)
 
-    # 11. Information gradient
-    logger.info("Computing information gradient...")
-    gradient = compute_information_gradient(panel)
+    # ── §4 Active subset characterization ───────────────────────────
+    logger.info("§4 Active subset characterization...")
+    active_subset = compute_active_subset(panel, form4, insider_profits=insider_profits)
 
-    # 12. Difference-in-differences
-    logger.info("Computing difference-in-differences...")
-    did = compute_diff_in_diff(panel)
+    # ── §5 Quantile regression ──────────────────────────────────────
+    logger.info("§5 Quantile regression...")
+    quantile_regression = compute_quantile_regression(panel)
 
-    # 13. 10b5-1 plan filter
-    logger.info("Computing 10b5-1 plan filter...")
-    plan_filter = compute_10b5_1_filter(panel, form4)
+    # ── §6 Trimmed robustness ───────────────────────────────────────
+    logger.info("§6 Trimmed robustness (1% and 5% tails)...")
+    trimmed_robustness = compute_trimmed_robustness(panel)
 
-    # 14. Match quality validation
-    logger.info("Computing match quality validation...")
-    match_quality = compute_match_quality(panel, events, stock_data)
+    # ── §7 Bootstrap Wilcoxon ───────────────────────────────────────
+    logger.info("§7 Bootstrap Wilcoxon inference...")
+    bootstrap_wilcoxon = compute_bootstrap_wilcoxon(panel)
 
-    # 15. Event clustering adjustment
-    logger.info("Computing event clustering adjustment...")
-    event_clustering = compute_event_clustering(panel)
+    # ── §8 Insider fixed effects ────────────────────────────────────
+    logger.info("§8 Insider fixed-effects panel...")
+    insider_panel_results = compute_insider_panel(panel, form4, insider_profits=insider_profits)
 
-    # 16. Intensive vs extensive margin
-    logger.info("Computing intensive vs extensive margin...")
-    margins = compute_intensive_extensive_margin(panel)
+    # ── §9 Concentration by dimension ───────────────────────────────
+    logger.info("§9 Concentration by dimension...")
+    concentration_cuts = compute_concentration_cuts(panel, form4, insider_profits=insider_profits)
 
-    # 17. Abnormal volume ratio
-    logger.info("Computing abnormal volume ratio...")
-    avr = compute_abnormal_volume_ratio(panel, stock_data)
+    # ── §10 Repeat traders ──────────────────────────────────────────
+    logger.info("§10 Repeat trader analysis...")
+    repeat_traders = compute_repeat_traders(panel, form4, insider_profits=insider_profits)
 
-    # 18. Firm fixed effects
-    logger.info("Computing firm fixed effects...")
-    firm_fe = compute_firm_fixed_effects(panel)
+    # ── §11 CRSP profit analysis ──────────────────────────────────────
+    logger.info("§11 CRSP profit analysis (forward-looking abnormal returns)...")
+    crsp_profits, crsp_summary = compute_crsp_profits(panel, form4, store, insider_profits=insider_profits)
 
-    # 19. Cross-sectional determinants
-    logger.info("Computing cross-sectional determinants...")
-    cross_section = compute_cross_sectional_determinants(panel, events)
+    # ── §12 CG size-accuracy attenuation (supporting) ─────────────────
+    logger.info("§12 CG size-accuracy attenuation (supporting evidence)...")
+    size_accuracy, size_accuracy_slopes, reversal_regression, control_trades = (
+        compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=crsp_profits)
+    )
 
-    # 20. Post-event reversal test
-    logger.info("Computing post-event reversal test...")
-    reversal = compute_post_event_reversal(panel)
+    # ── §12b Informed trading test (HEADLINE) ─────────────────────────
+    logger.info("§12b Informed trading test (headline)...")
+    informed_trading, informed_proximity, informed_dollars = (
+        compute_informed_trading_test(panel, crsp_profits, control_trades)
+    )
 
-    # 21. Bootstrap confidence intervals
-    logger.info("Computing bootstrap confidence intervals...")
-    bootstrap = compute_bootstrap_ci(panel)
-
-    # 22. Fama-MacBeth regressions
-    logger.info("Computing Fama-MacBeth regressions...")
-    fama_macbeth = compute_fama_macbeth(panel)
-
-    # 23. Short-swing profit rule check
-    logger.info("Computing short-swing profit rule check...")
-    short_swing = compute_short_swing_check(panel, form4)
-
-    # 24. TOST equivalence tests + power analysis
-    logger.info("Computing TOST equivalence tests + power analysis...")
+    # ── Carried-forward robustness ──────────────────────────────────
+    logger.info("Carried-forward robustness (TOST, placebo, bootstrap CI)...")
     tost = compute_tost_equivalence(panel)
+    placebo = compute_placebo_test(panel)
+    bootstrap_ci = compute_bootstrap_ci(panel)
 
-    # 25. Subgroup signal-finding
-    logger.info("Computing subgroup signal-finding analysis...")
-    subgroup = compute_subgroup_analysis(panel, form4)
-
-    # 26. Volatility-shift identification strategy
-    logger.info("Computing volatility-shift identification strategy...")
-    vol_shift = compute_volatility_shift_analysis(panel, form4, stock_data)
-
-    # 27. Tail diagnostic — who drives the Mann-Whitney distributional diff?
-    logger.info("Computing tail diagnostic (leaning × event type)...")
-    tail_diag = compute_tail_diagnostic(panel, events, form4)
-
-    # 28. Conservative × Planned deep dive (case-study table + power diagnostic)
-    logger.info("Computing Conservative × Planned deep dive...")
-    cons_planned = compute_conservative_planned_deep_dive(panel, events, form4)
-
-    # 29. Tail logit with industry controls
-    logger.info("Computing tail logit with industry controls...")
-    tail_logit = compute_tail_logit(panel, events, stock_data)
-
-    # 30. Propensity score matching
-    logger.info("Computing propensity score matching...")
-    propensity_match = compute_propensity_score_matching(panel, events, form4, stock_data)
-
-    # 31. Winsorized tail analysis
-    logger.info("Computing winsorized tail analysis...")
-    winsorized_tail = compute_winsorized_tail(panel, events)
-
-    # 32. Size-stratified tail analysis
-    logger.info("Computing size-stratified tail analysis...")
-    size_stratified = compute_size_stratified_tail(panel, events, stock_data)
-
-    # 33. Insider-level analysis
-    logger.info("Computing insider-level tail analysis...")
-    insider_level = compute_insider_level_analysis(panel, events, form4)
-
-    # 34. Time-series tail decomposition
-    logger.info("Computing time-series tail decomposition...")
-    time_series_tail = compute_time_series_tail(panel, events)
-
-    # 35. Placebo test stratified by leaning
-    logger.info("Computing lean-stratified placebo test...")
-    placebo_stratified = compute_placebo_stratified_by_lean(panel, events)
-
-    # 36. Within-firm temporal clustering
-    logger.info("Computing within-firm temporal clustering...")
-    within_firm_temporal = compute_within_firm_temporal(panel, events, form4)
-
-    # 37. Disclosure channel (10b5-1 × leaning)
-    logger.info("Computing disclosure channel analysis...")
-    disclosure_channel = compute_disclosure_channel(panel, events, form4)
-
-    # 38. Buy-side analysis
-    logger.info("Computing buy-side analysis...")
-    buy_analysis = compute_buy_analysis(panel, form4, events)
-
-    # Collect all results
+    # ── Collect results ──────────────────────────────────────────────
     results = {
         'panel': panel,
-        'window_summary': window_summary,
-        'abnormal': abnormal,
-        'treatment_ctrl': treatment_ctrl,
-        'leaning': leaning,
-        'regime': regime,
-        'rvo': rvo,
-        'placebo': placebo,
-        'accel': accel,
-        'car_reg': car_reg,
-        'gradient': gradient,
-        'did': did,
-        'plan_filter': plan_filter,
-        'match_quality': match_quality,
-        'event_clustering': event_clustering,
-        'margins': margins,
-        'avr': avr,
-        'firm_fe': firm_fe,
-        'cross_section': cross_section,
-        'reversal': reversal,
-        'bootstrap': bootstrap,
-        'fama_macbeth': fama_macbeth,
-        'short_swing': short_swing,
+        'stratification': _build_stratification_summary(panel),
+        'mean_vs_distributional': mean_vs_dist,
+        'wilcoxon_family': wilcoxon_family,
+        'insider_concentration': insider_concentration,
+        'active_subset': active_subset,
+        'quantile_regression': quantile_regression,
+        'trimmed_robustness': trimmed_robustness,
+        'bootstrap_wilcoxon': bootstrap_wilcoxon,
+        'insider_panel': insider_panel_results,
+        'concentration_cuts': concentration_cuts,
+        'repeat_traders': repeat_traders,
         'tost': tost,
-        'subgroup': subgroup,
-        'vol_shift': vol_shift,
-        'tail_firms': tail_diag.get('tail_firms'),
-        'tail_leaning': tail_diag.get('leaning_test'),
-        'tail_event_type': tail_diag.get('event_type'),
-        'tail_interaction': tail_diag.get('interaction'),
-        'cons_planned': cons_planned,
-        # Robustness extensions (29-38)
-        'tail_logit': tail_logit,
-        'propensity_match': propensity_match,
-        'winsorized_tail': winsorized_tail,
-        'size_stratified': size_stratified,
-        'insider_level': insider_level,
-        'time_series_tail': time_series_tail,
-        'placebo_stratified': placebo_stratified,
-        'within_firm_temporal': within_firm_temporal,
-        'disclosure_channel': disclosure_channel,
-        'buy_analysis': buy_analysis,
+        'placebo': placebo,
+        'bootstrap_ci': bootstrap_ci,
+        'crsp_profits': crsp_profits,
+        'crsp_summary': crsp_summary,
+        'informed_trading': informed_trading,
+        'informed_proximity': informed_proximity,
+        'informed_dollars': informed_dollars,
+        'size_accuracy': size_accuracy,
+        'size_accuracy_slopes': size_accuracy_slopes,
+        'reversal_regression': reversal_regression,
+        'control_trades': control_trades,
     }
 
-    # Save all results
     logger.info("Saving results...")
     save_essay3_results(store, results)
 
-    # Summary
-    logger.info("=" * 60)
-    logger.info("  Essay 3 complete!")
-    logger.info("  Panel: %d events (%d with data)",
-                len(panel), panel['HAS_SUFFICIENT_DATA'].sum())
-    logger.info("  Treatment: %d, Control: %d",
-                panel['IS_TREATMENT'].sum(), (~panel['IS_TREATMENT']).sum())
-    if not abnormal.empty:
-        sig = abnormal[abnormal['T_BH_SIGNIFICANT'] == 1]
-        logger.info("  Abnormal selling: %d/%d windows significant (BH)",
-                    len(sig), len(abnormal))
-    if not did.empty:
-        did_treat = did[(did['SPECIFICATION'] == 'DID_SIMPLE') &
-                        (did['VARIABLE'] == 'TREAT_X_POST')]
-        if not did_treat.empty:
-            logger.info("  DiD interaction: coef=%.4f, p=%.4f",
-                        did_treat.iloc[0]['COEFFICIENT'],
-                        did_treat.iloc[0]['P_VALUE'])
-    if not match_quality.empty:
-        n_bal = match_quality['BALANCED'].sum()
-        logger.info("  Match quality: %d/%d covariates balanced",
-                    n_bal, len(match_quality))
-    if not tost.empty:
-        tost_rows = tost[tost['TEST'] == 'TOST']
-        n_equiv = tost_rows['EQUIVALENT'].sum() if not tost_rows.empty else 0
-        logger.info("  TOST equivalence: %d/%d margins show equivalence",
-                    int(n_equiv), len(tost_rows))
-        power_obs = tost[tost['MARGIN_NAME'] == 'OBSERVED']
-        if not power_obs.empty:
-            logger.info("  Power at observed effect: %.1f%%",
-                        power_obs.iloc[0]['STATISTIC_VALUE'] * 100)
-        mde = tost[tost['MARGIN_NAME'] == 'MDE_80PCT_POWER']
-        if not mde.empty:
-            logger.info("  MDE (80%% power): d=%.3f ($%.0f/day)",
-                        mde.iloc[0]['DELTA'], mde.iloc[0]['DIFF_MEAN'])
-    if not subgroup.empty:
-        sig_subs = subgroup[subgroup.get('BH_SIGNIFICANT', pd.Series(dtype=int)) == 1]
-        logger.info("  Subgroup analysis: %d/%d subgroups significant (BH)",
-                    len(sig_subs), len(subgroup))
-        for _, sub_row in sig_subs.iterrows():
-            logger.info("    → %s: d=%.3f, p=%.4f, n=%d",
-                        sub_row['SUBGROUP'], sub_row['COHEN_D'],
-                        sub_row['P_VALUE'], sub_row['N_EVENTS'])
-    if not vol_shift.empty:
-        n_tests = len(vol_shift)
-        sig_vs = vol_shift[vol_shift.get('P_VALUE', pd.Series(dtype=float)) < 0.05]
-        logger.info("  Volatility-shift: %d tests, %d significant (p<.05)",
-                    n_tests, len(sig_vs))
-        cw_row = vol_shift[vol_shift['TEST'] == 'CW_VS_NON_CW']
-        if not cw_row.empty:
-            logger.info("    CW vs non-CW: diff=%.4f, p=%.4f",
-                        cw_row.iloc[0].get('DIFF_MEAN', 0),
-                        cw_row.iloc[0].get('P_VALUE', 1))
-    # Tail diagnostic summary
-    tail_leaning = tail_diag.get('leaning_test', pd.DataFrame())
-    tail_event_type = tail_diag.get('event_type', pd.DataFrame())
-    tail_interaction = tail_diag.get('interaction', pd.DataFrame())
-    if not tail_leaning.empty:
-        chi2_r = tail_leaning[tail_leaning['TEST'] == 'CHI2_LEANING_VS_TAIL']
-        if not chi2_r.empty:
-            logger.info("  Tail leaning chi2: p=%.4f", chi2_r.iloc[0]['P_VALUE'])
-    if not tail_event_type.empty:
-        pvr = tail_event_type[tail_event_type['COMPARISON'] == 'PLANNED_VS_REACTIVE']
-        if not pvr.empty:
-            logger.info("  Planned vs Reactive: d=%.3f, t-p=%.4f",
-                        pvr.iloc[0]['COHEN_D'], pvr.iloc[0]['T_PVALUE'])
-    if not tail_interaction.empty:
-        cells = tail_interaction[tail_interaction['LEAN'] != 'INTERACTION']
-        if not cells.empty:
-            best = cells.loc[cells['MEAN_ABN_SELL'].idxmax()]
-            logger.info("  Highest interaction cell: %s × %s (d=%.3f, p=%.4f)",
-                        best.get('LEAN', '?'), best.get('EVENT_TYPE', '?'),
-                        best.get('COHEN_D', 0), best.get('P_VALUE', 1))
-    if not cons_planned.empty:
-        actual = cons_planned[cons_planned['TICKER'] != '_POWER_DIAGNOSTIC']
-        power = cons_planned[cons_planned['TICKER'] == '_POWER_DIAGNOSTIC']
-        logger.info("  Conservative × Planned: %d case-study events", len(actual))
-        if not power.empty:
-            logger.info("    %s", power.iloc[0].get('EVENT_DESCRIPTION', ''))
-    logger.info("=" * 60)
+    # ── Summary ──────────────────────────────────────────────────────
+    _print_summary(panel, results)
 
     return results
 
 
-# Keep for backward compatibility
-def classify_inflation_regime(store: DataStore, low=2.0, high=4.0):
-    """Classify months into inflation regimes using Core PCE YoY."""
-    if store.inflation.empty:
-        return pd.DataFrame()
+def _build_stratification_summary(panel):
+    """Build stratification summary table."""
+    rows = []
+    for cat in ['CULTURAL', 'FUNDAMENTAL']:
+        sub = panel[panel['EVENT_CATEGORY'] == cat]
+        matched = sub[sub['MATCHED'] == True]  # noqa: E712
+        for year in sorted(panel['EVENT_YEAR'].unique()):
+            for tercile in sorted(panel['ACTIVITY_TERCILE'].unique()):
+                stratum = sub[(sub['EVENT_YEAR'] == year) &
+                              (sub['ACTIVITY_TERCILE'] == tercile)]
+                m_stratum = matched[(matched['EVENT_YEAR'] == year) &
+                                    (matched['ACTIVITY_TERCILE'] == tercile)]
+                if len(stratum) == 0 and len(m_stratum) == 0:
+                    continue
+                dv = stratum['ABNORMAL_NET_TRADING'].dropna()
+                rows.append({
+                    'EVENT_CATEGORY': cat, 'EVENT_YEAR': year,
+                    'ACTIVITY_TERCILE': tercile, 'N_EVENTS': len(stratum),
+                    'N_MATCHED': len(m_stratum),
+                    'MEAN_ABNORMAL': dv.mean() if len(dv) > 0 else np.nan,
+                    'MEAN_BENCH_VOLUME': stratum['BENCHMARK_TOTAL_VOLUME'].mean()
+                    if 'BENCHMARK_TOTAL_VOLUME' in stratum.columns else np.nan,
+                })
+    return pd.DataFrame(rows)
 
-    col = None
-    for candidate in ['CORE_PCE_YOY', 'CORE_CPI_YOY', 'CPI_YOY']:
-        if candidate in store.inflation.columns:
-            col = candidate
-            break
 
-    if col is None:
-        logger.warning("No inflation YoY column found")
-        return pd.DataFrame()
+def _print_summary(panel, results):
+    """Print summary to log."""
+    logger.info("=" * 60)
+    logger.info("  RESULTS SUMMARY")
+    logger.info("=" * 60)
 
-    inf = store.inflation[['DATE', col]].dropna().copy()
-    inf['INFLATION_REGIME'] = pd.cut(
-        inf[col],
-        bins=[-np.inf, low, high, np.inf],
-        labels=['Low', 'Moderate', 'High'],
-    )
-    return inf[['DATE', 'INFLATION_REGIME']]
+    n_cult = (panel['EVENT_CATEGORY'] == 'CULTURAL').sum()
+    n_fund = (panel['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum()
+    logger.info("  Full panel: %d events (%d cultural, %d fundamental)",
+                len(panel), n_cult, n_fund)
 
+    # Gating test result
+    wf = results.get('wilcoxon_family')
+    if wf is not None and not wf.empty:
+        n_tests = len(wf)
+        n_nominal = (wf['WILCOXON_PVALUE'] < 0.05).sum()
+        n_holm = wf['HOLM_SIGNIFICANT'].sum()
+        n_bh = wf['BH_SIGNIFICANT'].sum()
+        n_div = (wf['DIVERGENCE'] == 'YES').sum()
+        logger.info("  ── GATING TEST (Wilcoxon Family) ──")
+        logger.info("    %d tests | %d nominal p<.05 | %d Holm-sig | %d BH-sig | %d t/W divergent",
+                    n_tests, n_nominal, n_holm, n_bh, n_div)
 
-# ── CLI entry point ──────────────────────────────────────────────────
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s %(levelname)s %(message)s')
-    run_essay3()
+        # Show BH-significant cells
+        bh_cells = wf[wf['BH_SIGNIFICANT'] == 1]
+        if not bh_cells.empty:
+            logger.info("    BH-significant cells:")
+            for _, row in bh_cells.iterrows():
+                logger.info("      %s/%s: Wilcoxon p=%.4f, t p=%.4f, d=%.3f, N=%d",
+                            row['CUT'], row['SUBSET'], row['WILCOXON_PVALUE'],
+                            row['T_PVALUE'], row['COHEN_D'], row['N'])
+
+    # Concentration
+    ic = results.get('insider_concentration')
+    if ic is not None and not ic.empty:
+        logger.info("  ── CONCENTRATION ──")
+        for _, row in ic.iterrows():
+            if row['METRIC'] in ['GINI', 'TOP_5PCT_SHARE', 'TOP_10PCT_SHARE']:
+                logger.info("    %s [%s]: %.3f", row['METRIC'],
+                            row['EVENT_CATEGORY'], row['VALUE'])
+
+    # Active subset
+    act = results.get('active_subset')
+    if act is not None and not act.empty:
+        logger.info("  ── ACTIVE SUBSET ──")
+        for _, row in act.iterrows():
+            if row['GROUP'] in ['ACTIVE', 'INACTIVE']:
+                logger.info("    %s: %d insider-events, %d unique insiders, "
+                            "pct_high_conn=%.2f, pct_high_opp=%.2f, pct_court=%.2f",
+                            row['GROUP'], row['N_INSIDER_EVENTS'],
+                            row['N_UNIQUE_INSIDERS'],
+                            row.get('PCT_HIGH_CONN', 0),
+                            row.get('PCT_HIGH_OPP', 0),
+                            row.get('PCT_COURT_DECISION', 0))
+
+    # Bootstrap Wilcoxon
+    bw = results.get('bootstrap_wilcoxon')
+    if bw is not None and not bw.empty:
+        logger.info("  ── BOOTSTRAP WILCOXON ──")
+        for _, row in bw.iterrows():
+            logger.info("    %s: obs_p=%.4f, boot_pct_sig=%.1f%%, boot_pval_median=%.4f",
+                        row['CUT'], row['OBSERVED_PVALUE'],
+                        row['BOOT_PCT_SIG_005'] * 100, row['BOOT_PVALUE_MEDIAN'])
+
+    # Trimmed robustness
+    tr = results.get('trimmed_robustness')
+    if tr is not None and not tr.empty:
+        logger.info("  ── TRIMMED ROBUSTNESS ──")
+        for _, row in tr.iterrows():
+            logger.info("    [trim %d%%] %s: t_p=%.4f, W_p=%.4f, N=%d",
+                        row['TRIM_PCT'], row['CUT'],
+                        row['T_PVALUE'], row['WILCOXON_PVALUE'], row['N'])
+
+    # CRSP profit analysis
+    cs = results.get('crsp_summary')
+    if cs is not None and not cs.empty:
+        logger.info("  ── CRSP PROFIT ANALYSIS ──")
+        for _, row in cs.iterrows():
+            cut = row['CUT']
+            if cut in ('ACTIVE', 'INACTIVE', 'ACTIVE_BUYS', 'ACTIVE_SELLS',
+                       'ACTIVE_FUNDAMENTAL'):
+                pct_prof = row.get('PCT_PROFITABLE_30', np.nan)
+                binom_p = row.get('BINOM_PVAL_30', np.nan)
+                mean_car = row.get('MEAN_CAR_30', np.nan)
+                logger.info("    %s: N=%d, mean_CAR30=%.4f, pct_profitable=%.1f%%, binom_p=%.4f",
+                            cut, row['N_TRADES'],
+                            mean_car if not np.isnan(mean_car) else 0,
+                            (pct_prof * 100) if not np.isnan(pct_prof) else 0,
+                            binom_p if not np.isnan(binom_p) else 1.0)
+
+    # ── INFORMED TRADING TEST (headline) ──────────────────────────────
+    it = results.get('informed_trading')
+    if it is not None and not it.empty:
+        logger.info("  ── INFORMED TRADING TEST (Headline) ──")
+        # Main political vs control comparison
+        for _, row in it.iterrows():
+            if row['CUT'] in ('ALL', 'SELLS_ONLY', 'BUYS_ONLY',
+                              'SELLS_PREMIUM', 'SELLS_PREMIUM_TRADE_CAR'):
+                sample = row.get('SAMPLE', 'POLITICAL')
+                pct = row['METRIC_VALUE']
+                if row['CUT'] in ('SELLS_PREMIUM', 'SELLS_PREMIUM_TRADE_CAR'):
+                    tag = 'event-CAR' if row['CUT'] == 'SELLS_PREMIUM' else 'trade-CAR'
+                    logger.info("    SELLS PREMIUM (%s): +%.2f pp (p=%.4f, N=%d)",
+                                tag, pct * 100, row['METRIC_PVAL'], row['N_TRADES'])
+                else:
+                    logger.info("    [%s] %s: %.2f%% profitable (p=%.2e, N=%d)",
+                                sample, row['CUT'], pct * 100,
+                                row['METRIC_PVAL'], row['N_TRADES'])
+        # Regulatory periods (sells only) — political then control
+        for sample_label in ['POLITICAL', 'CONTROL']:
+            for _, row in it.iterrows():
+                if (row['CUT'].startswith('REG_SELLS:') and
+                        row.get('SAMPLE', 'POLITICAL') == sample_label):
+                    period = row['CUT'].replace('REG_SELLS:', '')
+                    logger.info("    [%s %s] Sells: %.2f%% (N=%d)",
+                                sample_label, period,
+                                row['METRIC_VALUE'] * 100,
+                                row['N_TRADES'])
+
+    ip = results.get('informed_proximity')
+    if ip is not None and not ip.empty:
+        logger.info("  ── PROXIMITY TO EVENT ──")
+        for _, row in ip.iterrows():
+            if row['CUT'].endswith('_SELLS'):
+                logger.info("    %s: %.2f%% profitable (N=%d)",
+                            row['CUT'], row['METRIC_VALUE'] * 100,
+                            row['N_TRADES'])
+
+    id_ = results.get('informed_dollars')
+    if id_ is not None and not id_.empty:
+        logger.info("  ── DOLLAR MAGNITUDES ──")
+        for _, row in id_.iterrows():
+            if row['CUT'].startswith('SELLS_') and 'CAR' not in row['CUT']:
+                logger.info("    %s: N=%d, mean_profit=$%.0f, total=$%.0fM",
+                            row['CUT'], row['N_SELLS'],
+                            row['MEAN_PROFIT'],
+                            row['TOTAL_PROFIT'] / 1e6)
+        # Severity cuts (sells near large-CAR events)
+        for _, row in id_.iterrows():
+            if 'CAR<=' in row['CUT'] and '0-30d' in row['CUT']:
+                logger.info("    %s: N=%d, mean_CAR=%.1f%%, mean_profit=$%.0f, "
+                            "total=$%.0fM",
+                            row['CUT'], row['N_SELLS'],
+                            row['MEAN_EVENT_CAR'] * 100,
+                            row['MEAN_PROFIT'],
+                            row['TOTAL_PROFIT'] / 1e6)
+        # Totals
+        for _, row in id_.iterrows():
+            if row['CUT'] in ('ALL_SELLS_TOTAL', 'CORRECT_SELLS_TOTAL'):
+                logger.info("    %s: N=%d, total=$%.0fM",
+                            row['CUT'], row['N_SELLS'],
+                            row['TOTAL_PROFIT'] / 1e6)
+
+    # ── CG SIZE-ACCURACY ATTENUATION (supporting) ─────────────────────
+    sa = results.get('size_accuracy')
+    sa_slopes = results.get('size_accuracy_slopes')
+    if sa is not None and not sa.empty:
+        logger.info("  ── CG SIZE-ACCURACY (Supporting) ──")
+        if sa_slopes is not None and not sa_slopes.empty:
+            for _, row in sa_slopes.iterrows():
+                logger.info("    %s slope(log_tv): %.5f (p=%.4f, R²=%.3f, N=%d)",
+                            row['SAMPLE'], row['SLOPE'],
+                            row['SLOPE_PVAL'], row['SLOPE_R2'],
+                            row['N_TRADES'])
+
+    rr = results.get('reversal_regression')
+    if rr is not None and not rr.empty:
+        logger.info("  ── LPM REGRESSION (Supporting) ──")
+        for _, row in rr.iterrows():
+            if row['VARIABLE'] == 'LOG_TV':
+                logger.info("    [%s] LOG_TV: β=%.5f (t=%.2f, p=%.4f, N=%d)",
+                            row['SPECIFICATION'], row['COEFFICIENT'],
+                            row['T_STAT'], row['P_VALUE'], row['N_OBS'])
+        for spec in ['POOLED_INTERACTION', 'POOLED_TICKER_FE']:
+            interaction = rr[(rr['SPECIFICATION'] == spec) &
+                             (rr['VARIABLE'] == 'LOG_TV_x_POL')]
+            if not interaction.empty:
+                r = interaction.iloc[0]
+                logger.info("    [%s] LOG_TV×POL: β=%.5f (t=%.2f, p=%.4f)",
+                            spec, r['COEFFICIENT'], r['T_STAT'], r['P_VALUE'])
+
+    logger.info("=" * 60)

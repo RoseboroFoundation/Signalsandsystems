@@ -85,12 +85,12 @@ from .essay2_did import (
     save_did_results,
 )
 
-# ── Essay 3 — Insider Trading ─────────────────────────────────────────
+# ── Essay 3 — Insider Trading: Fundamental vs Cultural ────────────────
 
 from .essay3 import (
-    classify_inflation_regime,
     run_essay3,
     save_essay3_results,
+    build_insider_panel,
 )
 
 # ── Reporting ───────────────────────────────────────────────────────────
@@ -153,8 +153,10 @@ __all__ = [
     "run_did",
     "parallel_trends_test",
     "save_did_results",
-    # Essay 3 — Systematic Risk (in progress)
-    "classify_inflation_regime",
+    # Essay 3 — Insider Trading: Fundamental vs Cultural
+    "run_essay3",
+    "save_essay3_results",
+    "build_insider_panel",
     # Reporting
     "summary_statistics",
     "run_and_save",
