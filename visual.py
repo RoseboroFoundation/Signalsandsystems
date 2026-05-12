@@ -1,10 +1,10 @@
 """
 Visualization module for Signals & Systems dissertation research.
 
-Generates 100 publication-quality figures across three essays:
+Generates 86 publication-quality figures across three essays:
   Essay 1 (33): Volatility regimes & Fama-French five-factor model
   Essay 2 (33): Culture war event study with regime conditioning
-  Essay 3 (34): Insider trading & political controversies
+  Essay 3 (20): Informed insider trading around political decisions
 
 Each figure is saved to disk (PNG) and stored in the database.
 
@@ -220,26 +220,31 @@ class ResultStore:
         self.e2_cont_tight = self._read('ESSAY2_CONTAGION_TIGHT_DIFF')
         self.e2_peer_parallel = self._read('ESSAY2_PEER_PARALLEL_TRENDS')
 
-        # Essay 3
-        self.e3_panel = self._read('ESSAY3_INSIDER_PANEL')
-        self.e3_window = self._read('ESSAY3_WINDOW_SUMMARY')
-        self.e3_abnormal = self._read('ESSAY3_ABNORMAL_SELLING')
-        self.e3_car_reg = self._read('ESSAY3_CAR_INSIDER_REGRESSION')
-        self.e3_leaning = self._read('ESSAY3_LEANING_ANALYSIS')
-        self.e3_tc = self._read('ESSAY3_TREATMENT_VS_CONTROL')
-        self.e3_rvo = self._read('ESSAY3_ROUTINE_VS_OPPORTUNISTIC')
-        self.e3_regime = self._read('ESSAY3_REGIME_INTERACTION')
-        self.e3_placebo = self._read('ESSAY3_PLACEBO_TEST')
-        self.e3_accel = self._read('ESSAY3_ACCELERATION_TEST')
-        self.e3_gradient = self._read('ESSAY3_INFORMATION_GRADIENT')
-        self.e3_tost = self._read('ESSAY3_TOST_EQUIVALENCE')
-        self.e3_subgroup = self._read('ESSAY3_SUBGROUP_ANALYSIS')
-        self.e3_vol_shift = self._read('ESSAY3_VOL_SHIFT')
-        self.e3_tail_firms = self._read('ESSAY3_TAIL_FIRMS')
-        self.e3_tail_leaning = self._read('ESSAY3_TAIL_LEANING')
-        self.e3_tail_event_type = self._read('ESSAY3_TAIL_EVENT_TYPE')
-        self.e3_tail_interaction = self._read('ESSAY3_TAIL_INTERACTION')
-        self.e3_cons_planned = self._read('ESSAY3_CONS_PLANNED')
+        # Essay 3 — Informed Insider Trading Around Political Decisions
+        self.e3_panel = self._read('ESSAY3_PANEL')
+        self.e3_informed_trading = self._read('ESSAY3_INFORMED_TRADING')
+        self.e3_informed_proximity = self._read('ESSAY3_INFORMED_PROXIMITY')
+        self.e3_informed_dollars = self._read('ESSAY3_INFORMED_DOLLARS')
+        self.e3_size_accuracy = self._read('ESSAY3_SIZE_ACCURACY')
+        self.e3_size_accuracy_slopes = self._read('ESSAY3_SIZE_ACCURACY_SLOPES')
+        self.e3_reversal_regression = self._read('ESSAY3_REVERSAL_REGRESSION')
+        self.e3_control_trades = self._read('ESSAY3_CONTROL_TRADES')
+        self.e3_crsp_profits = self._read('ESSAY3_CRSP_PROFITS')
+        self.e3_crsp_summary = self._read('ESSAY3_CRSP_SUMMARY')
+        self.e3_insider_panel = self._read('ESSAY3_INSIDER_PANEL')
+        self.e3_wilcoxon_family = self._read('ESSAY3_WILCOXON_FAMILY')
+        self.e3_insider_concentration = self._read('ESSAY3_INSIDER_CONCENTRATION')
+        self.e3_concentration_cuts = self._read('ESSAY3_CONCENTRATION_CUTS')
+        self.e3_tost = self._read('ESSAY3_TOST')
+        self.e3_placebo = self._read('ESSAY3_PLACEBO')
+        self.e3_bootstrap_ci = self._read('ESSAY3_BOOTSTRAP_CI')
+        self.e3_stratification = self._read('ESSAY3_STRATIFICATION')
+        self.e3_mean_vs_dist = self._read('ESSAY3_MEAN_VS_DISTRIBUTIONAL')
+        self.e3_quantile_reg = self._read('ESSAY3_QUANTILE_REGRESSION')
+        self.e3_trimmed = self._read('ESSAY3_TRIMMED_ROBUSTNESS')
+        self.e3_bootstrap_wilcoxon = self._read('ESSAY3_BOOTSTRAP_WILCOXON')
+        self.e3_active_subset = self._read('ESSAY3_ACTIVE_SUBSET')
+        self.e3_repeat_traders = self._read('ESSAY3_REPEAT_TRADERS')
 
         logger.info('ResultStore ready')
 
@@ -2212,1343 +2217,633 @@ ESSAY2_CHARTS = [
     ('e2_33_summary_dashboard', e2_33_summary_dashboard, 'Essay 2 summary dashboard'),
 ]
 # ═══════════════════════════════════════════════════════════════════════
-# ESSAY 3 — Insider Trading & Political Controversies (34 charts)
+# ESSAY 3 — Informed Insider Trading Around Political Decisions (20 charts)
 # ═══════════════════════════════════════════════════════════════════════
 
-# Colour palettes
-C_WINDOW = ['#264653', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51', '#606c38']
-C_RVO = ['#e63946', '#457b9d']  # routine / opportunistic
+C_POL_CTRL = {'POLITICAL': '#e74c3c', 'CONTROL': '#3498db'}
+C_PROXIMITY = ['#264653', '#2a9d8f', '#e9c46a', '#f4a261']
 
-
-# ── 01. Window summary — net dollar sold across windows ──────────────
-
-def e3_01_window_net_dollar(store):
-    """Bar chart of mean net dollar sold by window."""
-    df = store.e3_window
+def e3_01_directional_accuracy(store):
+    """Headline: directional accuracy by sample (political vs control)."""
+    df = store.e3_informed_trading
     if df.empty:
-        return _empty_fig('E3-01: No window data')
+        return _empty_fig('E3-01: No informed trading data')
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['MEAN_NET_DOLLAR_SOLD'].apply(_safe_float)
-        bars = ax.bar(df['WINDOW'], vals, color=C_WINDOW[:len(df)])
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('Mean Net $ Sold')
-        ax.set_title('Insider Net Selling by Window')
-        ax.tick_params(axis='x', rotation=30)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        # Filter to main cuts
+        main = df[df['CUT'].isin(['ALL_TRADES', 'ALL_SELLS', 'ALL_BUYS',
+                                   'CONTROL', 'CONTROL_SELLS', 'CONTROL_BUYS'])]
+        if main.empty:
+            main = df.head(10)
+        for col in ['METRIC_VALUE', 'METRIC_PVAL']:
+            if col in main.columns:
+                main[col] = pd.to_numeric(main[col], errors='coerce')
+        labels = main['CUT'].values
+        vals = main['METRIC_VALUE'].apply(_safe_float).values
+        colors = [C_POL_CTRL.get(str(main.iloc[i].get('SAMPLE', '')), '#888')
+                  for i in range(len(main))]
+        bars = ax.barh(range(len(labels)), vals, color=colors)
+        ax.axvline(0.5, color='grey', lw=1.2, ls='--', label='Null: 50%')
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=9)
+        for bar, p in zip(bars, main['METRIC_PVAL'].values):
+            x = bar.get_width()
+            ax.text(x + 0.003, bar.get_y() + bar.get_height() / 2,
+                    f'{x:.1%} {_sig(p)}', va='center', fontsize=9)
+        ax.set_xlabel('Directional Accuracy')
+        ax.set_title('Informed Trading: Directional Accuracy\n(Political vs Matched Control)')
+        ax.legend(fontsize=9)
         fig.tight_layout()
     return fig
 
 
-# ── 02. Window summary — net sell ratio ──────────────────────────────
 
-def e3_02_window_sell_ratio(store):
-    """Net sell ratio comparison across windows."""
-    df = store.e3_window
+def e3_02_sells_premium(store):
+    """Sells premium: political vs control (event-CAR and trade-CAR variants)."""
+    df = store.e3_informed_trading
     if df.empty:
-        return _empty_fig('E3-02: No window data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['MEAN_NET_SELL_RATIO'].apply(_safe_float)
-        ax.bar(df['WINDOW'], vals, color=C_WINDOW[:len(df)], edgecolor='black', lw=0.5)
-        ax.set_ylabel('Mean Net Sell Ratio')
-        ax.set_title('Net Sell Ratio by Window')
-        ax.tick_params(axis='x', rotation=30)
-        fig.tight_layout()
-    return fig
-
-
-# ── 03. Window summary — transaction counts ─────────────────────────
-
-def e3_03_window_transactions(store):
-    """Total transactions per window."""
-    df = store.e3_window
-    if df.empty:
-        return _empty_fig('E3-03: No window data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.bar(df['WINDOW'], df['TOTAL_TRANSACTIONS'].apply(_safe_float),
-               color=C_WINDOW[:len(df)])
-        ax.set_ylabel('Total Transactions')
-        ax.set_title('Transaction Volume by Window')
-        ax.tick_params(axis='x', rotation=30)
-        fig.tight_layout()
-    return fig
-
-
-# ── 04. Window summary — opportunistic trades ───────────────────────
-
-def e3_04_window_opportunistic(store):
-    """Mean opportunistic trades per window."""
-    df = store.e3_window
-    if df.empty or 'MEAN_N_OPPORTUNISTIC' not in df.columns:
-        return _empty_fig('E3-04: No opportunistic data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.bar(df['WINDOW'], df['MEAN_N_OPPORTUNISTIC'].apply(_safe_float),
-               color='#e76f51')
-        ax.set_ylabel('Mean Opportunistic Trades')
-        ax.set_title('Opportunistic Trade Frequency by Window')
-        ax.tick_params(axis='x', rotation=30)
-        fig.tight_layout()
-    return fig
-
-
-# ── 05. Abnormal selling — paired t-test results ────────────────────
-
-def e3_05_abnormal_selling(store):
-    """Grouped bar: pre-event vs benchmark daily selling by window."""
-    df = store.e3_abnormal
-    if df.empty:
-        return _empty_fig('E3-05: No abnormal selling data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        x = np.arange(len(df))
-        w = 0.35
-        ax.bar(x - w/2, df['MEAN_PRE_DAILY'].apply(_safe_float), w,
-               label='Pre-Event', color='#e63946')
-        ax.bar(x + w/2, df['MEAN_BENCH_DAILY'].apply(_safe_float), w,
-               label='Benchmark', color='#457b9d')
-        ax.set_xticks(x)
-        ax.set_xticklabels(df['WINDOW'], rotation=30)
-        ax.set_ylabel('Mean Daily Selling ($)')
-        ax.set_title('Abnormal Selling: Pre-Event vs Benchmark')
-        ax.legend()
-        # significance stars
-        for i, row in df.iterrows():
-            sig = _sig(row.get('T_PVALUE', 1))
-            if sig:
-                ymax = max(_safe_float(row['MEAN_PRE_DAILY']),
-                           _safe_float(row['MEAN_BENCH_DAILY']))
-                ax.text(i, ymax * 1.05, sig, ha='center', fontsize=11)
-        fig.tight_layout()
-    return fig
-
-
-# ── 06. Abnormal selling — effect size (mean diff) ──────────────────
-
-def e3_06_abnormal_diff(store):
-    """Bar chart of mean difference (pre − benchmark) by window."""
-    df = store.e3_abnormal
-    if df.empty:
-        return _empty_fig('E3-06: No abnormal data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['MEAN_DIFF'].apply(_safe_float)
-        colors = ['#e63946' if v > 0 else '#457b9d' for v in vals]
-        ax.bar(df['WINDOW'], vals, color=colors)
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('Mean Difference (Pre − Benchmark)')
-        ax.set_title('Abnormal Selling Effect Size')
-        ax.tick_params(axis='x', rotation=30)
-        fig.tight_layout()
-    return fig
-
-
-# ── 07. Treatment vs control — net dollar comparison ────────────────
-
-def e3_07_treat_vs_ctrl(store):
-    """Treatment vs control mean net dollar sold from panel."""
-    df = store.e3_panel
-    if df.empty or 'IS_TREATMENT' not in df.columns:
-        return _empty_fig('E3-07: No panel data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        for label, grp in df.groupby('IS_TREATMENT'):
-            tag = 'Treatment' if label else 'Control'
-            vals = grp['PRE_FULL_NET_DOLLAR_SOLD'].apply(_safe_float).dropna()
-            ax.hist(vals, bins=30, alpha=0.6, label=tag,
-                    color=C_TC.get(tag, '#555'))
-        ax.set_xlabel('Pre-Event Net Dollar Sold')
-        ax.set_ylabel('Frequency')
-        ax.set_title('Insider Selling: Treatment vs Control')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 08. Treatment vs control — box plot ──────────────────────────────
-
-def e3_08_treat_ctrl_box(store):
-    """Box plot of pre-event net dollar sold by treatment status."""
-    df = store.e3_panel.copy()
-    if df.empty or 'IS_TREATMENT' not in df.columns:
-        return _empty_fig('E3-08: No panel data')
-    df['_val'] = df['PRE_FULL_NET_DOLLAR_SOLD'].apply(_safe_float)
-    df['Group'] = df['IS_TREATMENT'].map({True: 'Treatment', False: 'Control',
-                                           1: 'Treatment', 0: 'Control'})
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        groups = ['Treatment', 'Control']
-        data = [df.loc[df['Group'] == g, '_val'].dropna() for g in groups]
-        bp = ax.boxplot(data, tick_labels=groups, patch_artist=True)
-        for patch, color in zip(bp['boxes'], ['#e74c3c', '#3498db']):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-        ax.set_ylabel('Pre-Event Net Dollar Sold')
-        ax.set_title('Insider Selling Distribution: Treatment vs Control')
-        fig.tight_layout()
-    return fig
-
-
-# ── 09. Leaning analysis — net dollar sold by political lean ────────
-
-def e3_09_leaning_net_dollar(store):
-    """Bar chart of mean net dollar sold by political leaning."""
-    df = store.e3_leaning
-    if df.empty:
-        return _empty_fig('E3-09: No leaning data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.bar(df['LEAN'], df['MEAN_NET_DOLLAR_SOLD'].apply(_safe_float),
-               color=list(C_LEAN.values())[:len(df)], edgecolor='black', lw=0.5)
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('Mean Net $ Sold')
-        ax.set_title('Insider Selling by Political Leaning')
-        # significance
-        for i, row in df.iterrows():
-            sig = _sig(row.get('P_VALUE_VS_ZERO', 1))
-            if sig:
-                y = _safe_float(row['MEAN_NET_DOLLAR_SOLD'])
-                ax.text(i, y + abs(y)*0.05, sig, ha='center', fontsize=11)
-        fig.tight_layout()
-    return fig
-
-
-# ── 10. Leaning analysis — median comparison ────────────────────────
-
-def e3_10_leaning_median(store):
-    """Median net dollar sold by leaning."""
-    df = store.e3_leaning
-    if df.empty:
-        return _empty_fig('E3-10: No leaning data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.bar(df['LEAN'], df['MEDIAN_NET_DOLLAR_SOLD'].apply(_safe_float),
-               color=list(C_LEAN.values())[:len(df)])
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('Median Net $ Sold')
-        ax.set_title('Median Insider Selling by Political Leaning')
-        fig.tight_layout()
-    return fig
-
-
-# ── 11. Leaning analysis — variability (std dev) ────────────────────
-
-def e3_11_leaning_variability(store):
-    """Std dev of net dollar sold by leaning."""
-    df = store.e3_leaning
-    if df.empty:
-        return _empty_fig('E3-11: No leaning data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        ax.bar(df['LEAN'], df['STD_NET_DOLLAR_SOLD'].apply(_safe_float),
-               color=list(C_LEAN.values())[:len(df)], alpha=0.8)
-        ax.set_ylabel('Std Dev Net $ Sold')
-        ax.set_title('Insider Selling Variability by Political Leaning')
-        fig.tight_layout()
-    return fig
-
-
-# ── 12. Regime interaction — mean net sell daily by regime ───────────
-
-def e3_12_regime_net_sell(store):
-    """Net sell daily by regime across test types."""
-    df = store.e3_regime
-    if df.empty:
-        return _empty_fig('E3-12: No regime data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        tests = df['TEST'].unique()
-        all_regimes = sorted(df['REGIME'].unique())
-        x = np.arange(len(all_regimes))
-        w = 0.8 / max(len(tests), 1)
-        for i, t in enumerate(tests):
-            sub = df[df['TEST'] == t].set_index('REGIME').reindex(all_regimes)
-            ax.bar(x + i*w, sub['MEAN_NET_SELL_DAILY'].apply(_safe_float).fillna(0), w,
-                   label=t, alpha=0.85)
-        ax.set_xticks(x + w*(len(tests)-1)/2)
-        ax.set_xticklabels(all_regimes)
-        ax.set_ylabel('Mean Net Sell Daily ($)')
-        ax.set_title('Insider Selling by Regime')
-        ax.legend(fontsize=8)
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        fig.tight_layout()
-    return fig
-
-
-# ── 13. Regime interaction — significance heatmap ────────────────────
-
-def e3_13_regime_significance(store):
-    """Heatmap of p-values by test × regime."""
-    df = store.e3_regime
-    if df.empty:
-        return _empty_fig('E3-13: No regime data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        pivot = df.pivot_table(values='P_VALUE', index='TEST', columns='REGIME',
-                                aggfunc='first')
-        if pivot.empty or pivot.size == 0:
-            plt.close(fig)
-            return _empty_fig('E3-13: No regime pivot data')
-        sns.heatmap(pivot.astype(float), annot=True, fmt='.3f', cmap='RdYlGn_r',
-                    vmin=0, vmax=0.1, ax=ax, linewidths=0.5)
-        ax.set_title('Statistical Significance: Insider Selling by Regime')
-        fig.tight_layout()
-    return fig
-
-
-# ── 14. Regime interaction — sample size by regime ───────────────────
-
-def e3_14_regime_sample_size(store):
-    """Bar: sample size by regime and test."""
-    df = store.e3_regime
-    if df.empty:
-        return _empty_fig('E3-14: No regime data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        tests = df['TEST'].unique()
-        all_regimes = sorted(df['REGIME'].unique())
-        x = np.arange(len(all_regimes))
-        w = 0.8 / max(len(tests), 1)
-        for i, t in enumerate(tests):
-            sub = df[df['TEST'] == t].set_index('REGIME').reindex(all_regimes)
-            ax.bar(x + i*w, sub['N'].apply(_safe_float).fillna(0), w, label=t, alpha=0.85)
-        ax.set_xticks(x + w*(len(tests)-1)/2)
-        ax.set_xticklabels(all_regimes)
-        ax.set_ylabel('N')
-        ax.set_title('Sample Size by Regime')
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-    return fig
-
-
-# ── 15. Routine vs opportunistic — paired comparison ────────────────
-
-def e3_15_rvo_comparison(store):
-    """Grouped bar: routine vs opportunistic pre vs benchmark."""
-    df = store.e3_rvo
-    if df.empty:
-        return _empty_fig('E3-15: No RVO data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        x = np.arange(len(df))
-        w = 0.35
-        ax.bar(x - w/2, df['MEAN_PRE_DAILY'].apply(_safe_float), w,
-               label='Pre-Event', color='#e63946')
-        ax.bar(x + w/2, df['MEAN_BENCH_DAILY'].apply(_safe_float), w,
-               label='Benchmark', color='#457b9d')
-        ax.set_xticks(x)
-        ax.set_xticklabels(df['TEST'], rotation=30, ha='right')
-        ax.set_ylabel('Mean Daily ($)')
-        ax.set_title('Routine vs Opportunistic: Pre vs Benchmark')
-        ax.legend()
-        for i, row in df.iterrows():
-            sig = _sig(row.get('P_VALUE', 1))
-            if sig:
-                ymax = max(_safe_float(row['MEAN_PRE_DAILY']),
-                           _safe_float(row['MEAN_BENCH_DAILY']))
-                ax.text(i, ymax * 1.05, sig, ha='center', fontsize=11)
-        fig.tight_layout()
-    return fig
-
-
-# ── 16. Routine vs opportunistic — effect size ──────────────────────
-
-def e3_16_rvo_effect_size(store):
-    """Mean difference bars for routine vs opportunistic tests."""
-    df = store.e3_rvo
-    if df.empty:
-        return _empty_fig('E3-16: No RVO data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['MEAN_DIFF'].apply(_safe_float)
-        colors = ['#e63946' if v > 0 else '#457b9d' for v in vals]
-        ax.barh(df['TEST'], vals, color=colors)
-        ax.axvline(0, color='grey', lw=0.8, ls='--')
-        ax.set_xlabel('Mean Difference (Pre − Benchmark)')
-        ax.set_title('Routine vs Opportunistic Effect Size')
-        fig.tight_layout()
-    return fig
-
-
-# ── 17. Placebo test — observed vs placebo distribution ──────────────
-
-def e3_17_placebo_dist(store):
-    """Observed statistic vs placebo distribution."""
-    df = store.e3_placebo
-    if df.empty:
-        return _empty_fig('E3-17: No placebo data')
-    row = df.iloc[0]
-    obs = _safe_float(row['OBSERVED_STAT'])
-    mu = _safe_float(row['PLACEBO_MEAN'])
-    sigma = _safe_float(row.get('PLACEBO_STD', 1))
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        # simulate normal distribution from summary stats
-        if sigma > 0:
-            x_range = np.linspace(mu - 4*sigma, mu + 4*sigma, 200)
-            from scipy.stats import norm
-            ax.fill_between(x_range, norm.pdf(x_range, mu, sigma),
-                           alpha=0.3, color='#457b9d', label='Placebo Distribution')
-            ax.plot(x_range, norm.pdf(x_range, mu, sigma), color='#457b9d')
-        ax.axvline(obs, color='#e63946', lw=2, ls='--', label=f'Observed = {obs:.4f}')
-        pval = _safe_float(row.get('EMPIRICAL_P', 1))
-        ax.set_title(f'Placebo Test (p = {pval:.3f}, {int(_safe_float(row.get("N_ITERATIONS", 0)))} iterations)')
-        ax.set_xlabel('Test Statistic')
-        ax.set_ylabel('Density')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 18. Placebo test — percentile gauge ──────────────────────────────
-
-def e3_18_placebo_percentile(store):
-    """Gauge-style display of observed percentile."""
-    df = store.e3_placebo
-    if df.empty:
-        return _empty_fig('E3-18: No placebo data')
-    row = df.iloc[0]
-    pctile = _safe_float(row.get('PERCENTILE', 50))
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.barh(['Percentile'], [pctile], color='#e63946' if pctile > 95 else '#457b9d',
-                height=0.4)
-        ax.set_xlim(0, 100)
-        ax.axvline(95, color='grey', ls='--', lw=1, label='95th pctile')
-        ax.set_xlabel('Percentile Rank')
-        ax.set_title('Placebo Test: Observed Percentile')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 19. Acceleration — JT statistics across tests ───────────────────
-
-def e3_19_accel_jt_stats(store):
-    """JT statistics for acceleration tests."""
-    df = store.e3_accel
-    if df.empty:
-        return _empty_fig('E3-19: No acceleration data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        ax.barh(df['TEST'], df['JT_STAT'].apply(_safe_float), color='#264653')
-        ax.set_xlabel('Jonckheere-Terpstra Statistic')
-        ax.set_title('Acceleration Test: JT Statistics')
-        fig.tight_layout()
-    return fig
-
-
-# ── 20. Acceleration — monotonic trend markers ──────────────────────
-
-def e3_20_accel_monotonic(store):
-    """Visual indicator of monotonic increase by test."""
-    df = store.e3_accel
-    if df.empty:
-        return _empty_fig('E3-20: No acceleration data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        mono = df['MONOTONIC_INCREASE'].apply(lambda x: 1 if x else 0)
-        colors = ['#2a9d8f' if m else '#e76f51' for m in mono]
-        ax.barh(df['TEST'], df['JT_PVALUE'].apply(_safe_float), color=colors)
-        ax.axvline(0.05, color='grey', ls='--', lw=1, label='p = 0.05')
-        ax.set_xlabel('JT p-value')
-        ax.set_title('Acceleration: Monotonic Increase Check')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 21. Acceleration — far/mid/near window means ────────────────────
-
-def e3_21_accel_window_gradient(store):
-    """Grouped bar: mean far / mid / near selling by test."""
-    df = store.e3_accel
-    if df.empty:
-        return _empty_fig('E3-21: No acceleration data')
-    cols = ['MEAN_FAR', 'MEAN_MID', 'MEAN_NEAR']
-    present = [c for c in cols if c in df.columns]
-    if not present:
-        return _empty_fig('E3-21: No window mean columns')
+        return _empty_fig('E3-02: No informed trading data')
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(10, 5))
-        x = np.arange(len(df))
-        w = 0.8 / len(present)
-        for j, col in enumerate(present):
-            ax.bar(x + j*w, df[col].apply(_safe_float), w,
-                   label=col.replace('MEAN_', ''), alpha=0.85)
-        ax.set_xticks(x + w*(len(present)-1)/2)
-        ax.set_xticklabels(df['TEST'], rotation=30, ha='right', fontsize=8)
-        ax.set_ylabel('Mean Value')
-        ax.set_title('Acceleration: Selling Gradient (Far → Mid → Near)')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 22. Panel — insider trading distribution ─────────────────────────
-
-def e3_22_panel_distribution(store):
-    """Histogram of pre-event net dollar sold across panel."""
-    df = store.e3_panel
-    if df.empty:
-        return _empty_fig('E3-22: No panel data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['PRE_FULL_NET_DOLLAR_SOLD'].apply(_safe_float).dropna()
-        if vals.empty:
-            plt.close(fig)
-            return _empty_fig('E3-22: No selling values')
-        ax.hist(vals, bins=40, color='#264653', edgecolor='white', alpha=0.8)
-        ax.axvline(vals.mean(), color='#e63946', ls='--', lw=1.5,
-                   label=f'Mean = {vals.mean():,.0f}')
-        ax.set_xlabel('Pre-Event Net Dollar Sold')
-        ax.set_ylabel('Frequency')
-        ax.set_title('Distribution of Insider Selling')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 23. Panel — abnormal selling flag ────────────────────────────────
-
-def e3_23_panel_abnormal_flag(store):
-    """Pie chart of abnormal vs normal selling classification."""
-    df = store.e3_panel
-    if df.empty or 'ABNORMAL_SELLING' not in df.columns:
-        return _empty_fig('E3-23: No panel data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(6, 5))
-        flags = pd.to_numeric(df['ABNORMAL_SELLING'], errors='coerce').fillna(0) > 0
-        n_abnormal = int(flags.sum())
-        n_normal = int((~flags).sum())
-        labels = [f'Abnormal ({n_abnormal})', f'Normal ({n_normal})']
-        sizes = [n_abnormal, n_normal]
-        if sum(sizes) == 0:
-            plt.close(fig)
-            return _empty_fig('E3-23: No classification data')
-        ax.pie(sizes, labels=labels, colors=['#e63946', '#457b9d'],
-               autopct='%1.1f%%', startangle=90)
-        ax.set_title('Abnormal Selling Classification')
-        fig.tight_layout()
-    return fig
-
-
-# ── 24. Panel — sufficient data coverage ─────────────────────────────
-
-def e3_24_panel_coverage(store):
-    """Bar chart showing data sufficiency across events."""
-    df = store.e3_panel
-    if df.empty or 'HAS_SUFFICIENT_DATA' not in df.columns:
-        return _empty_fig('E3-24: No panel data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(6, 5))
-        counts = df['HAS_SUFFICIENT_DATA'].value_counts()
-        labels = ['Sufficient', 'Insufficient']
-        sizes = [counts.get(True, counts.get(1, 0)),
-                 counts.get(False, counts.get(0, 0))]
-        ax.bar(labels, sizes, color=['#2a9d8f', '#e76f51'])
-        ax.set_ylabel('Number of Events')
-        ax.set_title('Data Sufficiency Coverage')
-        for i, v in enumerate(sizes):
-            ax.text(i, v + 1, str(v), ha='center')
-        fig.tight_layout()
-    return fig
-
-
-# ── 25. Panel — CAR vs insider selling scatter ──────────────────────
-
-def e3_25_car_vs_selling(store):
-    """Scatter: CAR_POST vs net dollar sold."""
-    df = store.e3_panel.copy()
-    if df.empty or 'CAR_POST' not in df.columns:
-        return _empty_fig('E3-25: No CAR data')
-    df['_car'] = df['CAR_POST'].apply(_safe_float)
-    df['_sell'] = df['PRE_FULL_NET_DOLLAR_SOLD'].apply(_safe_float)
-    df = df.dropna(subset=['_car', '_sell'])
-    if df.empty:
-        return _empty_fig('E3-25: No valid CAR/selling pairs')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.scatter(df['_sell'], df['_car'], alpha=0.4, s=20, color='#264653')
-        # trend line
-        z = np.polyfit(df['_sell'], df['_car'], 1)
-        p = np.poly1d(z)
-        x_line = np.linspace(df['_sell'].min(), df['_sell'].max(), 100)
-        ax.plot(x_line, p(x_line), color='#e63946', lw=1.5, ls='--')
-        ax.set_xlabel('Pre-Event Net Dollar Sold')
-        ax.set_ylabel('Post-Event CAR')
-        ax.set_title('CAR vs Insider Selling')
-        fig.tight_layout()
-    return fig
-
-
-# ── 26. Panel — insider selling by leaning (box) ────────────────────
-
-def e3_26_panel_lean_box(store):
-    """Box plot of pre-event net dollar sold by political leaning."""
-    df = store.e3_panel.copy()
-    if df.empty or 'LEAN' not in df.columns:
-        return _empty_fig('E3-26: No leaning data')
-    df['_val'] = df['PRE_FULL_NET_DOLLAR_SOLD'].apply(_safe_float)
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        sns.boxplot(data=df, x='LEAN', y='_val', hue='LEAN',
-                    palette=list(C_LEAN.values())[:df['LEAN'].nunique()], legend=False, ax=ax)
-        ax.set_ylabel('Pre-Event Net Dollar Sold')
-        ax.set_title('Insider Selling Distribution by Political Leaning')
-        fig.tight_layout()
-    return fig
-
-
-# ── 27. Panel — pre-event window comparison ──────────────────────────
-
-def e3_27_panel_windows(store):
-    """Grouped bar: mean selling across pre-event sub-windows."""
-    df = store.e3_panel
-    if df.empty:
-        return _empty_fig('E3-27: No panel data')
-    windows = {'Far': 'PRE_FAR_NET_DOLLAR_SOLD', 'Mid': 'PRE_MID_NET_DOLLAR_SOLD',
-               'Near': 'PRE_NEAR_NET_DOLLAR_SOLD', 'Full': 'PRE_FULL_NET_DOLLAR_SOLD'}
-    present = {k: v for k, v in windows.items() if v in df.columns}
-    if not present:
-        return _empty_fig('E3-27: No window columns')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        means = {k: df[v].apply(_safe_float).mean() for k, v in present.items()}
-        ax.bar(means.keys(), means.values(), color=C_WINDOW[:len(means)])
+        premium_rows = df[df['CUT'].str.contains('PREMIUM', na=False)].copy()
+        if premium_rows.empty:
+            return _empty_fig('E3-02: No premium rows')
+        for col in ['METRIC_VALUE', 'METRIC_PVAL']:
+            premium_rows[col] = pd.to_numeric(premium_rows[col], errors='coerce')
+        labels = premium_rows['CUT'].values
+        vals = premium_rows['METRIC_VALUE'].apply(_safe_float).values
+        colors = ['#e74c3c' if v > 0 else '#3498db' for v in vals]
+        bars = ax.bar(range(len(labels)), vals, color=colors)
         ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('Mean Net Dollar Sold')
-        ax.set_title('Insider Selling: Pre-Event Sub-Windows')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=8)
+        for bar, p in zip(bars, premium_rows['METRIC_PVAL'].values):
+            y = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, y + 0.001,
+                    f'{y:.1%} {_sig(p)}', ha='center', fontsize=9)
+        ax.set_ylabel('Accuracy Difference (pp)')
+        ax.set_title('Sells Premium: Political − Control')
         fig.tight_layout()
-    return fig
-
-
-# ── 28. Panel — opportunistic vs routine ratio ──────────────────────
-
-def e3_28_panel_opp_routine(store):
-    """Stacked bar: opportunistic vs routine trades by window."""
-    df = store.e3_panel
-    if df.empty:
-        return _empty_fig('E3-28: No panel data')
-    windows = ['BENCHMARK', 'PRE_FAR', 'PRE_MID', 'PRE_NEAR', 'POST']
-    opp_cols = [f'{w}_N_OPPORTUNISTIC' for w in windows]
-    rout_cols = [f'{w}_N_ROUTINE' for w in windows]
-    present_w = [w for w, o, r in zip(windows, opp_cols, rout_cols)
-                 if o in df.columns and r in df.columns]
-    if not present_w:
-        return _empty_fig('E3-28: No opp/routine columns')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        opp_means = [df[f'{w}_N_OPPORTUNISTIC'].apply(_safe_float).mean() for w in present_w]
-        rout_means = [df[f'{w}_N_ROUTINE'].apply(_safe_float).mean() for w in present_w]
-        x = np.arange(len(present_w))
-        ax.bar(x, rout_means, label='Routine', color='#457b9d')
-        ax.bar(x, opp_means, bottom=rout_means, label='Opportunistic', color='#e63946')
-        ax.set_xticks(x)
-        ax.set_xticklabels(present_w, rotation=30)
-        ax.set_ylabel('Mean Trades per Event')
-        ax.set_title('Routine vs Opportunistic Trades by Window')
-        ax.legend()
-        fig.tight_layout()
-    return fig
-
-
-# ── 29. Panel — unique insiders by window ────────────────────────────
-
-def e3_29_panel_insiders(store):
-    """Line: mean unique insiders across windows."""
-    df = store.e3_panel
-    if df.empty:
-        return _empty_fig('E3-29: No panel data')
-    windows = ['BENCHMARK', 'PRE_FAR', 'PRE_MID', 'PRE_NEAR', 'POST']
-    cols = [f'{w}_N_UNIQUE_INSIDERS' for w in windows]
-    present = [(w, c) for w, c in zip(windows, cols) if c in df.columns]
-    if not present:
-        return _empty_fig('E3-29: No insider columns')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        means = [df[c].apply(_safe_float).mean() for _, c in present]
-        labels = [w for w, _ in present]
-        ax.plot(labels, means, marker='o', color='#264653', lw=2)
-        ax.set_ylabel('Mean Unique Insiders')
-        ax.set_title('Unique Insider Count by Window')
         ax.tick_params(axis='x', rotation=30)
         fig.tight_layout()
     return fig
 
 
-# ── 30. Abnormal selling — Wilcoxon vs t-test p-values ──────────────
 
-def e3_30_abnormal_pvalues(store):
-    """Paired comparison of t-test and Wilcoxon p-values."""
-    df = store.e3_abnormal
+
+def e3_03_proximity_accuracy(store):
+    """Directional accuracy by proximity-to-event window."""
+    df = store.e3_informed_proximity
     if df.empty:
-        return _empty_fig('E3-30: No abnormal data')
+        return _empty_fig('E3-03: No proximity data')
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        x = np.arange(len(df))
-        w = 0.35
-        ax.bar(x - w/2, df['T_PVALUE'].apply(_safe_float), w,
-               label='t-test', color='#264653')
-        ax.bar(x + w/2, df['WILCOXON_PVALUE'].apply(_safe_float), w,
-               label='Wilcoxon', color='#e9c46a')
-        ax.axhline(0.05, color='red', ls='--', lw=1, label='p = 0.05')
-        ax.set_xticks(x)
-        ax.set_xticklabels(df['WINDOW'], rotation=30)
-        ax.set_ylabel('p-value')
-        ax.set_title('Abnormal Selling: t-test vs Wilcoxon')
-        ax.legend(fontsize=8)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        pol = df[df['SAMPLE'] == 'POLITICAL'].copy()
+        ctrl = df[df['SAMPLE'] == 'CONTROL'].copy()
+        for col in ['METRIC_VALUE', 'METRIC_PVAL']:
+            pol[col] = pd.to_numeric(pol[col], errors='coerce')
+            if not ctrl.empty:
+                ctrl[col] = pd.to_numeric(ctrl[col], errors='coerce')
+        # Political sells by window
+        sells = pol[pol['CUT'].str.endswith('_SELLS')].copy()
+        if sells.empty:
+            sells = pol
+        x = range(len(sells))
+        vals = sells['METRIC_VALUE'].apply(_safe_float).values
+        bars = ax.bar(x, vals, color=C_PROXIMITY[:len(sells)], edgecolor='black', lw=0.5)
+        ax.axhline(0.5, color='grey', lw=1.2, ls='--', label='Null: 50%')
+        # Control reference line
+        ctrl_sells = ctrl[ctrl['CUT'] == 'CONTROL_ALL_SELLS']
+        if not ctrl_sells.empty:
+            cv = _safe_float(ctrl_sells['METRIC_VALUE'].iloc[0])
+            ax.axhline(cv, color='#3498db', lw=1.5, ls=':', label=f'Control sells: {cv:.1%}')
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(sells['CUT'].values, rotation=30, ha='right', fontsize=9)
+        for bar, p in zip(bars, sells['METRIC_PVAL'].values):
+            y = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, y + 0.003,
+                    f'{y:.1%} {_sig(p)}', ha='center', fontsize=9)
+        ax.set_ylabel('Directional Accuracy')
+        ax.set_title('Sells Accuracy by Proximity to Event\n(Political vs Control Baseline)')
+        ax.legend(fontsize=9)
         fig.tight_layout()
     return fig
 
 
-# ── 31. Panel — sell ratio by treatment ──────────────────────────────
-
-def e3_31_sell_ratio_by_treatment(store):
-    """Box: pre-event net sell ratio by treatment status."""
-    df = store.e3_panel.copy()
-    if df.empty or 'PRE_FULL_NET_SELL_RATIO' not in df.columns:
-        return _empty_fig('E3-31: No sell ratio data')
-    df['_val'] = df['PRE_FULL_NET_SELL_RATIO'].apply(_safe_float)
-    df['Group'] = df['IS_TREATMENT'].map({True: 'Treatment', False: 'Control',
-                                           1: 'Treatment', 0: 'Control'})
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7, 5))
-        groups = ['Treatment', 'Control']
-        data = [df.loc[df['Group'] == g, '_val'].dropna() for g in groups]
-        bp = ax.boxplot(data, tick_labels=groups, patch_artist=True)
-        for patch, color in zip(bp['boxes'], ['#e74c3c', '#3498db']):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-        ax.set_ylabel('Pre-Event Net Sell Ratio')
-        ax.set_title('Net Sell Ratio: Treatment vs Control')
-        fig.tight_layout()
-    return fig
-
-
-# ── 32. Regime — t-statistic comparison ──────────────────────────────
-
-def e3_32_regime_t_stats(store):
-    """Grouped bar: t-statistics by regime and test."""
-    df = store.e3_regime
+def e3_04_regulatory_period(store):
+    """Accuracy by regulatory period (political vs control)."""
+    df = store.e3_informed_trading
     if df.empty:
-        return _empty_fig('E3-32: No regime data')
+        return _empty_fig('E3-04: No informed trading data')
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(9, 5))
-        tests = df['TEST'].unique()
-        all_regimes = sorted(df['REGIME'].unique())
-        x = np.arange(len(all_regimes))
-        w = 0.8 / max(len(tests), 1)
-        for i, t in enumerate(tests):
-            sub = df[df['TEST'] == t].set_index('REGIME').reindex(all_regimes)
-            ax.bar(x + i*w, sub['T_STAT'].apply(_safe_float).fillna(0), w,
-                   label=t, alpha=0.85)
-        ax.set_xticks(x + w*(len(tests)-1)/2)
-        ax.set_xticklabels(all_regimes)
-        ax.axhline(0, color='grey', lw=0.8, ls='--')
-        ax.set_ylabel('t-statistic')
-        ax.set_title('Insider Selling t-Statistics by Regime')
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-    return fig
-
-
-# ── 33. Panel — post-event selling ───────────────────────────────────
-
-def e3_33_post_event_selling(store):
-    """Distribution of post-event net dollar sold."""
-    df = store.e3_panel
-    if df.empty or 'POST_NET_DOLLAR_SOLD' not in df.columns:
-        return _empty_fig('E3-33: No post-event data')
-    with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        vals = df['POST_NET_DOLLAR_SOLD'].apply(_safe_float).dropna()
-        if vals.empty:
-            plt.close(fig)
-            return _empty_fig('E3-33: No post-event values')
-        ax.hist(vals, bins=40, color='#e76f51', edgecolor='white', alpha=0.8)
-        ax.axvline(vals.mean(), color='#264653', ls='--', lw=1.5,
-                   label=f'Mean = {vals.mean():,.0f}')
-        ax.set_xlabel('Post-Event Net Dollar Sold')
-        ax.set_ylabel('Frequency')
-        ax.set_title('Post-Event Insider Selling Distribution')
+        periods = ['PRE_SOX', 'SOX_ERA', 'DODD_FRANK', 'POST_AMENDMENTS']
+        fig, ax = plt.subplots(figsize=(10, 6))
+        pol_rows = df[(df['CUT'].isin(periods)) & (df.get('SAMPLE', pd.Series()) == 'POLITICAL')]
+        ctrl_rows = df[df['CUT'].str.startswith('CTRL_')]
+        if pol_rows.empty:
+            pol_rows = df[df['CUT'].isin(periods)]
+        if not pol_rows.empty:
+            for col in ['METRIC_VALUE']:
+                pol_rows[col] = pd.to_numeric(pol_rows[col], errors='coerce')
+            x = range(len(pol_rows))
+            vals = pol_rows['METRIC_VALUE'].apply(_safe_float).values
+            ax.bar(x, vals, color='#e74c3c', alpha=0.8, label='Political')
+            ax.set_xticks(list(x))
+            ax.set_xticklabels(pol_rows['CUT'].values, rotation=30, ha='right')
+        if not ctrl_rows.empty:
+            for col in ['METRIC_VALUE']:
+                ctrl_rows[col] = pd.to_numeric(ctrl_rows[col], errors='coerce')
+            cx = range(len(ctrl_rows))
+            cvals = ctrl_rows['METRIC_VALUE'].apply(_safe_float).values
+            ax.bar([i + 0.3 for i in cx], cvals, width=0.3, color='#3498db', alpha=0.8, label='Control')
+        ax.axhline(0.5, color='grey', lw=1.2, ls='--')
+        ax.set_ylabel('Directional Accuracy')
+        ax.set_title('Accuracy by Regulatory Period')
         ax.legend()
         fig.tight_layout()
     return fig
 
 
-# ── 34. Summary dashboard ────────────────────────────────────────────
-
-def e3_34_summary_dashboard(store):
-    """2×2 summary of key Essay 3 findings."""
+def e3_05_dollar_magnitudes(store):
+    """Dollar magnitudes by proximity window and CAR severity."""
+    df = store.e3_informed_dollars
+    if df.empty:
+        return _empty_fig('E3-05: No dollar data')
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-        # (0,0) Abnormal selling effect
-        df = store.e3_abnormal
-        if not df.empty:
-            vals = df['MEAN_DIFF'].apply(_safe_float)
-            colors = ['#e63946' if v > 0 else '#457b9d' for v in vals]
-            axes[0, 0].bar(df['WINDOW'], vals, color=colors)
-            axes[0, 0].axhline(0, color='grey', lw=0.8, ls='--')
-        axes[0, 0].set_title('Abnormal Selling Effect')
-        axes[0, 0].tick_params(axis='x', rotation=30)
-
-        # (0,1) Leaning
-        df = store.e3_leaning
-        if not df.empty:
-            axes[0, 1].bar(df['LEAN'], df['MEAN_NET_DOLLAR_SOLD'].apply(_safe_float),
-                           color=list(C_LEAN.values())[:len(df)])
-            axes[0, 1].axhline(0, color='grey', lw=0.8, ls='--')
-        axes[0, 1].set_title('Selling by Political Leaning')
-
-        # (1,0) Acceleration gradient
-        df = store.e3_accel
-        if not df.empty and all(c in df.columns for c in ['MEAN_FAR', 'MEAN_MID', 'MEAN_NEAR']):
-            first = df.iloc[0]
-            vals = [_safe_float(first['MEAN_FAR']), _safe_float(first['MEAN_MID']),
-                    _safe_float(first['MEAN_NEAR'])]
-            axes[1, 0].plot(['Far', 'Mid', 'Near'], vals, marker='o', color='#264653', lw=2)
-        axes[1, 0].set_title('Acceleration Gradient')
-
-        # (1,1) Regime t-stats
-        df = store.e3_regime
-        if not df.empty:
-            for t in df['TEST'].unique():
-                sub = df[df['TEST'] == t].sort_values('REGIME')
-                axes[1, 1].plot(sub['REGIME'].astype(str),
-                                sub['T_STAT'].apply(_safe_float),
-                                marker='o', label=t)
-            axes[1, 1].axhline(0, color='grey', lw=0.8, ls='--')
-            axes[1, 1].legend(fontsize=7)
-        axes[1, 1].set_title('Regime t-Statistics')
-
-        fig.suptitle('Essay 3: Insider Trading Summary', fontsize=14, fontweight='bold')
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
-    return fig
-
-
-def e3_35_tost_equivalence(store):
-    """TOST equivalence test results with 90% CIs vs equivalence bounds."""
-    with plt.rc_context(STYLE):
-        df = store.e3_tost
-        if df.empty:
-            return _empty_fig('No TOST data')
-        tost = df[df['TEST'] == 'TOST'].copy()
-        if tost.empty:
-            return _empty_fig('No TOST data')
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        y_pos = range(len(tost))
-        labels = tost['MARGIN_NAME'].values
-
-        for i, (_, row) in enumerate(tost.iterrows()):
-            delta = _safe_float(row['DELTA'])
-            ci_lo = _safe_float(row['CI90_LOWER'])
-            ci_hi = _safe_float(row['CI90_UPPER'])
-            diff = _safe_float(row['DIFF_MEAN'])
-            equiv = _safe_float(row.get('EQUIVALENT', 0))
-
-            color = '#27ae60' if equiv == 1 else '#e74c3c'
-            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=3, solid_capstyle='round')
-            ax.plot(diff, i, 'o', color=color, ms=8, zorder=5)
-            # Equivalence bounds
-            ax.plot([-delta, -delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
-            ax.plot([delta, delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
-
-        ax.axvline(0, color='black', lw=0.8, ls='-')
-        ax.set_yticks(list(y_pos))
-        ax.set_yticklabels(labels)
-        ax.set_xlabel('Difference (pre-event − benchmark daily selling)')
-        ax.set_title('TOST Equivalence Tests\n(green = equivalent within bounds, red = not)')
-
-        # Legend
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], color='#27ae60', lw=3, label='Equivalent (p < 0.05)'),
-            Line2D([0], [0], color='#e74c3c', lw=3, label='Not equivalent'),
-            Line2D([0], [0], color='grey', lw=1.5, ls='--', label='Equivalence bounds (±δ)'),
-        ]
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
-        fig.tight_layout()
-    return fig
-
-
-def e3_36_power_analysis(store):
-    """Post-hoc power analysis and minimum detectable effect."""
-    with plt.rc_context(STYLE):
-        df = store.e3_tost
-        if df.empty:
-            return _empty_fig('No TOST data')
-
-        power_rows = df[df['TEST'] == 'POWER'].copy()
-        mde_rows = df[df['TEST'] == 'MDE'].copy()
-
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-        # Left: power at various effect sizes
-        if not power_rows.empty:
-            labels = power_rows['MARGIN_NAME'].values
-            powers = power_rows['OBSERVED_D'].apply(_safe_float).values  # power stored here
-            colors = ['#3498db' if p >= 0.80 else '#e67e22' if p >= 0.50 else '#e74c3c'
-                      for p in powers]
-            bars = axes[0].barh(range(len(labels)), powers, color=colors)
-            axes[0].set_yticks(range(len(labels)))
-            axes[0].set_yticklabels(labels)
-            axes[0].axvline(0.80, color='#27ae60', ls='--', lw=1.5, label='80% power')
-            axes[0].set_xlabel('Statistical Power')
-            axes[0].set_title('Post-hoc Power Analysis')
-            axes[0].set_xlim(0, 1)
-            axes[0].legend(fontsize=8)
-            for bar, p in zip(bars, powers):
-                axes[0].text(bar.get_width() + 0.02, bar.get_y() + bar.get_height() / 2,
-                             f'{p:.1%}', va='center', fontsize=9)
-
-        # Right: MDE context
-        if not mde_rows.empty:
-            mde = mde_rows.iloc[0]
-            mde_d = _safe_float(mde['DELTA'])
-            mde_dollars = _safe_float(mde['DIFF_MEAN'])
-            obs_d = _safe_float(mde['OBSERVED_D'])
-
-            effect_sizes = [obs_d, 0.2, mde_d, 0.5]
-            labels = [f'Observed\nd={obs_d:.3f}', f'Small\nd=0.200',
-                      f'MDE (80%)\nd={mde_d:.3f}', f'Medium\nd=0.500']
-            colors = ['#e74c3c', '#f39c12', '#27ae60', '#3498db']
-            axes[1].barh(range(len(effect_sizes)), effect_sizes, color=colors)
-            axes[1].set_yticks(range(len(effect_sizes)))
-            axes[1].set_yticklabels(labels)
-            axes[1].set_xlabel("Cohen's d")
-            axes[1].set_title('Effect Size Context')
-            axes[1].axvline(mde_d, color='#27ae60', ls='--', lw=1, alpha=0.5)
-        else:
-            axes[1].text(0.5, 0.5, 'No MDE data', transform=axes[1].transAxes,
-                         ha='center', va='center', fontsize=12, color='#999')
-
-        fig.suptitle('Statistical Power & Minimum Detectable Effect', fontsize=13, fontweight='bold')
+        for col in df.columns:
+            if col not in ('CUT', 'SAMPLE', 'METRIC_TYPE'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        # Left: by proximity
+        prox = df[df['CUT'].str.contains('d$', regex=True, na=False)]
+        if not prox.empty and 'TOTAL_EVENT_PROFIT' in prox.columns:
+            axes[0].bar(range(len(prox)), prox['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
+                        color=C_PROXIMITY[:len(prox)])
+            axes[0].set_xticks(range(len(prox)))
+            axes[0].set_xticklabels(prox['CUT'].values, rotation=30, ha='right')
+        axes[0].set_title('Total Event Profit by Proximity')
+        axes[0].set_ylabel('Total Profit ($)')
+        # Right: by severity threshold
+        sev = df[df['CUT'].str.contains('CAR_', na=False)]
+        if not sev.empty and 'TOTAL_EVENT_PROFIT' in sev.columns:
+            axes[1].bar(range(len(sev)), sev['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
+                        color=['#f4a261', '#e76f51', '#e63946'][:len(sev)])
+            axes[1].set_xticks(range(len(sev)))
+            axes[1].set_xticklabels(sev['CUT'].values, rotation=30, ha='right')
+        axes[1].set_title('Total Event Profit by CAR Severity')
+        axes[1].set_ylabel('Total Profit ($)')
+        fig.suptitle('Informed Trading: Dollar Magnitudes', fontsize=13, fontweight='bold')
         fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
 
-def e3_37_subgroup_forest(store):
-    """Forest plot of subgroup analyses with effect sizes and CIs."""
+def e3_06_size_accuracy(store):
+    """Trade-size decile accuracy (political vs control)."""
+    df = store.e3_size_accuracy
+    if df.empty:
+        return _empty_fig('E3-06: No size-accuracy data')
     with plt.rc_context(STYLE):
-        df = store.e3_subgroup
-        if df.empty:
-            return _empty_fig('No subgroup data')
-
-        fig, ax = plt.subplots(figsize=(10, max(6, len(df) * 0.5 + 1)))
-        df = df.sort_values('COHEN_D', ascending=True).reset_index(drop=True)
-
-        for i, (_, row) in enumerate(df.iterrows()):
-            d = _safe_float(row['COHEN_D'])
-            n = int(_safe_float(row['N_EVENTS']))
-            p = _safe_float(row.get('P_VALUE', 1))
-            sig = _safe_float(row.get('BH_SIGNIFICANT', 0))
-
-            # Approximate 95% CI: d ± 1.96 * sqrt(1/n + d²/(2n))
-            se_d = np.sqrt(1 / n + d ** 2 / (2 * n)) if n > 0 else 0
-            ci_lo = d - 1.96 * se_d
-            ci_hi = d + 1.96 * se_d
-
-            color = '#27ae60' if sig == 1 else ('#e67e22' if p < 0.05 else '#3498db')
-            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=2, solid_capstyle='round')
-            ax.plot(d, i, 's' if sig == 1 else 'o', color=color, ms=8, zorder=5)
-
-            label = row['SUBGROUP']
-            ax.text(ax.get_xlim()[0] if ax.get_xlim()[0] != 0 else -0.5, i + 0.15,
-                    f'{label} (n={n}, p={p:.3f})', fontsize=8, color='#333')
-
-        ax.axvline(0, color='black', lw=0.8)
-        ax.set_yticks(range(len(df)))
-        ax.set_yticklabels(df['SUBGROUP'].values, fontsize=8)
-        ax.set_xlabel("Cohen's d (pre-event − benchmark)")
-        ax.set_title('Subgroup Analysis: Forest Plot\n(BH-corrected significance)', fontsize=12)
-
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='s', color='#27ae60', lw=0, ms=8, label='BH significant'),
-            Line2D([0], [0], marker='o', color='#e67e22', lw=0, ms=8, label='Nominally sig (p<0.05)'),
-            Line2D([0], [0], marker='o', color='#3498db', lw=0, ms=8, label='Not significant'),
-        ]
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
-        fig.tight_layout()
-    return fig
-
-
-def e3_38_subgroup_effect_sizes(store):
-    """Bar chart of subgroup effect sizes (Cohen's d) with significance markers."""
-    with plt.rc_context(STYLE):
-        df = store.e3_subgroup
-        if df.empty:
-            return _empty_fig('No subgroup data')
-
+        for col in df.columns:
+            if col not in ('DECILE', 'SIZE_DECILE', 'SAMPLE', 'SPEC'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(10, 6))
-        df = df.sort_values('COHEN_D', ascending=False).reset_index(drop=True)
-        labels = df['SUBGROUP'].values
-        d_vals = df['COHEN_D'].apply(_safe_float).values
-        sig = df.get('BH_SIGNIFICANT', pd.Series([0] * len(df))).apply(_safe_float).values
-        pvals = df['P_VALUE'].apply(_safe_float).values
-
-        colors = []
-        for s, p in zip(sig, pvals):
-            if s == 1:
-                colors.append('#27ae60')
-            elif p < 0.05:
-                colors.append('#e67e22')
-            else:
-                colors.append('#3498db')
-
-        bars = ax.barh(range(len(labels)), d_vals, color=colors)
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=9)
-        ax.axvline(0, color='black', lw=0.8)
-        ax.axvline(0.2, color='grey', ls=':', lw=1, alpha=0.5)
-        ax.axvline(-0.2, color='grey', ls=':', lw=1, alpha=0.5)
-
-        # Annotate with p-values
-        for bar, p in zip(bars, pvals):
-            x = bar.get_width()
-            ax.text(x + 0.01 if x >= 0 else x - 0.01, bar.get_y() + bar.get_height() / 2,
-                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=8)
-
-        ax.set_xlabel("Cohen's d")
-        ax.set_title('Subgroup Effect Sizes\n(dashed lines = ±0.2 small effect threshold)')
+        for sample, color in C_POL_CTRL.items():
+            sub = df[df['SAMPLE'] == sample].sort_values('SIZE_DECILE')
+            if not sub.empty and 'PCT_ACCURATE' in sub.columns:
+                ax.plot(sub['SIZE_DECILE'], sub['PCT_ACCURATE'].apply(_safe_float),
+                        marker='o', color=color, label=sample, lw=2)
+        ax.axhline(0.5, color='grey', lw=1, ls='--')
+        ax.set_xlabel('Trade-Size Decile')
+        ax.set_ylabel('Directional Accuracy')
+        ax.set_title('Accuracy by Trade-Size Decile\n(Political vs Control)')
+        ax.legend()
         fig.tight_layout()
     return fig
 
 
-def e3_39_vol_shift_forest(store):
-    """Forest plot of volatility-shift analysis: CW-driven vs non-CW insider selling before vol spikes."""
+def e3_07_size_accuracy_slopes(store):
+    """LPM slopes: accuracy on log(trade size) by sample."""
+    df = store.e3_size_accuracy_slopes
+    if df.empty:
+        return _empty_fig('E3-07: No slope data')
     with plt.rc_context(STYLE):
-        df = store.e3_vol_shift
-        if df.empty:
-            return _empty_fig('No volatility-shift data')
+        for col in df.columns:
+            if col not in ('SAMPLE', 'SPEC'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(8, 5))
+        labels = df['SAMPLE'].values if 'SAMPLE' in df.columns else df.index.values
+        slopes = df['SLOPE'].apply(_safe_float).values if 'SLOPE' in df.columns else []
+        if len(slopes):
+            colors = [C_POL_CTRL.get(str(l), '#888') for l in labels]
+            ax.bar(range(len(labels)), slopes, color=colors)
+            ax.set_xticks(range(len(labels)))
+            ax.set_xticklabels(labels)
+            ax.axhline(0, color='grey', lw=0.8, ls='--')
+        ax.set_ylabel('Slope')
+        ax.set_title('LPM: Accuracy ~ log(Trade Size) Slope by Sample')
+        fig.tight_layout()
+    return fig
 
-        # Show the main one-sample and comparison tests (skip OLS rows)
-        show = df[~df['TEST'].str.startswith('OLS_')].copy()
-        show = show.sort_values('TEST').reset_index(drop=True)
 
-        fig, ax = plt.subplots(figsize=(10, max(5, len(show) * 0.7 + 1)))
-
-        for i, (_, row) in enumerate(show.iterrows()):
-            d = _safe_float(row.get('COHEN_D', 0))
-            n = int(_safe_float(row['N_SPIKES']))
-            p = _safe_float(row['P_VALUE'])
-            sig = _safe_float(row.get('BH_SIGNIFICANT', 0))
-
-            se_d = np.sqrt(1 / n + d ** 2 / (2 * n)) if n > 0 and not np.isnan(d) else 0.3
-            if np.isnan(d):
-                d = 0
-            ci_lo = d - 1.96 * se_d
-            ci_hi = d + 1.96 * se_d
-
-            color = '#27ae60' if sig == 1 else ('#e67e22' if p < 0.05 else '#3498db')
+def e3_08_reversal_regression(store):
+    """Forest plot of reversal regression coefficients."""
+    df = store.e3_reversal_regression
+    if df.empty:
+        return _empty_fig('E3-08: No regression data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('SPEC', 'VARIABLE', 'SAMPLE'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.3 + 1)))
+        for i, (_, row) in enumerate(df.iterrows()):
+            coef = _safe_float(row.get('COEF', 0))
+            se = _safe_float(row.get('SE', 0))
+            p = _safe_float(row.get('PVAL', 1))
+            ci_lo = coef - 1.96 * se
+            ci_hi = coef + 1.96 * se
+            color = '#e74c3c' if p < 0.05 else '#3498db'
             ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=2, solid_capstyle='round')
-            ax.plot(d, i, 's' if sig == 1 else 'o', color=color, ms=8, zorder=5)
-
+            ax.plot(coef, i, 'o', color=color, ms=7, zorder=5)
         ax.axvline(0, color='black', lw=0.8)
-        ax.set_yticks(range(len(show)))
-        labels = [f"{row['TEST']} (n={int(row['N_SPIKES'])}, p={_safe_float(row['P_VALUE']):.4f})"
-                  for _, row in show.iterrows()]
+        labels = [f"{row.get('SPEC', '')}: {row.get('VARIABLE', '')}" for _, row in df.iterrows()]
+        ax.set_yticks(range(len(df)))
         ax.set_yticklabels(labels, fontsize=8)
-        ax.set_xlabel("Cohen's d (pre-spike selling − benchmark)")
-        ax.set_title('Volatility-Shift Identification Strategy\nInsider Selling Before Vol Spikes: CW vs Non-CW', fontsize=12)
-
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='s', color='#27ae60', lw=0, ms=8, label='BH significant'),
-            Line2D([0], [0], marker='o', color='#e67e22', lw=0, ms=8, label='Nominally sig (p<0.05)'),
-            Line2D([0], [0], marker='o', color='#3498db', lw=0, ms=8, label='Not significant'),
-        ]
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=8)
+        ax.set_xlabel('Coefficient')
+        ax.set_title('Reversal Regression Coefficients\n(LPM: Accuracy ~ log(Size) × Political)')
         fig.tight_layout()
     return fig
 
 
-def e3_40_vol_shift_ols(store):
-    """Bar chart of OLS regression coefficients from volatility-shift analysis."""
+def e3_09_crsp_summary(store):
+    """CRSP abnormal return summary by cut."""
+    df = store.e3_crsp_summary
+    if df.empty:
+        return _empty_fig('E3-09: No CRSP summary')
     with plt.rc_context(STYLE):
-        df = store.e3_vol_shift
-        if df.empty:
-            return _empty_fig('No volatility-shift data')
+        for col in df.columns:
+            if col not in ('CUT', 'SAMPLE', 'METRIC_TYPE'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, 6))
+        if 'CUT' in df.columns and 'MEAN_CAR_30' in df.columns:
+            labels = df['CUT'].values
+            vals = df['MEAN_CAR_30'].apply(_safe_float).values
+            colors = ['#e74c3c' if v > 0 else '#3498db' for v in vals]
+            ax.bar(range(len(labels)), vals, color=colors)
+            ax.set_xticks(range(len(labels)))
+            ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
+            ax.axhline(0, color='grey', lw=0.8, ls='--')
+        ax.set_ylabel('Mean CAR (30-day)')
+        ax.set_title('CRSP Abnormal Returns by Cut')
+        fig.tight_layout()
+    return fig
 
-        ols = df[df['TEST'].str.startswith('OLS_')].copy()
-        if ols.empty:
-            return _empty_fig('No OLS results in vol-shift')
 
+def e3_10_wilcoxon_family(store):
+    """Family-level Wilcoxon correction (Holm + BH)."""
+    df = store.e3_wilcoxon_family
+    if df.empty:
+        return _empty_fig('E3-10: No Wilcoxon family data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('CUT', 'FAMILY', 'TEST'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.3 + 1)))
+        if 'RAW_P' in df.columns and 'BH_P' in df.columns:
+            y = range(len(df))
+            labels = df['CUT'].values if 'CUT' in df.columns else df.index.values
+            raw = df['RAW_P'].apply(_safe_float).values
+            bh = df['BH_P'].apply(_safe_float).values
+            ax.scatter(raw, list(y), marker='o', color='#e74c3c', label='Raw p', zorder=5)
+            ax.scatter(bh, list(y), marker='s', color='#3498db', label='BH-adjusted p', zorder=5)
+            ax.axvline(0.05, color='grey', lw=1, ls='--', label='α=0.05')
+            ax.set_yticks(list(y))
+            ax.set_yticklabels(labels, fontsize=8)
+            ax.legend(fontsize=9)
+        ax.set_xlabel('p-value')
+        ax.set_title('Wilcoxon Family Correction (Holm + BH)')
+        ax.set_xscale('log')
+        fig.tight_layout()
+    return fig
+
+
+def e3_11_insider_concentration(store):
+    """Insider-level concentration metrics (Gini, HHI, top-K%)."""
+    df = store.e3_insider_concentration
+    if df.empty:
+        return _empty_fig('E3-11: No concentration data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('CUT', 'METRIC'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, 6))
+        if 'METRIC' in df.columns and 'VALUE' in df.columns:
+            labels = df.apply(lambda r: f"{r.get('CUT', '')}:{r.get('METRIC', '')}", axis=1).values
+            vals = df['VALUE'].apply(_safe_float).values
+            ax.barh(range(len(labels)), vals, color=C_SEQ[:len(labels)])
+            ax.set_yticks(range(len(labels)))
+            ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlabel('Value')
+        ax.set_title('Insider Concentration Metrics')
+        fig.tight_layout()
+    return fig
+
+
+def e3_12_tost_equivalence(store):
+    """TOST equivalence test results with 90% CIs."""
+    df = store.e3_tost
+    if df.empty:
+        return _empty_fig('E3-12: No TOST data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('TEST', 'MARGIN_NAME'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for i, (_, row) in enumerate(df.iterrows()):
+            delta = _safe_float(row.get('DELTA', 0.2))
+            ci_lo = _safe_float(row.get('CI90_LOWER', 0))
+            ci_hi = _safe_float(row.get('CI90_UPPER', 0))
+            diff = _safe_float(row.get('DIFF_MEAN', 0))
+            equiv = _safe_float(row.get('EQUIVALENT', 0))
+            color = '#27ae60' if equiv == 1 else '#e74c3c'
+            ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=3, solid_capstyle='round')
+            ax.plot(diff, i, 'o', color=color, ms=8, zorder=5)
+            ax.plot([-delta, -delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
+            ax.plot([delta, delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
+        ax.axvline(0, color='black', lw=0.8)
+        labels = df['MARGIN_NAME'].values if 'MARGIN_NAME' in df.columns else [str(i) for i in range(len(df))]
+        ax.set_yticks(range(len(df)))
+        ax.set_yticklabels(labels)
+        ax.set_xlabel('Difference')
+        ax.set_title('TOST Equivalence Tests')
+        fig.tight_layout()
+    return fig
+
+
+def e3_13_placebo_test(store):
+    """Placebo permutation test distribution."""
+    df = store.e3_placebo
+    if df.empty:
+        return _empty_fig('E3-13: No placebo data')
+    with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(8, 5))
-        labels = ols['TEST'].str.replace('OLS_', '', regex=False).values
-        coefs = ols['MEAN_DIFF'].apply(_safe_float).values  # MEAN_DIFF holds coefficients for OLS
-        pvals = ols['P_VALUE'].apply(_safe_float).values
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        obs = _safe_float(df.iloc[0].get('OBSERVED_STAT', 0))
+        mean = _safe_float(df.iloc[0].get('PLACEBO_MEAN', 0))
+        std = _safe_float(df.iloc[0].get('PLACEBO_STD', 1))
+        p = _safe_float(df.iloc[0].get('EMPIRICAL_P', 1))
+        # Draw normal approximation
+        x_range = np.linspace(mean - 4 * std, mean + 4 * std, 200)
+        y_range = sp_stats.norm.pdf(x_range, mean, std) if std > 0 else np.zeros_like(x_range)
+        ax.fill_between(x_range, y_range, alpha=0.3, color='#3498db', label='Placebo dist.')
+        ax.axvline(obs, color='#e74c3c', lw=2, ls='-', label=f'Observed ({obs:.4f})')
+        ax.axvline(mean, color='#3498db', lw=1, ls='--', label=f'Placebo mean ({mean:.4f})')
+        ax.set_xlabel('Test Statistic')
+        ax.set_ylabel('Density')
+        ax.set_title(f'Placebo Test (p={p:.4f})')
+        ax.legend(fontsize=9)
+        fig.tight_layout()
+    return fig
 
-        colors = ['#e67e22' if p < 0.05 else '#3498db' for p in pvals]
-        bars = ax.barh(range(len(labels)), coefs, color=colors)
+
+def e3_14_mean_vs_distributional(store):
+    """Side-by-side t-test vs Wilcoxon across cuts."""
+    df = store.e3_mean_vs_dist
+    if df.empty:
+        return _empty_fig('E3-14: No mean vs distributional data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('CUT',):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        if 'T_PVALUE' in df.columns:
+            axes[0].barh(range(len(df)), -np.log10(df['T_PVALUE'].apply(_safe_float).values + 1e-30),
+                         color='#e74c3c', alpha=0.8)
+            axes[0].axvline(-np.log10(0.05), color='grey', ls='--', label='p=0.05')
+            axes[0].set_yticks(range(len(df)))
+            axes[0].set_yticklabels(df['CUT'].values, fontsize=8)
+            axes[0].set_xlabel('-log₁₀(p)')
+            axes[0].set_title('t-test p-values')
+            axes[0].legend(fontsize=8)
+        if 'WILCOXON_P' in df.columns:
+            axes[1].barh(range(len(df)), -np.log10(df['WILCOXON_P'].apply(_safe_float).values + 1e-30),
+                         color='#3498db', alpha=0.8)
+            axes[1].axvline(-np.log10(0.05), color='grey', ls='--', label='p=0.05')
+            axes[1].set_yticks(range(len(df)))
+            axes[1].set_yticklabels(df['CUT'].values, fontsize=8)
+            axes[1].set_xlabel('-log₁₀(p)')
+            axes[1].set_title('Wilcoxon p-values')
+            axes[1].legend(fontsize=8)
+        fig.suptitle('Mean vs Distributional Tests', fontsize=13, fontweight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def e3_15_concentration_cuts(store):
+    """Concentration by event type, policy area, connection."""
+    df = store.e3_concentration_cuts
+    if df.empty:
+        return _empty_fig('E3-15: No concentration cuts data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('CUT', 'METRIC'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.35 + 1)))
+        labels = df['CUT'].values if 'CUT' in df.columns else df.index.values
+        vals = df['GINI'].apply(_safe_float).values if 'GINI' in df.columns else np.zeros(len(df))
+        ax.barh(range(len(labels)), vals, color=C_SEQ[:len(labels)])
         ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=10)
-        ax.axvline(0, color='black', lw=0.8)
-
-        for bar, p in zip(bars, pvals):
-            x = bar.get_width()
-            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
-                    bar.get_y() + bar.get_height() / 2,
-                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=9)
-
-        ax.set_xlabel('OLS Coefficient (DIFF ~ IS_CW + VOL_RATIO)')
-        ax.set_title('Volatility-Shift OLS Regression\nPredicting Pre-Spike Insider Selling Differential', fontsize=12)
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlabel('Gini Coefficient')
+        ax.set_title('Insider Trading Concentration by Cut')
         fig.tight_layout()
     return fig
 
 
-def e3_41_tail_leaning(store):
-    """Bar chart of abnormal selling by political leaning, with tail share."""
+def e3_16_repeat_traders(store):
+    """Repeat trader analysis."""
+    df = store.e3_repeat_traders
+    if df.empty:
+        return _empty_fig('E3-16: No repeat trader data')
     with plt.rc_context(STYLE):
-        df = store.e3_tail_leaning
-        if df.empty:
-            return _empty_fig('No tail leaning data')
-
-        lean_rows = df[df['TEST'].str.startswith('LEANING_')].copy()
-        if lean_rows.empty:
-            return _empty_fig('No leaning rows')
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-
-        labels = lean_rows['TEST'].str.replace('LEANING_', '', regex=False).values
-        mean_abn = lean_rows['MEAN_ABN_SELL'].apply(_safe_float).values
-        pct_tail = lean_rows['PCT_IN_TAIL'].apply(_safe_float).values
-        pvals = lean_rows['P_VALUE'].apply(_safe_float).values
-
-        colors = ['#e74c3c' if 'CONSERVATIVE' in l else '#3498db' if 'LIBERAL' in l
-                  else '#95a5a6' for l in labels]
-
-        # Left: mean abnormal selling
-        bars1 = ax1.bar(range(len(labels)), mean_abn, color=colors)
-        ax1.set_xticks(range(len(labels)))
-        ax1.set_xticklabels(labels, fontsize=9)
-        ax1.axhline(0, color='black', lw=0.8)
-        ax1.set_ylabel('Mean Abnormal Selling ($/day)')
-        ax1.set_title('Abnormal Selling by Leaning')
-        for bar, p in zip(bars1, pvals):
-            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     f'p={p:.3f}', ha='center', va='bottom', fontsize=8)
-
-        # Right: % in tail
-        bars2 = ax2.bar(range(len(labels)), pct_tail, color=colors)
-        ax2.set_xticks(range(len(labels)))
-        ax2.set_xticklabels(labels, fontsize=9)
-        ax2.axhline(20, color='grey', ls=':', lw=1, alpha=0.7, label='Expected 20%')
-        ax2.set_ylabel('% of Events in Top Quintile')
-        ax2.set_title('Tail Overrepresentation by Leaning')
-        ax2.legend(fontsize=8)
-        for bar, v in zip(bars2, pct_tail):
-            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                     f'{v:.1f}%', ha='center', va='bottom', fontsize=8)
-
-        fig.suptitle('Tail Diagnostic: Political Leaning in Abnormal Selling Distribution',
-                     fontsize=12, y=1.02)
-        fig.tight_layout()
-    return fig
-
-
-def e3_42_event_type_selling(store):
-    """Grouped bar chart: abnormal selling by event type (planned vs reactive)."""
-    with plt.rc_context(STYLE):
-        df = store.e3_tail_event_type
-        if df.empty:
-            return _empty_fig('No event type data')
-
+        for col in df.columns:
+            if col not in ('CUT',):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(8, 5))
-        labels = df['COMPARISON'].values
-        means = df['MEAN_A'].apply(_safe_float).values
-        pvals = df['T_PVALUE'].apply(_safe_float).values
-
-        type_colors = {'PLANNED_VS_REACTIVE': '#8e44ad',
-                       'PLANNED_VS_ZERO': '#2ecc71',
-                       'REACTIVE_VS_ZERO': '#e67e22',
-                       'AMBIGUOUS_VS_ZERO': '#95a5a6'}
-        colors = [type_colors.get(l, '#3498db') for l in labels]
-
-        bars = ax.barh(range(len(labels)), means, color=colors)
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=9)
-        ax.axvline(0, color='black', lw=0.8)
-
-        for bar, p in zip(bars, pvals):
-            x = bar.get_width()
-            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
-                    bar.get_y() + bar.get_height() / 2,
-                    f'p={p:.3f}', va='center', ha='left' if x >= 0 else 'right', fontsize=9)
-
-        ax.set_xlabel('Mean Abnormal Selling ($/day)')
-        ax.set_title('Planned vs Reactive Events: Insider Selling\n'
-                     '(PLANNED = corporate action, REACTIVE = external pressure)',
-                     fontsize=11)
+        labels = df['CUT'].values if 'CUT' in df.columns else df.index.values
+        vals = df['ACCURACY'].apply(_safe_float).values if 'ACCURACY' in df.columns else np.zeros(len(df))
+        ax.bar(range(len(labels)), vals, color=C_SEQ[:len(labels)])
+        ax.axhline(0.5, color='grey', lw=1, ls='--')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=30, ha='right')
+        ax.set_ylabel('Accuracy')
+        ax.set_title('Repeat Trader Directional Accuracy')
         fig.tight_layout()
     return fig
 
 
-def e3_43_interaction_heatmap(store):
-    """Heatmap of Leaning × Event Type interaction cells."""
+def e3_17_quantile_regression(store):
+    """Quantile regression coefficients."""
+    df = store.e3_quantile_reg
+    if df.empty:
+        return _empty_fig('E3-17: No quantile regression data')
     with plt.rc_context(STYLE):
-        df = store.e3_tail_interaction
-        if df.empty:
-            return _empty_fig('No interaction data')
-
-        cells = df[df['LEAN'] != 'INTERACTION'].copy()
-        if cells.empty:
-            return _empty_fig('No cell data')
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-        # Pivot for heatmap: Cohen's d
-        cells['COHEN_D'] = pd.to_numeric(cells['COHEN_D'], errors='coerce')
-        cells['P_VALUE'] = pd.to_numeric(cells['P_VALUE'], errors='coerce')
-        cells['N'] = pd.to_numeric(cells['N'], errors='coerce')
-        pivot_d = cells.pivot_table(
-            index='LEAN', columns='EVENT_TYPE', values='COHEN_D', aggfunc='first')
-        pivot_p = cells.pivot_table(
-            index='LEAN', columns='EVENT_TYPE', values='P_VALUE', aggfunc='first')
-
-        import matplotlib.colors as mcolors
-        norm = mcolors.TwoSlopeNorm(vmin=-0.5, vcenter=0, vmax=0.8)
-
-        im1 = ax1.imshow(pivot_d.values.astype(float), cmap='RdYlGn', norm=norm, aspect='auto')
-        ax1.set_xticks(range(len(pivot_d.columns)))
-        ax1.set_xticklabels(pivot_d.columns, fontsize=9)
-        ax1.set_yticks(range(len(pivot_d.index)))
-        ax1.set_yticklabels(pivot_d.index, fontsize=9)
-        for i in range(len(pivot_d.index)):
-            for j in range(len(pivot_d.columns)):
-                v = pivot_d.values[i, j]
-                p = pivot_p.values[i, j] if pivot_p.values[i, j] == pivot_p.values[i, j] else 1
-                if v == v:  # not NaN
-                    ax1.text(j, i, f'd={v:.2f}\np={p:.3f}',
-                             ha='center', va='center', fontsize=8,
-                             fontweight='bold' if p < 0.05 else 'normal')
-        ax1.set_title("Cohen's d (abnormal selling)")
-        plt.colorbar(im1, ax=ax1, shrink=0.8)
-
-        # Right: sample sizes
-        pivot_n = cells.pivot_table(
-            index='LEAN', columns='EVENT_TYPE', values='N', aggfunc='first')
-        im2 = ax2.imshow(pivot_n.values.astype(float), cmap='Blues', aspect='auto')
-        ax2.set_xticks(range(len(pivot_n.columns)))
-        ax2.set_xticklabels(pivot_n.columns, fontsize=9)
-        ax2.set_yticks(range(len(pivot_n.index)))
-        ax2.set_yticklabels(pivot_n.index, fontsize=9)
-        for i in range(len(pivot_n.index)):
-            for j in range(len(pivot_n.columns)):
-                v = pivot_n.values[i, j]
-                if v == v:
-                    ax2.text(j, i, f'n={int(v)}', ha='center', va='center',
-                             fontsize=10, fontweight='bold')
-        ax2.set_title('Sample Size per Cell')
-        plt.colorbar(im2, ax=ax2, shrink=0.8)
-
-        fig.suptitle('Leaning × Event Type Interaction\n'
-                     '(Theory: Conservative × Planned = highest foreknowledge)',
-                     fontsize=12, y=1.02)
+        for col in df.columns:
+            if col not in ('QUANTILE', 'VARIABLE'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(10, 6))
+        if 'QUANTILE' in df.columns and 'COEF' in df.columns:
+            q = df['QUANTILE'].apply(_safe_float).values
+            c = df['COEF'].apply(_safe_float).values
+            ax.plot(q, c, marker='o', color='#e74c3c', lw=2)
+            ax.axhline(0, color='grey', lw=0.8, ls='--')
+        ax.set_xlabel('Quantile')
+        ax.set_ylabel('Coefficient')
+        ax.set_title('Quantile Regression: Political Treatment Effect')
         fig.tight_layout()
     return fig
 
 
-def e3_44_cons_planned_cases(store):
-    """Case-study bar chart of Conservative × Planned events with power diagnostic."""
+def e3_18_bootstrap_ci(store):
+    """Bootstrap confidence intervals."""
+    df = store.e3_bootstrap_ci
+    if df.empty:
+        return _empty_fig('E3-18: No bootstrap CI data')
     with plt.rc_context(STYLE):
-        df = store.e3_cons_planned
-        if df.empty:
-            return _empty_fig('No Conservative × Planned data')
-
-        # Separate case rows from power diagnostic
-        cases = df[df['TICKER'] != '_POWER_DIAGNOSTIC'].copy()
-        power = df[df['TICKER'] == '_POWER_DIAGNOSTIC']
-
-        if cases.empty:
-            return _empty_fig('No case events')
-
-        fig, ax = plt.subplots(figsize=(10, max(4, len(cases) * 1.2 + 2)))
-
-        labels = [f"{r['TICKER']} ({r['EVENT_DATE']})" for _, r in cases.iterrows()]
-        abn = cases['ABN_SELL_DAILY'].apply(_safe_float).values
-        n_trades = cases['N_PRE_TRADES'].apply(lambda x: int(_safe_float(x))).values
-        csuite = cases['CSUITE_PRESENT'].values
-
-        colors = ['#e74c3c' if v > 0 else '#3498db' for v in abn]
-        bars = ax.barh(range(len(labels)), abn, color=colors)
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, fontsize=10)
+        for col in df.columns:
+            if col not in ('MARGIN',):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for i, (_, row) in enumerate(df.iterrows()):
+            lo = _safe_float(row.get('CI_LOWER', 0))
+            hi = _safe_float(row.get('CI_UPPER', 0))
+            pt = _safe_float(row.get('POINT_ESTIMATE', 0))
+            color = '#e74c3c' if lo > 0 or hi < 0 else '#3498db'
+            ax.plot([lo, hi], [i, i], color=color, lw=3, solid_capstyle='round')
+            ax.plot(pt, i, 'o', color=color, ms=8, zorder=5)
         ax.axvline(0, color='black', lw=0.8)
-
-        for i, (bar, nt, cs) in enumerate(zip(bars, n_trades, csuite)):
-            x = bar.get_width()
-            annot = f'{nt} trades'
-            if cs:
-                annot += ' (C-suite)'
-            ax.text(x + abs(x) * 0.05 if x >= 0 else x - abs(x) * 0.05,
-                    bar.get_y() + bar.get_height() / 2,
-                    annot, va='center', ha='left' if x >= 0 else 'right',
-                    fontsize=9, style='italic')
-
-        # Add power annotation
-        if not power.empty:
-            desc = power.iloc[0].get('EVENT_DESCRIPTION', '')
-            ax.text(0.02, -0.12, desc, transform=ax.transAxes,
-                    fontsize=9, style='italic', color='#666')
-
-        ax.set_xlabel('Abnormal Selling ($/day, pre-event − benchmark)')
-        ax.set_title('Conservative × Planned: Case-Study Events\n'
-                     '(d=0.751, underpowered — large effect, small cell)',
-                     fontsize=11)
+        labels = df['MARGIN'].values if 'MARGIN' in df.columns else [str(i) for i in range(len(df))]
+        ax.set_yticks(range(len(df)))
+        ax.set_yticklabels(labels)
+        ax.set_xlabel('Value')
+        ax.set_title('Bootstrap 95% Confidence Intervals')
         fig.tight_layout()
+    return fig
+
+
+def e3_19_stratification(store):
+    """Year × activity-tercile strata heatmap."""
+    df = store.e3_stratification
+    if df.empty:
+        return _empty_fig('E3-19: No stratification data')
+    with plt.rc_context(STYLE):
+        for col in df.columns:
+            if col not in ('YEAR', 'TERCILE', 'STRATUM'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        fig, ax = plt.subplots(figsize=(12, 6))
+        if 'YEAR' in df.columns and 'N_EVENTS' in df.columns:
+            pivot = df.pivot_table(values='N_EVENTS', index='YEAR', columns='TERCILE',
+                                   aggfunc='sum', fill_value=0) if 'TERCILE' in df.columns else pd.DataFrame()
+            if not pivot.empty:
+                sns.heatmap(pivot, annot=True, fmt='.0f', cmap='YlOrRd', ax=ax)
+            else:
+                yearly = df.groupby('YEAR')['N_EVENTS'].sum()
+                ax.bar(yearly.index, yearly.values, color='#e74c3c')
+        ax.set_title('Event Coverage: Year × Activity Tercile')
+        fig.tight_layout()
+    return fig
+
+
+def e3_20_summary_dashboard(store):
+    """2×2 summary of key Essay 3 informed trading findings."""
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        # (0,0) Headline: political vs control accuracy
+        df = store.e3_informed_trading
+        if not df.empty:
+            main = df[df['CUT'].isin(['ALL_SELLS', 'CONTROL_SELLS'])].copy()
+            for col in ['METRIC_VALUE']:
+                main[col] = pd.to_numeric(main[col], errors='coerce')
+            if not main.empty:
+                vals = main['METRIC_VALUE'].apply(_safe_float).values
+                labels = main['CUT'].values
+                colors = [C_POL_CTRL.get(str(main.iloc[i].get('SAMPLE', '')), '#888')
+                          for i in range(len(main))]
+                axes[0, 0].bar(labels, vals, color=colors)
+                axes[0, 0].axhline(0.5, color='grey', lw=1, ls='--')
+        axes[0, 0].set_title('Sells Accuracy: Political vs Control')
+
+        # (0,1) Proximity gradient
+        prox = store.e3_informed_proximity
+        if not prox.empty:
+            sells = prox[prox['CUT'].str.endswith('_SELLS') & (prox['SAMPLE'] == 'POLITICAL')].copy()
+            sells['METRIC_VALUE'] = pd.to_numeric(sells['METRIC_VALUE'], errors='coerce')
+            if not sells.empty:
+                axes[0, 1].bar(range(len(sells)), sells['METRIC_VALUE'].apply(_safe_float).values,
+                               color=C_PROXIMITY[:len(sells)])
+                axes[0, 1].set_xticks(range(len(sells)))
+                axes[0, 1].set_xticklabels(sells['CUT'].values, rotation=30, ha='right', fontsize=8)
+                axes[0, 1].axhline(0.5, color='grey', lw=1, ls='--')
+        axes[0, 1].set_title('Proximity Gradient (Sells)')
+
+        # (1,0) Size-accuracy
+        sa = store.e3_size_accuracy
+        if not sa.empty:
+            for col in sa.columns:
+                if col not in ('DECILE', 'SIZE_DECILE', 'SAMPLE', 'SPEC'):
+                    sa[col] = pd.to_numeric(sa[col], errors='coerce')
+            for sample, color in C_POL_CTRL.items():
+                sub = sa[sa['SAMPLE'] == sample].sort_values('SIZE_DECILE')
+                if not sub.empty and 'PCT_ACCURATE' in sub.columns:
+                    axes[1, 0].plot(sub['SIZE_DECILE'], sub['PCT_ACCURATE'].apply(_safe_float),
+                                    marker='o', color=color, label=sample, lw=2)
+            axes[1, 0].axhline(0.5, color='grey', lw=1, ls='--')
+            axes[1, 0].legend(fontsize=8)
+        axes[1, 0].set_title('Size-Accuracy by Decile')
+
+        # (1,1) Dollar magnitudes
+        dol = store.e3_informed_dollars
+        if not dol.empty:
+            for col in dol.columns:
+                if col not in ('CUT', 'SAMPLE', 'METRIC_TYPE'):
+                    dol[col] = pd.to_numeric(dol[col], errors='coerce')
+            if 'TOTAL_EVENT_PROFIT' in dol.columns:
+                top = dol.head(6)
+                axes[1, 1].bar(range(len(top)),
+                               top['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
+                               color=C_SEQ[:len(top)])
+                axes[1, 1].set_xticks(range(len(top)))
+                axes[1, 1].set_xticklabels(top['CUT'].values, rotation=30, ha='right', fontsize=8)
+        axes[1, 1].set_title('Dollar Magnitudes')
+
+        fig.suptitle('Essay 3: Informed Insider Trading — Summary',
+                     fontsize=14, fontweight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
     return fig
 
 
 ESSAY3_CHARTS = [
-    ('e3_01_window_net_dollar', e3_01_window_net_dollar, 'Net dollar sold by window'),
-    ('e3_02_window_sell_ratio', e3_02_window_sell_ratio, 'Net sell ratio by window'),
-    ('e3_03_window_transactions', e3_03_window_transactions, 'Transaction volume by window'),
-    ('e3_04_window_opportunistic', e3_04_window_opportunistic, 'Opportunistic trades by window'),
-    ('e3_05_abnormal_selling', e3_05_abnormal_selling, 'Abnormal selling pre vs benchmark'),
-    ('e3_06_abnormal_diff', e3_06_abnormal_diff, 'Abnormal selling effect size'),
-    ('e3_07_treat_vs_ctrl', e3_07_treat_vs_ctrl, 'Treatment vs control histogram'),
-    ('e3_08_treat_ctrl_box', e3_08_treat_ctrl_box, 'Treatment vs control box plot'),
-    ('e3_09_leaning_net_dollar', e3_09_leaning_net_dollar, 'Net dollar sold by leaning'),
-    ('e3_10_leaning_median', e3_10_leaning_median, 'Median selling by leaning'),
-    ('e3_11_leaning_variability', e3_11_leaning_variability, 'Selling variability by leaning'),
-    ('e3_12_regime_net_sell', e3_12_regime_net_sell, 'Net sell daily by regime'),
-    ('e3_13_regime_significance', e3_13_regime_significance, 'Regime significance heatmap'),
-    ('e3_14_regime_sample_size', e3_14_regime_sample_size, 'Sample size by regime'),
-    ('e3_15_rvo_comparison', e3_15_rvo_comparison, 'Routine vs opportunistic paired'),
-    ('e3_16_rvo_effect_size', e3_16_rvo_effect_size, 'RVO effect size'),
-    ('e3_17_placebo_dist', e3_17_placebo_dist, 'Placebo distribution'),
-    ('e3_18_placebo_percentile', e3_18_placebo_percentile, 'Placebo percentile gauge'),
-    ('e3_19_accel_jt_stats', e3_19_accel_jt_stats, 'Acceleration JT statistics'),
-    ('e3_20_accel_monotonic', e3_20_accel_monotonic, 'Acceleration monotonic check'),
-    ('e3_21_accel_window_gradient', e3_21_accel_window_gradient, 'Acceleration window gradient'),
-    ('e3_22_panel_distribution', e3_22_panel_distribution, 'Insider selling distribution'),
-    ('e3_23_panel_abnormal_flag', e3_23_panel_abnormal_flag, 'Abnormal selling classification'),
-    ('e3_24_panel_coverage', e3_24_panel_coverage, 'Data sufficiency coverage'),
-    ('e3_25_car_vs_selling', e3_25_car_vs_selling, 'CAR vs insider selling scatter'),
-    ('e3_26_panel_lean_box', e3_26_panel_lean_box, 'Selling by leaning box plot'),
-    ('e3_27_panel_windows', e3_27_panel_windows, 'Pre-event sub-window comparison'),
-    ('e3_28_panel_opp_routine', e3_28_panel_opp_routine, 'Opportunistic vs routine stacked'),
-    ('e3_29_panel_insiders', e3_29_panel_insiders, 'Unique insiders by window'),
-    ('e3_30_abnormal_pvalues', e3_30_abnormal_pvalues, 'Abnormal t vs Wilcoxon p-values'),
-    ('e3_31_sell_ratio_by_treatment', e3_31_sell_ratio_by_treatment, 'Sell ratio by treatment'),
-    ('e3_32_regime_t_stats', e3_32_regime_t_stats, 'Regime t-statistics'),
-    ('e3_33_post_event_selling', e3_33_post_event_selling, 'Post-event selling distribution'),
-    ('e3_34_summary_dashboard', e3_34_summary_dashboard, 'Essay 3 summary dashboard'),
-    ('e3_35_tost_equivalence', e3_35_tost_equivalence, 'TOST equivalence test bounds'),
-    ('e3_36_power_analysis', e3_36_power_analysis, 'Power analysis and MDE'),
-    ('e3_37_subgroup_forest', e3_37_subgroup_forest, 'Subgroup forest plot'),
-    ('e3_38_subgroup_effect_sizes', e3_38_subgroup_effect_sizes, 'Subgroup effect sizes'),
-    ('e3_39_vol_shift_forest', e3_39_vol_shift_forest, 'Volatility-shift CW vs non-CW'),
-    ('e3_40_vol_shift_ols', e3_40_vol_shift_ols, 'Volatility-shift OLS coefficients'),
-    ('e3_41_tail_leaning', e3_41_tail_leaning, 'Tail diagnostic: leaning distribution'),
-    ('e3_42_event_type_selling', e3_42_event_type_selling, 'Planned vs reactive event selling'),
-    ('e3_43_interaction_heatmap', e3_43_interaction_heatmap, 'Leaning × event type interaction'),
-    ('e3_44_cons_planned_cases', e3_44_cons_planned_cases, 'Conservative × Planned case studies'),
+    ('e3_01_directional_accuracy', e3_01_directional_accuracy, 'Directional accuracy by sample'),
+    ('e3_02_sells_premium', e3_02_sells_premium, 'Sells premium: political - control'),
+    ('e3_03_proximity_accuracy', e3_03_proximity_accuracy, 'Accuracy by proximity to event'),
+    ('e3_04_regulatory_period', e3_04_regulatory_period, 'Accuracy by regulatory period'),
+    ('e3_05_dollar_magnitudes', e3_05_dollar_magnitudes, 'Dollar magnitudes by proximity and severity'),
+    ('e3_06_size_accuracy', e3_06_size_accuracy, 'Trade-size decile accuracy'),
+    ('e3_07_size_accuracy_slopes', e3_07_size_accuracy_slopes, 'LPM accuracy slopes by sample'),
+    ('e3_08_reversal_regression', e3_08_reversal_regression, 'Reversal regression coefficients'),
+    ('e3_09_crsp_summary', e3_09_crsp_summary, 'CRSP abnormal returns by cut'),
+    ('e3_10_wilcoxon_family', e3_10_wilcoxon_family, 'Wilcoxon family correction'),
+    ('e3_11_insider_concentration', e3_11_insider_concentration, 'Insider concentration metrics'),
+    ('e3_12_tost_equivalence', e3_12_tost_equivalence, 'TOST equivalence tests'),
+    ('e3_13_placebo_test', e3_13_placebo_test, 'Placebo permutation test'),
+    ('e3_14_mean_vs_distributional', e3_14_mean_vs_distributional, 'Mean vs distributional tests'),
+    ('e3_15_concentration_cuts', e3_15_concentration_cuts, 'Concentration by cut'),
+    ('e3_16_repeat_traders', e3_16_repeat_traders, 'Repeat trader accuracy'),
+    ('e3_17_quantile_regression', e3_17_quantile_regression, 'Quantile regression'),
+    ('e3_18_bootstrap_ci', e3_18_bootstrap_ci, 'Bootstrap confidence intervals'),
+    ('e3_19_stratification', e3_19_stratification, 'Year × activity stratification'),
+    ('e3_20_summary_dashboard', e3_20_summary_dashboard, 'Essay 3 summary dashboard'),
 ]
 
 ALL_CHARTS = ESSAY1_CHARTS + ESSAY2_CHARTS + ESSAY3_CHARTS
@@ -3598,7 +2893,7 @@ def generate_all(store, essays=None):
         all_results.update(generate_essay(store, ESSAY2_CHARTS, 'Essay 2'))
     if essays is None or 3 in essays:
         print('\n' + '=' * 60)
-        print('  Essay 3 — Insider Trading (34 charts)')
+        print('  Essay 3 — Informed Insider Trading (20 charts)')
         print('=' * 60)
         all_results.update(generate_essay(store, ESSAY3_CHARTS, 'Essay 3'))
     return all_results
