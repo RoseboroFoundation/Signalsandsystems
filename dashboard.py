@@ -2174,7 +2174,7 @@ with tab_a3:
     # ESSAY 3 — MODEL RESULTS
     # =====================================================================
 
-    # Load Essay 3 tables
+    # Load Essay 3 tables (all 24)
     e3_informed = load_table("ESSAY3_INFORMED_TRADING")
     e3_proximity = load_table("ESSAY3_INFORMED_PROXIMITY")
     e3_dollars = load_table("ESSAY3_INFORMED_DOLLARS")
@@ -2183,20 +2183,41 @@ with tab_a3:
     e3_reversal = load_table("ESSAY3_REVERSAL_REGRESSION")
     e3_panel = load_table("ESSAY3_PANEL")
     e3_crsp_summary = load_table("ESSAY3_CRSP_SUMMARY")
+    e3_crsp_profits = load_table("ESSAY3_CRSP_PROFITS")
     e3_wilcoxon = load_table("ESSAY3_WILCOXON_FAMILY")
     e3_tost = load_table("ESSAY3_TOST")
     e3_placebo = load_table("ESSAY3_PLACEBO")
     e3_concentration = load_table("ESSAY3_INSIDER_CONCENTRATION")
+    e3_stratification = load_table("ESSAY3_STRATIFICATION")
+    e3_mean_vs_dist = load_table("ESSAY3_MEAN_VS_DISTRIBUTIONAL")
+    e3_active_subset = load_table("ESSAY3_ACTIVE_SUBSET")
+    e3_quantile_reg = load_table("ESSAY3_QUANTILE_REGRESSION")
+    e3_trimmed = load_table("ESSAY3_TRIMMED_ROBUSTNESS")
+    e3_bootstrap_wilcoxon = load_table("ESSAY3_BOOTSTRAP_WILCOXON")
+    e3_insider_panel = load_table("ESSAY3_INSIDER_PANEL")
+    e3_concentration_cuts = load_table("ESSAY3_CONCENTRATION_CUTS")
+    e3_repeat_traders = load_table("ESSAY3_REPEAT_TRADERS")
+    e3_bootstrap_ci = load_table("ESSAY3_BOOTSTRAP_CI")
+    e3_control_trades = load_table("ESSAY3_CONTROL_TRADES")
 
     _has_e3 = not e3_informed.empty
 
     if _has_e3:
         # Coerce numeric columns
-        for _df in [e3_informed, e3_proximity, e3_dollars, e3_size_acc, e3_slopes,
-                     e3_reversal, e3_crsp_summary, e3_wilcoxon, e3_tost, e3_placebo]:
+        _e3_all_dfs = [e3_informed, e3_proximity, e3_dollars, e3_size_acc, e3_slopes,
+                       e3_reversal, e3_crsp_summary, e3_crsp_profits, e3_wilcoxon,
+                       e3_tost, e3_placebo, e3_concentration, e3_stratification,
+                       e3_mean_vs_dist, e3_active_subset, e3_quantile_reg, e3_trimmed,
+                       e3_bootstrap_wilcoxon, e3_insider_panel, e3_concentration_cuts,
+                       e3_repeat_traders, e3_bootstrap_ci]
+        _e3_skip_cols = {"CUT", "SAMPLE", "SPEC", "VARIABLE", "METRIC_TYPE",
+                         "TEST", "MARGIN_NAME", "FAMILY", "DECILE", "SIZE_DECILE",
+                         "SUBGROUP", "QUANTILE", "MARGIN", "TERCILE", "STRATUM",
+                         "YEAR", "TICKER", "OWNER", "EVENT_ID", "EVENT_DATE",
+                         "TRADE_TYPE", "RUN_TIMESTAMP"}
+        for _df in _e3_all_dfs:
             for col in _df.columns:
-                if col not in ("CUT", "SAMPLE", "SPEC", "VARIABLE", "METRIC_TYPE",
-                                "TEST", "MARGIN_NAME", "FAMILY", "DECILE", "SIZE_DECILE"):
+                if col not in _e3_skip_cols:
                     _df[col] = pd.to_numeric(_df[col], errors="coerce")
 
         # --- Key finding callout ---
@@ -2326,6 +2347,128 @@ with tab_a3:
             st.subheader("Insider Concentration Metrics")
             _conc_display = e3_concentration.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
             render_df(_conc_display, "Concentration", "a3_concentration")
+            st.divider()
+
+        # --- Concentration Cuts ---
+        if not e3_concentration_cuts.empty:
+            st.subheader("Concentration by Event Type / Policy Area")
+            _cc_display = e3_concentration_cuts.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_cc_display, "Concentration Cuts", "a3_concentration_cuts")
+            st.divider()
+
+        # --- Stratification ---
+        if not e3_stratification.empty:
+            st.subheader("Year × Activity-Tercile Stratification")
+            st.markdown(
+                "Event coverage across years and insider-activity terciles, ensuring "
+                "results are not driven by a single time period or activity cluster."
+            )
+            _strat_display = e3_stratification.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_strat_display, "Stratification", "a3_stratification", height=400)
+            st.divider()
+
+        # --- Mean vs Distributional ---
+        if not e3_mean_vs_dist.empty:
+            st.subheader("Mean vs Distributional Tests")
+            st.markdown(
+                "Side-by-side t-test and Wilcoxon signed-rank across all cuts. "
+                "Distinguishes mean-shift from distributional-shift signals."
+            )
+            _mvd_display = e3_mean_vs_dist.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_mvd_display, "Mean vs Distributional", "a3_mean_vs_dist")
+            st.divider()
+
+        # --- Active Subset ---
+        if not e3_active_subset.empty:
+            st.subheader("Active Subset Characterization")
+            st.markdown(
+                "Observable characteristics of active insiders (those trading in "
+                "multiple event windows), addressing endogeneity concerns."
+            )
+            _as_display = e3_active_subset.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_as_display, "Active Subset", "a3_active_subset")
+            st.divider()
+
+        # --- Quantile Regression ---
+        if not e3_quantile_reg.empty:
+            st.subheader("Quantile / Median Regression")
+            _qr_display = e3_quantile_reg.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_qr_display, "Quantile Regression", "a3_quantile_reg")
+            st.divider()
+
+        # --- Trimmed Robustness ---
+        if not e3_trimmed.empty:
+            st.subheader("Trimmed Robustness (1% Tails Removed)")
+            st.markdown(
+                "Re-test after trimming the top and bottom 1% of the distribution, "
+                "confirming results are not driven by outliers."
+            )
+            _trim_display = e3_trimmed.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_trim_display, "Trimmed Robustness", "a3_trimmed")
+            st.divider()
+
+        # --- Bootstrap Wilcoxon ---
+        if not e3_bootstrap_wilcoxon.empty:
+            st.subheader("Bootstrapped Wilcoxon (Resampled Under H₀)")
+            _bw_display = e3_bootstrap_wilcoxon.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_bw_display, "Bootstrap Wilcoxon", "a3_bootstrap_wilcoxon")
+            st.divider()
+
+        # --- Insider Panel (FE) ---
+        if not e3_insider_panel.empty:
+            st.subheader("Within-Insider Variation (PanelOLS Entity FE)")
+            st.markdown(
+                "Insider fixed-effects regression exploiting within-insider variation "
+                "across events. Controls for time-invariant insider characteristics."
+            )
+            _ip_display = e3_insider_panel.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_ip_display, "Insider Panel FE", "a3_insider_panel")
+            st.divider()
+
+        # --- Repeat Traders ---
+        if not e3_repeat_traders.empty:
+            st.subheader("Repeat Trader Analysis")
+            _rt_display = e3_repeat_traders.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_rt_display, "Repeat Traders", "a3_repeat_traders")
+            st.divider()
+
+        # --- Bootstrap CI ---
+        if not e3_bootstrap_ci.empty:
+            st.subheader("Bootstrap 95% Confidence Intervals")
+            _bci_display = e3_bootstrap_ci.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_bci_display, "Bootstrap CI", "a3_bootstrap_ci")
+            st.divider()
+
+        # --- CRSP Profits (trade-level) ---
+        if not e3_crsp_profits.empty:
+            with st.expander(f"CRSP Trade-Level Abnormal Returns ({len(e3_crsp_profits)} trades)", expanded=False):
+                _cp_cols = [c for c in [
+                    "TICKER", "TRADE_TYPE", "TRADE_VALUE", "CAR_30", "CAR_60",
+                    "PROFITABLE_30", "PROFITABLE_60",
+                ] if c in e3_crsp_profits.columns]
+                if _cp_cols:
+                    _cp_display = e3_crsp_profits[_cp_cols].copy()
+                else:
+                    _cp_display = e3_crsp_profits.head(200).copy()
+                for c in _cp_display.select_dtypes(include=[np.number]).columns:
+                    _cp_display[c] = _cp_display[c].round(4)
+                render_df(_cp_display, "CRSP Profits", "a3_crsp_profits", height=400)
+            st.divider()
+
+        # --- Control Trades ---
+        if not e3_control_trades.empty:
+            with st.expander(f"Matched Control Trades ({len(e3_control_trades)} trades)", expanded=False):
+                _ct_cols = [c for c in [
+                    "TICKER", "TRADE_TYPE", "TRADE_VALUE", "CAR_30", "CAR_60",
+                    "PROFITABLE_30", "PROFITABLE_60",
+                ] if c in e3_control_trades.columns]
+                if _ct_cols:
+                    _ct_display = e3_control_trades[_ct_cols].copy()
+                else:
+                    _ct_display = e3_control_trades.head(200).copy()
+                for c in _ct_display.select_dtypes(include=[np.number]).columns:
+                    _ct_display[c] = _ct_display[c].round(4)
+                render_df(_ct_display, "Control Trades", "a3_control_trades", height=400)
             st.divider()
 
         # --- Full Panel (expandable) ---
