@@ -75,6 +75,7 @@ Output tables (24, orphaned tables from prior runs are auto-dropped):
   ESSAY3_CONTROL_TRADES         Non-political matched control trades with CARs
 """
 
+import bisect
 import logging
 import os
 import warnings
@@ -1941,6 +1942,16 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
     logger.info("  Active subset: %d insider-event pairs (q10=%.0f, q90=%.0f)",
                 len(active_keys), q10, q90)
 
+    # Build insider-level routine cache (10b5-1 proxy per Cohen-Malloy-Pomorski)
+    quarter_cache = _build_routine_cache(form4)
+
+    # Build per-insider prior-buy index for Section 16(b) short-swing flag:
+    # (owner, ticker) → sorted list of buy dates
+    _buy_dates_by_insider = {}
+    buys_only = form4[form4['_trade_type'] == 'buy']
+    for (owner, ticker), grp in buys_only.groupby(['owner_name', 'ticker']):
+        _buy_dates_by_insider[(owner, ticker)] = sorted(grp['transaction_date'].dropna())
+
     # Collect all individual trades in the pre-event window
     trade_rows = []
     done = 0
@@ -1969,6 +1980,24 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
             if pd.isna(trade_value) or trade_value == 0:
                 continue
 
+            # Insider-level routine classification (10b5-1 proxy)
+            is_routine = _is_routine_from_cache(
+                quarter_cache, ticker, owner, event_date
+            )
+
+            # Section 16(b) short-swing flag: did this insider buy the
+            # same stock within the prior 6 months?  Sellers accepting
+            # disgorgement risk are more informationally motivated.
+            has_prior_buy_6m = False
+            if trade_type == 'sell':
+                trade_date = txn['transaction_date']
+                buy_dates = _buy_dates_by_insider.get((owner, ticker), [])
+                cutoff = trade_date - pd.Timedelta(days=180)
+                idx = bisect.bisect_left(buy_dates, cutoff)
+                has_prior_buy_6m = any(
+                    cutoff <= d < trade_date for d in buy_dates[idx:]
+                )
+
             trade_rows.append({
                 'OWNER': owner,
                 'TICKER': ticker,
@@ -1987,6 +2016,8 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
                 'REGULATORY_PERIOD': ev['REGULATORY_PERIOD'],
                 'HIGH_POLITICAL_CONNECTION': ev['HIGH_POLITICAL_CONNECTION'],
                 'HIGH_OPP': ev.get('HIGH_OPP', False),
+                'IS_ROUTINE': is_routine,
+                'HAS_PRIOR_BUY_6M': has_prior_buy_6m,
             })
 
         done += 1
@@ -2922,6 +2953,31 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         r = _summarize(sub, label)
         if r:
             summary_rows.append(r)
+
+    # 10b5-1 proxy: insider-level routine vs opportunistic (CMP classification)
+    # The headline rests on sells being informationally motivated rather than
+    # scheduled.  Splitting at the insider level (not ticker) per Lambert.
+    if 'IS_ROUTINE' in valid_pol.columns:
+        opp_sells = sells[sells['IS_ROUTINE'] == False]  # noqa: E712
+        rout_sells = sells[sells['IS_ROUTINE'] == True]  # noqa: E712
+        for sub, label in [(opp_sells, 'SELLS_OPPORTUNISTIC'),
+                           (rout_sells, 'SELLS_ROUTINE')]:
+            r = _summarize(sub, label)
+            if r:
+                summary_rows.append(r)
+
+    # Section 16(b) short-swing cut: sells where the insider bought the same
+    # stock within the prior 6 months.  These sellers accept disgorgement risk,
+    # implying stronger informational motivation — not weaker — because the
+    # expected gain must exceed the 16(b) clawback.
+    if 'HAS_PRIOR_BUY_6M' in sells.columns:
+        s16b = sells[sells['HAS_PRIOR_BUY_6M'] == True]  # noqa: E712
+        s_no16b = sells[sells['HAS_PRIOR_BUY_6M'] == False]  # noqa: E712
+        for sub, label in [(s16b, 'SELLS_16B_ELIGIBLE'),
+                           (s_no16b, 'SELLS_NO_16B')]:
+            r = _summarize(sub, label)
+            if r:
+                summary_rows.append(r)
 
     # Control sample comparison (uses trade-window CAR, not event CAR)
     if control_trades is not None and not control_trades.empty:
