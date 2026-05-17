@@ -218,7 +218,13 @@ def _build_routine_cache(form4):
 
 
 def _is_routine_from_cache(cache, ticker, owner, event_date, lookback_years=5):
-    """CMP routine classification: traded in same calendar month in >= 3 of prior 5 years."""
+    """Month-of-trade routine classification, modified from CMP (2012).
+
+    Cohen-Malloy-Pomorski define routine at the insider-year level; our version
+    is finer-grained — evaluated per (ticker, owner, event_month).  An insider
+    is routine for this month if they traded in the same calendar month in >= 3
+    of the prior 5 years.
+    """
     event_month = event_date.month
     event_year = event_date.year
     years_traded = cache.get((ticker, owner, event_month))
@@ -253,7 +259,7 @@ def _compute_window_metrics(txns, window_days):
         'SHARES_BOUGHT': buys['shares'].sum(),
         'DOLLAR_SOLD': dollar_sold,
         'DOLLAR_BOUGHT': dollar_bought,
-        'NET_DOLLAR': net_dollar,
+        'NET_SELLING': net_dollar,
         'NET_SELL_RATIO': net_sell_ratio,
         'N_UNIQUE_INSIDERS': n_unique_insiders,
         'N_OPPORTUNISTIC': n_opportunistic,
@@ -360,7 +366,7 @@ def _assign_regulatory_period(event_date):
 def _winsorize_panel(panel, percentile=1):
     """Winsorize dollar columns within each EVENT_CATEGORY separately."""
     dollar_cols = [c for c in panel.columns
-                   if any(kw in c for kw in ['DOLLAR', 'NET_TRADING'])]
+                   if any(kw in c for kw in ['DOLLAR', 'NET_TRADING', 'NET_SELLING'])]
     lower = percentile / 100
     upper = 1 - lower
     n_clipped = 0
@@ -677,8 +683,8 @@ def build_insider_panel(form4, culture_events, political_events,
             if metrics['N_TRANSACTIONS'] > 0:
                 has_data = True
 
-        bench_daily = _daily_rate(row.get('BENCHMARK_NET_DOLLAR', 0), 'BENCHMARK')
-        pre_daily = _daily_rate(row.get('PRE_FULL_NET_DOLLAR', 0), 'PRE_FULL')
+        bench_daily = _daily_rate(row.get('BENCHMARK_NET_SELLING', 0), 'BENCHMARK')
+        pre_daily = _daily_rate(row.get('PRE_FULL_NET_SELLING', 0), 'PRE_FULL')
         row['ABNORMAL_NET_TRADING'] = pre_daily - bench_daily
         row['ABNORMAL_SELLING'] = 1 if (pre_daily > bench_daily and pre_daily > 0) else 0
         row['HAS_SUFFICIENT_DATA'] = 1 if has_data else 0
@@ -714,11 +720,16 @@ def build_insider_panel(form4, culture_events, political_events,
 
     # Recompute DV after winsorization
     panel['ABNORMAL_NET_TRADING'] = panel.apply(
-        lambda r: _daily_rate(r.get('PRE_FULL_NET_DOLLAR', 0), 'PRE_FULL')
-                  - _daily_rate(r.get('BENCHMARK_NET_DOLLAR', 0), 'BENCHMARK'),
+        lambda r: _daily_rate(r.get('PRE_FULL_NET_SELLING', 0), 'PRE_FULL')
+                  - _daily_rate(r.get('BENCHMARK_NET_SELLING', 0), 'BENCHMARK'),
         axis=1
     )
     panel['ABNORMAL_SELLING'] = (panel['ABNORMAL_NET_TRADING'] > 0).astype(int)
+
+    assert panel['ABNORMAL_NET_TRADING'].abs().sum() > 0, (
+        "ABNORMAL_NET_TRADING is identically zero — column lookup failed "
+        "(check _compute_window_metrics keys vs build_insider_panel lookups)"
+    )
 
     # Stratify
     panel = _stratify_panel(panel)
@@ -1064,7 +1075,7 @@ def compute_insider_concentration(panel, form4, insider_profits=None):
         if sub_profits.empty:
             continue
 
-        profits = sub_profits['NET_PROFIT'].values
+        profits = sub_profits['ABNORMAL_NET_SELLING'].values
         abs_profits = np.abs(profits)
 
         if len(abs_profits) < 5:
@@ -1086,7 +1097,7 @@ def compute_insider_concentration(panel, form4, insider_profits=None):
             results.append({
                 'EVENT_CATEGORY': cat, 'METRIC': f'TOP_{k_pct}PCT_SHARE',
                 'VALUE': share, 'K': k, 'N_INSIDERS': n,
-                'TOTAL_ABS_PROFIT': total_abs,
+                'TOTAL_ABS_NET_SELLING': total_abs,
             })
 
         # Gini coefficient
@@ -1094,7 +1105,7 @@ def compute_insider_concentration(panel, form4, insider_profits=None):
         results.append({
             'EVENT_CATEGORY': cat, 'METRIC': 'GINI',
             'VALUE': gini, 'K': np.nan, 'N_INSIDERS': n,
-            'TOTAL_ABS_PROFIT': total_abs,
+            'TOTAL_ABS_NET_SELLING': total_abs,
         })
 
         # HHI
@@ -1103,26 +1114,32 @@ def compute_insider_concentration(panel, form4, insider_profits=None):
         results.append({
             'EVENT_CATEGORY': cat, 'METRIC': 'HHI',
             'VALUE': hhi, 'K': np.nan, 'N_INSIDERS': n,
-            'TOTAL_ABS_PROFIT': total_abs,
+            'TOTAL_ABS_NET_SELLING': total_abs,
         })
 
         # Summary stats
         results.append({
-            'EVENT_CATEGORY': cat, 'METRIC': 'MEAN_ABS_PROFIT',
+            'EVENT_CATEGORY': cat, 'METRIC': 'MEAN_ABS_NET_SELLING',
             'VALUE': abs_profits.mean(), 'K': np.nan, 'N_INSIDERS': n,
-            'TOTAL_ABS_PROFIT': total_abs,
+            'TOTAL_ABS_NET_SELLING': total_abs,
         })
         results.append({
-            'EVENT_CATEGORY': cat, 'METRIC': 'MEDIAN_ABS_PROFIT',
+            'EVENT_CATEGORY': cat, 'METRIC': 'MEDIAN_ABS_NET_SELLING',
             'VALUE': np.median(abs_profits), 'K': np.nan, 'N_INSIDERS': n,
-            'TOTAL_ABS_PROFIT': total_abs,
+            'TOTAL_ABS_NET_SELLING': total_abs,
         })
 
     return pd.DataFrame(results)
 
 
 def _compute_insider_profits(panel_sub, form4):
-    """Compute per-insider net dollar trading around events in the panel subset."""
+    """Compute per-insider abnormal net selling around events in the panel subset.
+
+    Note: only insiders with at least one pre-event trade are included.
+    Insiders who withdrew (had benchmark activity but no pre-event activity)
+    are excluded — this is intentional: we measure the trading behavior of
+    active pre-event insiders, not the decision to abstain.
+    """
     rows = []
     for _, ev in panel_sub.iterrows():
         ticker = ev['TICKER']
@@ -1167,9 +1184,9 @@ def _compute_insider_profits(panel_sub, form4):
                 'REGULATORY_PERIOD': ev['REGULATORY_PERIOD'],
                 'HIGH_POLITICAL_CONNECTION': ev['HIGH_POLITICAL_CONNECTION'],
                 'HIGH_OPP': ev.get('HIGH_OPP', False),
-                'NET_PROFIT': abnormal,
-                'PRE_NET_DOLLAR': pre_net,
-                'BENCH_NET_DOLLAR': bench_net,
+                'ABNORMAL_NET_SELLING': abnormal,
+                'PRE_NET_SELLING': pre_net,
+                'BENCH_NET_SELLING': bench_net,
                 'N_PRE_TXNS': len(owner_pre),
             })
 
@@ -1212,7 +1229,7 @@ def compute_active_subset(panel, form4, insider_profits=None):
     if insider_profits.empty:
         return pd.DataFrame()
 
-    profits = insider_profits['NET_PROFIT']
+    profits = insider_profits['ABNORMAL_NET_SELLING']
     q10 = profits.quantile(0.10)
     q90 = profits.quantile(0.90)
 
@@ -1233,10 +1250,10 @@ def compute_active_subset(panel, form4, insider_profits=None):
             'N_INSIDER_EVENTS': len(sub),
             'N_UNIQUE_INSIDERS': sub['OWNER'].nunique(),
             'N_UNIQUE_TICKERS': sub['TICKER'].nunique(),
-            'MEAN_ABS_PROFIT': sub['NET_PROFIT'].abs().mean(),
-            'MEDIAN_ABS_PROFIT': sub['NET_PROFIT'].abs().median(),
-            'TOTAL_ABS_PROFIT': sub['NET_PROFIT'].abs().sum(),
-            'PCT_NET_SELLERS': (sub['NET_PROFIT'] > 0).mean(),
+            'MEAN_ABS_NET_SELLING': sub['ABNORMAL_NET_SELLING'].abs().mean(),
+            'MEDIAN_ABS_NET_SELLING': sub['ABNORMAL_NET_SELLING'].abs().median(),
+            'TOTAL_ABS_NET_SELLING': sub['ABNORMAL_NET_SELLING'].abs().sum(),
+            'PCT_NET_SELLERS': (sub['ABNORMAL_NET_SELLING'] > 0).mean(),
         }
 
         # Event type distribution
@@ -1265,9 +1282,9 @@ def compute_active_subset(panel, form4, insider_profits=None):
             'N_INSIDER_EVENTS': len(active),
             'N_UNIQUE_INSIDERS': active['OWNER'].nunique(),
             'N_UNIQUE_TICKERS': active['TICKER'].nunique(),
-            'MEAN_ABS_PROFIT': owner_counts.mean(),   # mean events per active insider
-            'MEDIAN_ABS_PROFIT': owner_counts.median(),
-            'TOTAL_ABS_PROFIT': (owner_counts > 1).sum(),  # N repeat traders
+            'MEAN_ABS_NET_SELLING': owner_counts.mean(),   # mean events per active insider
+            'MEDIAN_ABS_NET_SELLING': owner_counts.median(),
+            'TOTAL_ABS_NET_SELLING': (owner_counts > 1).sum(),  # N repeat traders
             'PCT_NET_SELLERS': (owner_counts > 1).mean(),   # pct repeat
             'PCT_HIGH_CONN': np.nan, 'PCT_HIGH_OPP': np.nan,
             'PCT_FUNDAMENTAL': np.nan, 'PCT_CULTURAL': np.nan,
@@ -1561,13 +1578,17 @@ def compute_bootstrap_wilcoxon(panel, n_bootstrap=1000, seed=42):
             warnings.simplefilter("ignore")
             obs_stat, obs_pval = stats.wilcoxon(vals, alternative='two-sided', zero_method='pratt')
 
-        # Bootstrap under H0: center the data (subtract median) so the null
-        # hypothesis of symmetry around zero holds, then resample
-        centered = vals.values - np.median(vals.values)
+        # Bootstrap under H0 via sign-flipping: Wilcoxon tests symmetry
+        # around zero.  Randomly flipping signs imposes that null without
+        # assuming the distribution is symmetric (median-centering preserves
+        # skew, so resampling from a skewed centered distribution doesn't
+        # actually impose the null).
+        abs_vals = np.abs(vals.values)
         boot_stats = []
         boot_pvals = []
         for _ in range(n_bootstrap):
-            sample = rng.choice(centered, size=len(centered), replace=True)
+            signs = rng.choice([-1, 1], size=len(abs_vals))
+            sample = signs * abs_vals
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -1639,7 +1660,7 @@ def compute_insider_panel(panel, form4, insider_profits=None):
 
     # Insider FE via linearmodels.PanelOLS (proper dof adjustment)
     X_cols_fe = ['IS_FUNDAMENTAL', 'IS_COURT']
-    valid_fe = ip_repeat[['OWNER', 'EVENT_DATE', 'NET_PROFIT'] + X_cols_fe].dropna()
+    valid_fe = ip_repeat[['OWNER', 'EVENT_DATE', 'ABNORMAL_NET_SELLING'] + X_cols_fe].dropna()
     if len(valid_fe) < 20:
         return pd.DataFrame()
 
@@ -1657,7 +1678,7 @@ def compute_insider_panel(panel, form4, insider_profits=None):
             valid_fe = valid_fe.groupby(['OWNER', '_time'], as_index=False).mean()
         valid_fe = valid_fe.set_index(['OWNER', '_time'])
 
-        y = valid_fe['NET_PROFIT']
+        y = valid_fe['ABNORMAL_NET_SELLING']
         X_fe = valid_fe[X_cols_fe].astype(float)
         model = PanelOLS(y, X_fe, entity_effects=True).fit(
             cov_type='clustered', cluster_entity=True
@@ -1677,13 +1698,13 @@ def compute_insider_panel(panel, form4, insider_profits=None):
     except Exception as e:
         logger.warning("PanelOLS insider FE failed: %s", e)
         # Fallback to demeaned OLS if linearmodels fails
-        for col in ['NET_PROFIT'] + X_cols_fe:
+        for col in ['ABNORMAL_NET_SELLING'] + X_cols_fe:
             owner_means = ip_repeat.groupby('OWNER')[col].transform('mean')
             ip_repeat[f'{col}_DM'] = ip_repeat[col] - owner_means
-        valid_dm = ip_repeat[['NET_PROFIT_DM'] + [f'{c}_DM' for c in X_cols_fe]].dropna()
+        valid_dm = ip_repeat[['ABNORMAL_NET_SELLING_DM'] + [f'{c}_DM' for c in X_cols_fe]].dropna()
         if len(valid_dm) >= 20:
             X = sm.add_constant(valid_dm[[f'{c}_DM' for c in X_cols_fe]].astype(float))
-            y_dm = valid_dm['NET_PROFIT_DM'].astype(float)
+            y_dm = valid_dm['ABNORMAL_NET_SELLING_DM'].astype(float)
             model_dm = sm.OLS(y_dm, X).fit(
                 cov_type='cluster',
                 cov_kwds={'groups': ip_repeat.loc[valid_dm.index, 'OWNER']},
@@ -1705,9 +1726,9 @@ def compute_insider_panel(panel, form4, insider_profits=None):
     # Pooled OLS for comparison
     try:
         X_cols_pooled = ['IS_FUNDAMENTAL', 'IS_COURT', 'HIGH_CONN_INT', 'HIGH_OPP_INT']
-        valid_p = ip[[col for col in ['NET_PROFIT'] + X_cols_pooled]].dropna()
+        valid_p = ip[[col for col in ['ABNORMAL_NET_SELLING'] + X_cols_pooled]].dropna()
         X = sm.add_constant(valid_p[X_cols_pooled].astype(float))
-        y = valid_p['NET_PROFIT'].astype(float)
+        y = valid_p['ABNORMAL_NET_SELLING'].astype(float)
         model = sm.OLS(y, X).fit(
             cov_type='cluster',
             cov_kwds={'groups': ip.loc[valid_p.index, 'OWNER']},
@@ -1774,7 +1795,7 @@ def compute_concentration_cuts(panel, form4, insider_profits=None):
         if sub_profits.empty or len(sub_profits) < 5:
             continue
 
-        abs_profits = np.abs(sub_profits['NET_PROFIT'].values)
+        abs_profits = np.abs(sub_profits['ABNORMAL_NET_SELLING'].values)
         total = abs_profits.sum()
         if total == 0:
             continue
@@ -1789,11 +1810,11 @@ def compute_concentration_cuts(panel, form4, insider_profits=None):
         results.append({
             'CUT': label, 'N_INSIDER_EVENTS': n,
             'N_UNIQUE_INSIDERS': sub_profits['OWNER'].nunique(),
-            'TOTAL_ABS_PROFIT': total,
+            'TOTAL_ABS_NET_SELLING': total,
             'TOP_10PCT_SHARE': top10_share,
             'GINI': gini,
-            'MEAN_ABS_PROFIT': abs_profits.mean(),
-            'MEDIAN_ABS_PROFIT': np.median(abs_profits),
+            'MEAN_ABS_NET_SELLING': abs_profits.mean(),
+            'MEDIAN_ABS_NET_SELLING': np.median(abs_profits),
         })
 
     return pd.DataFrame(results)
@@ -1818,10 +1839,10 @@ def compute_repeat_traders(panel, form4, insider_profits=None):
 
     owner_counts = insider_profits.groupby('OWNER').size().reset_index(name='N_EVENTS')
     owner_stats = insider_profits.groupby('OWNER').agg(
-        TOTAL_ABS_PROFIT=('NET_PROFIT', lambda x: x.abs().sum()),
-        MEAN_NET_PROFIT=('NET_PROFIT', 'mean'),
+        TOTAL_ABS_NET_SELLING=('ABNORMAL_NET_SELLING', lambda x: x.abs().sum()),
+        MEAN_NET_SELLING=('ABNORMAL_NET_SELLING', 'mean'),
         N_TICKERS=('TICKER', 'nunique'),
-        PCT_POSITIVE=('NET_PROFIT', lambda x: (x > 0).mean()),
+        PCT_NET_SELLERS=('ABNORMAL_NET_SELLING', lambda x: (x > 0).mean()),
     ).reset_index()
     owner_stats = owner_stats.merge(owner_counts, on='OWNER')
 
@@ -1836,14 +1857,14 @@ def compute_repeat_traders(panel, form4, insider_profits=None):
         'MAX_EVENTS': owner_stats['N_EVENTS'].max(),
         'N_REPEAT': (owner_stats['N_EVENTS'] > 1).sum(),
         'PCT_REPEAT': (owner_stats['N_EVENTS'] > 1).mean(),
-        'TOTAL_ABS_PROFIT': owner_stats['TOTAL_ABS_PROFIT'].sum(),
-        'REPEAT_SHARE_OF_PROFIT': np.nan,
+        'TOTAL_ABS_NET_SELLING': owner_stats['TOTAL_ABS_NET_SELLING'].sum(),
+        'REPEAT_SHARE_OF_NET_SELLING': np.nan,
     })
 
     # Repeat vs one-time
     repeat = owner_stats[owner_stats['N_EVENTS'] > 1]
     onetime = owner_stats[owner_stats['N_EVENTS'] == 1]
-    total_profit = owner_stats['TOTAL_ABS_PROFIT'].sum()
+    total_profit = owner_stats['TOTAL_ABS_NET_SELLING'].sum()
 
     if total_profit > 0 and not repeat.empty:
         results.append({
@@ -1854,8 +1875,8 @@ def compute_repeat_traders(panel, form4, insider_profits=None):
             'MAX_EVENTS': repeat['N_EVENTS'].max(),
             'N_REPEAT': len(repeat),
             'PCT_REPEAT': 1.0,
-            'TOTAL_ABS_PROFIT': repeat['TOTAL_ABS_PROFIT'].sum(),
-            'REPEAT_SHARE_OF_PROFIT': repeat['TOTAL_ABS_PROFIT'].sum() / total_profit,
+            'TOTAL_ABS_NET_SELLING': repeat['TOTAL_ABS_NET_SELLING'].sum(),
+            'REPEAT_SHARE_OF_NET_SELLING': repeat['TOTAL_ABS_NET_SELLING'].sum() / total_profit,
         })
 
     if not onetime.empty:
@@ -1867,15 +1888,15 @@ def compute_repeat_traders(panel, form4, insider_profits=None):
             'MAX_EVENTS': 1,
             'N_REPEAT': 0,
             'PCT_REPEAT': 0.0,
-            'TOTAL_ABS_PROFIT': onetime['TOTAL_ABS_PROFIT'].sum(),
-            'REPEAT_SHARE_OF_PROFIT': onetime['TOTAL_ABS_PROFIT'].sum() / total_profit if total_profit > 0 else 0,
+            'TOTAL_ABS_NET_SELLING': onetime['TOTAL_ABS_NET_SELLING'].sum(),
+            'REPEAT_SHARE_OF_NET_SELLING': onetime['TOTAL_ABS_NET_SELLING'].sum() / total_profit if total_profit > 0 else 0,
         })
 
     # Wilcoxon on repeat vs one-time profits
     repeat_ids = repeat['OWNER'].values if not repeat.empty else []
     onetime_ids = onetime['OWNER'].values if not onetime.empty else []
-    repeat_profits = insider_profits[insider_profits['OWNER'].isin(repeat_ids)]['NET_PROFIT']
-    onetime_profits = insider_profits[insider_profits['OWNER'].isin(onetime_ids)]['NET_PROFIT']
+    repeat_profits = insider_profits[insider_profits['OWNER'].isin(repeat_ids)]['ABNORMAL_NET_SELLING']
+    onetime_profits = insider_profits[insider_profits['OWNER'].isin(onetime_ids)]['ABNORMAL_NET_SELLING']
 
     if len(repeat_profits) >= 10 and len(onetime_profits) >= 10:
         u_stat, u_pval = stats.mannwhitneyu(repeat_profits, onetime_profits, alternative='two-sided')
@@ -1887,9 +1908,9 @@ def compute_repeat_traders(panel, form4, insider_profits=None):
             'U_PVALUE': u_pval,
             'T_STAT': t_stat,
             'T_PVALUE': t_pval,
-            'REPEAT_MEAN_PROFIT': repeat_profits.mean(),
-            'ONETIME_MEAN_PROFIT': onetime_profits.mean(),
-            'DIFF_MEAN_PROFIT': repeat_profits.mean() - onetime_profits.mean(),
+            'REPEAT_MEAN_NET_SELLING': repeat_profits.mean(),
+            'ONETIME_MEAN_NET_SELLING': onetime_profits.mean(),
+            'DIFF_MEAN_NET_SELLING': repeat_profits.mean() - onetime_profits.mean(),
         })
 
     return pd.DataFrame(results)
@@ -1930,7 +1951,7 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
         return pd.DataFrame(), pd.DataFrame()
 
     # Identify active insiders (top/bottom decile of abnormal net trading)
-    profits = insider_profits['NET_PROFIT']
+    profits = insider_profits['ABNORMAL_NET_SELLING']
     q10 = profits.quantile(0.10)
     q90 = profits.quantile(0.90)
     active_owners = insider_profits[
@@ -1992,7 +2013,7 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
             if trade_type == 'sell':
                 trade_date = txn['transaction_date']
                 buy_dates = _buy_dates_by_insider.get((owner, ticker), [])
-                cutoff = trade_date - pd.Timedelta(days=180)
+                cutoff = trade_date - pd.DateOffset(months=6)
                 idx = bisect.bisect_left(buy_dates, cutoff)
                 has_prior_buy_6m = any(
                     cutoff <= d < trade_date for d in buy_dates[idx:]
@@ -2032,16 +2053,21 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
     trades = pd.DataFrame(trade_rows)
     logger.info("  Total pre-event trades (pre-dedup): %d", len(trades))
 
-    # Deduplicate: same (OWNER, TICKER, TRADE_DATE, TRADE_TYPE) across events
-    # Keep the first occurrence; assign a unique trade ID for clustering
+    # Deduplicate: same (OWNER, TICKER, TRADE_DATE, TRADE_TYPE) across events.
+    # When a trade falls in multiple event windows, keep the closest event
+    # (smallest |EVENT_DATE - TRADE_DATE|) so EVENT_CAR attribution is
+    # meaningful.  IS_ACTIVE is true if active in ANY associated event.
     n_before = len(trades)
     trades['TRADE_ID'] = (trades['OWNER'] + '|' + trades['TICKER'] + '|' +
                           trades['TRADE_DATE'].astype(str) + '|' + trades['TRADE_TYPE'])
     # For IS_ACTIVE: a trade is active if active in ANY event (conservative)
     active_by_trade = trades.groupby('TRADE_ID')['IS_ACTIVE'].any().reset_index()
     active_by_trade.columns = ['TRADE_ID', 'IS_ACTIVE_ANY']
+    # Sort by proximity to event so drop_duplicates keeps the closest event
+    trades['_days_to_event'] = (trades['EVENT_DATE'] - trades['TRADE_DATE']).dt.days.abs()
+    trades = trades.sort_values('_days_to_event')
     trades = trades.drop_duplicates(subset='TRADE_ID', keep='first')
-    trades = trades.drop(columns=['IS_ACTIVE']).merge(
+    trades = trades.drop(columns=['IS_ACTIVE', '_days_to_event']).merge(
         active_by_trade, on='TRADE_ID'
     ).rename(columns={'IS_ACTIVE_ANY': 'IS_ACTIVE'})
     logger.info("  After dedup: %d trades (%d removed), %d active, %d inactive",
@@ -2303,6 +2329,7 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
         'TRANSACTION_CODE', 'TRADE_VALUE', 'IS_ACTIVE',
         'EVENT_CATEGORY', 'EVENT_TYPE',
         'REGULATORY_PERIOD', 'HIGH_POLITICAL_CONNECTION', 'HIGH_OPP',
+        'IS_ROUTINE', 'HAS_PRIOR_BUY_6M',
         'CAR_30', 'CAR_60', 'PROFITABLE_30', 'PROFITABLE_60',
         'SIGNED_PROFIT_30', 'SIGNED_PROFIT_60',
     ]
@@ -2953,6 +2980,20 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         r = _summarize(sub, label)
         if r:
             summary_rows.append(r)
+
+    # Discretionary trades only (Purchase/Sale codes P and S).  Excludes
+    # M (option exercise), D (disposition), F (tax withholding on RSU vest),
+    # A (non-purchase acquisition).  Matches the §12 POLITICAL_PS_ONLY filter.
+    if 'TRANSACTION_CODE' in valid_pol.columns:
+        ps_only = valid_pol[valid_pol['TRANSACTION_CODE'].isin(['P', 'S'])]
+        ps_sells = ps_only[ps_only['TRADE_TYPE'] == 'sell']
+        ps_buys = ps_only[ps_only['TRADE_TYPE'] == 'buy']
+        for sub, label in [(ps_only, 'ALL_PS_ONLY'),
+                           (ps_sells, 'SELLS_PS_ONLY'),
+                           (ps_buys, 'BUYS_PS_ONLY')]:
+            r = _summarize(sub, label)
+            if r:
+                summary_rows.append(r)
 
     # 10b5-1 proxy: insider-level routine vs opportunistic (CMP classification)
     # The headline rests on sells being informationally motivated rather than
