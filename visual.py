@@ -276,15 +276,34 @@ class ResultStore:
             row.update(metadata)
         df = pd.DataFrame([row])
 
+        def _save_to_sqlite(dataframe):
+            """Save figure with IMAGE_DATA to SQLite (dashboard reads blobs from here)."""
+            from Database import SQLiteLoader
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   'data', 'signals_systems.db')
+            loader = SQLiteLoader(db_path=db_path)
+            loader.connect()
+            try:
+                loader.conn.execute(
+                    'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
+                loader.conn.commit()
+            except Exception:
+                try:
+                    loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
+                    loader.conn.commit()
+                except Exception:
+                    pass
+            result = loader.write_table(dataframe, 'FIGURES', replace=False)
+            loader.close()
+            return result
+
         try:
             if self.backend == 'sqlite':
-                # Drop and recreate table if schema changed (new metadata cols)
                 try:
                     self._loader.conn.execute(
                         'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
                     self._loader.conn.commit()
                 except Exception:
-                    # Table may not exist or schema mismatch — drop to recreate
                     try:
                         self._loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
                         self._loader.conn.commit()
@@ -295,6 +314,11 @@ class ResultStore:
                 # Athena/S3: drop binary IMAGE_DATA (not Parquet-safe), append only
                 athena_df = df.drop(columns=['IMAGE_DATA'], errors='ignore')
                 result = self._loader.write_table(athena_df, 'FIGURES', replace=False)
+                # Also save to SQLite so dashboard can load IMAGE_DATA blobs
+                try:
+                    _save_to_sqlite(df)
+                except Exception as e:
+                    logger.warning('SQLite figure save failed for %s: %s', name, e)
             return result
         except Exception as e:
             logger.error('Failed to save figure %s: %s', name, e)
