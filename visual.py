@@ -250,6 +250,41 @@ class ResultStore:
 
     # ── figure persistence ─────────────────────────────────────────────
 
+    @staticmethod
+    def _upsert_figure_sqlite(loader, df, name):
+        """Delete-then-append inside the same transaction so a failed append
+        does not leave the row missing.  Falls back to DROP on schema drift."""
+        try:
+            loader.conn.execute(
+                'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
+        except Exception:
+            # Table missing or schema mismatch — DROP and let write_table recreate
+            loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
+            loader.conn.commit()
+        # append inside the same transaction (DELETE not yet committed)
+        res = loader.write_table(df, 'FIGURES', replace=False)
+        if res.get('status') == 'SUCCESS':
+            loader.conn.commit()
+        else:
+            loader.conn.rollback()
+        return res
+
+    def _save_figure_to_sqlite(self, df, name):
+        """Mirror the figure row (incl. IMAGE_DATA) into the dashboard's SQLite DB."""
+        from Database import SQLiteLoader
+        try:
+            with SQLiteLoader() as loader:
+                res = self._upsert_figure_sqlite(loader, df, name)
+                if res.get('status') == 'FAILED':
+                    # Self-heal a drifted schema and retry
+                    loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
+                    loader.conn.commit()
+                    res = loader.write_table(df, 'FIGURES', replace=False)
+                return res
+        except Exception as e:
+            logger.error('SQLite figure save error for %s: %s', name, e)
+            return {'status': 'FAILED', 'error': str(e)}
+
     def save_figure(self, name, fig, metadata=None):
         os.makedirs(FIGURE_DIR, exist_ok=True)
         png_path = os.path.join(FIGURE_DIR, f'{name}.png')
@@ -276,49 +311,18 @@ class ResultStore:
             row.update(metadata)
         df = pd.DataFrame([row])
 
-        def _save_to_sqlite(dataframe):
-            """Save figure with IMAGE_DATA to SQLite (dashboard reads blobs from here)."""
-            from Database import SQLiteLoader
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   'data', 'signals_systems.db')
-            loader = SQLiteLoader(db_path=db_path)
-            loader.connect()
-            try:
-                loader.conn.execute(
-                    'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
-                loader.conn.commit()
-            except Exception:
-                try:
-                    loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
-                    loader.conn.commit()
-                except Exception:
-                    pass
-            result = loader.write_table(dataframe, 'FIGURES', replace=False)
-            loader.close()
-            return result
-
         try:
             if self.backend == 'sqlite':
-                try:
-                    self._loader.conn.execute(
-                        'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
-                    self._loader.conn.commit()
-                except Exception:
-                    try:
-                        self._loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
-                        self._loader.conn.commit()
-                    except Exception:
-                        pass
-                result = self._loader.write_table(df, 'FIGURES', replace=False)
+                result = self._upsert_figure_sqlite(self._loader, df, name)
             else:
                 # Athena/S3: drop binary IMAGE_DATA (not Parquet-safe), append only
                 athena_df = df.drop(columns=['IMAGE_DATA'], errors='ignore')
                 result = self._loader.write_table(athena_df, 'FIGURES', replace=False)
                 # Also save to SQLite so dashboard can load IMAGE_DATA blobs
-                try:
-                    _save_to_sqlite(df)
-                except Exception as e:
-                    logger.warning('SQLite figure save failed for %s: %s', name, e)
+                sqlite_res = self._save_figure_to_sqlite(df, name)
+                if sqlite_res.get('status') != 'SUCCESS':
+                    logger.warning('SQLite figure save failed for %s: %s', name, sqlite_res.get('error'))
+                result['sqlite_status'] = sqlite_res.get('status')
             return result
         except Exception as e:
             logger.error('Failed to save figure %s: %s', name, e)
@@ -2254,9 +2258,8 @@ def e3_01_directional_accuracy(store):
         return _empty_fig('E3-01: No informed trading data')
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(10, 6))
-        # Filter to main cuts
-        main = df[df['CUT'].isin(['ALL_TRADES', 'ALL_SELLS', 'ALL_BUYS',
-                                   'CONTROL', 'CONTROL_SELLS', 'CONTROL_BUYS'])]
+        # Filter to main cuts (data uses ALL/SELLS_ONLY/BUYS_ONLY with SAMPLE column)
+        main = df[df['CUT'].isin(['ALL', 'SELLS_ONLY', 'BUYS_ONLY'])]
         if main.empty:
             main = df.head(10)
         for col in ['METRIC_VALUE', 'METRIC_PVAL']:
@@ -2264,7 +2267,7 @@ def e3_01_directional_accuracy(store):
                 main[col] = pd.to_numeric(main[col], errors='coerce')
         labels = main['CUT'].values
         vals = main['METRIC_VALUE'].apply(_safe_float).values
-        colors = [C_POL_CTRL.get(str(main.iloc[i].get('SAMPLE', '')), '#888')
+        colors = [C_POL_CTRL.get(str(main.iloc[i].get('SAMPLE', 'POLITICAL')), '#888')
                   for i in range(len(main))]
         bars = ax.barh(range(len(labels)), vals, color=colors)
         ax.axvline(0.5, color='grey', lw=1.2, ls='--', label='Null: 50%')
@@ -2360,26 +2363,33 @@ def e3_04_regulatory_period(store):
     if df.empty:
         return _empty_fig('E3-04: No informed trading data')
     with plt.rc_context(STYLE):
-        periods = ['PRE_SOX', 'SOX_ERA', 'DODD_FRANK', 'POST_AMENDMENTS']
         fig, ax = plt.subplots(figsize=(10, 6))
-        pol_rows = df[(df['CUT'].isin(periods)) & (df.get('SAMPLE', pd.Series()) == 'POLITICAL')]
-        ctrl_rows = df[df['CUT'].str.startswith('CTRL_')]
+        # Data uses REG:period format with SAMPLE column
+        pol_rows = df[(df['CUT'].str.startswith('REG:')) &
+                      (~df['CUT'].str.startswith('REG_SELLS:')) &
+                      (df['SAMPLE'] == 'POLITICAL')].copy()
+        ctrl_rows = df[(df['CUT'].str.startswith('REG:')) &
+                       (~df['CUT'].str.startswith('REG_SELLS:')) &
+                       (df['SAMPLE'] == 'CONTROL')].copy()
         if pol_rows.empty:
-            pol_rows = df[df['CUT'].isin(periods)]
+            pol_rows = df[df['CUT'].str.startswith('REG:') &
+                          ~df['CUT'].str.startswith('REG_SELLS:')].copy()
         if not pol_rows.empty:
             for col in ['METRIC_VALUE']:
                 pol_rows[col] = pd.to_numeric(pol_rows[col], errors='coerce')
-            x = range(len(pol_rows))
+            x = np.arange(len(pol_rows))
             vals = pol_rows['METRIC_VALUE'].apply(_safe_float).values
-            ax.bar(x, vals, color='#e74c3c', alpha=0.8, label='Political')
-            ax.set_xticks(list(x))
-            ax.set_xticklabels(pol_rows['CUT'].values, rotation=30, ha='right')
+            labels = [c.replace('REG:', '') for c in pol_rows['CUT'].values]
+            ax.bar(x - 0.15, vals, width=0.3, color='#e74c3c', alpha=0.8, label='Political')
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=30, ha='right')
         if not ctrl_rows.empty:
             for col in ['METRIC_VALUE']:
                 ctrl_rows[col] = pd.to_numeric(ctrl_rows[col], errors='coerce')
-            cx = range(len(ctrl_rows))
+            # Align control bars with political by matching CUT values
+            cx = np.arange(len(ctrl_rows))
             cvals = ctrl_rows['METRIC_VALUE'].apply(_safe_float).values
-            ax.bar([i + 0.3 for i in cx], cvals, width=0.3, color='#3498db', alpha=0.8, label='Control')
+            ax.bar(cx + 0.15, cvals, width=0.3, color='#3498db', alpha=0.8, label='Control')
         ax.axhline(0.5, color='grey', lw=1.2, ls='--')
         ax.set_ylabel('Directional Accuracy')
         ax.set_title('Accuracy by Regulatory Period')
@@ -2397,23 +2407,26 @@ def e3_05_dollar_magnitudes(store):
         for col in df.columns:
             if col not in ('CUT', 'SAMPLE', 'METRIC_TYPE'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Column is TOTAL_PROFIT (not TOTAL_EVENT_PROFIT)
+        profit_col = 'TOTAL_PROFIT' if 'TOTAL_PROFIT' in df.columns else 'TOTAL_EVENT_PROFIT'
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-        # Left: by proximity
-        prox = df[df['CUT'].str.contains('d$', regex=True, na=False)]
-        if not prox.empty and 'TOTAL_EVENT_PROFIT' in prox.columns:
-            axes[0].bar(range(len(prox)), prox['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
+        # Left: by proximity (CUT like SELLS_0-30d, not containing CAR)
+        prox = df[df['CUT'].str.match(r'SELLS_\d+-\d+d$', na=False)]
+        if not prox.empty and profit_col in prox.columns:
+            axes[0].bar(range(len(prox)), prox[profit_col].apply(_safe_float).values,
                         color=C_PROXIMITY[:len(prox)])
             axes[0].set_xticks(range(len(prox)))
             axes[0].set_xticklabels(prox['CUT'].values, rotation=30, ha='right')
         axes[0].set_title('Total Event Profit by Proximity')
         axes[0].set_ylabel('Total Profit ($)')
-        # Right: by severity threshold
-        sev = df[df['CUT'].str.contains('CAR_', na=False)]
-        if not sev.empty and 'TOTAL_EVENT_PROFIT' in sev.columns:
-            axes[1].bar(range(len(sev)), sev['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
-                        color=['#f4a261', '#e76f51', '#e63946'][:len(sev)])
+        # Right: by severity threshold (CUT contains CAR<=)
+        sev = df[df['CUT'].str.contains('CAR<=', na=False)]
+        if not sev.empty and profit_col in sev.columns:
+            sev_colors = ['#f4a261', '#e76f51', '#e63946'] * ((len(sev) // 3) + 1)
+            axes[1].bar(range(len(sev)), sev[profit_col].apply(_safe_float).values,
+                        color=sev_colors[:len(sev)])
             axes[1].set_xticks(range(len(sev)))
-            axes[1].set_xticklabels(sev['CUT'].values, rotation=30, ha='right')
+            axes[1].set_xticklabels(sev['CUT'].values, rotation=30, ha='right', fontsize=7)
         axes[1].set_title('Total Event Profit by CAR Severity')
         axes[1].set_ylabel('Total Profit ($)')
         fig.suptitle('Informed Trading: Dollar Magnitudes', fontsize=13, fontweight='bold')
@@ -2475,21 +2488,25 @@ def e3_08_reversal_regression(store):
     if df.empty:
         return _empty_fig('E3-08: No regression data')
     with plt.rc_context(STYLE):
+        spec_col = 'SPECIFICATION' if 'SPECIFICATION' in df.columns else 'SPEC'
+        coef_col = 'COEFFICIENT' if 'COEFFICIENT' in df.columns else 'COEF'
+        se_col = 'STD_ERROR' if 'STD_ERROR' in df.columns else 'SE'
+        p_col = 'P_VALUE' if 'P_VALUE' in df.columns else 'PVAL'
         for col in df.columns:
-            if col not in ('SPEC', 'VARIABLE', 'SAMPLE'):
+            if col not in (spec_col, 'VARIABLE', 'SAMPLE'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.3 + 1)))
         for i, (_, row) in enumerate(df.iterrows()):
-            coef = _safe_float(row.get('COEF', 0))
-            se = _safe_float(row.get('SE', 0))
-            p = _safe_float(row.get('PVAL', 1))
+            coef = _safe_float(row.get(coef_col, 0))
+            se = _safe_float(row.get(se_col, 0))
+            p = _safe_float(row.get(p_col, 1))
             ci_lo = coef - 1.96 * se
             ci_hi = coef + 1.96 * se
             color = '#e74c3c' if p < 0.05 else '#3498db'
             ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=2, solid_capstyle='round')
             ax.plot(coef, i, 'o', color=color, ms=7, zorder=5)
         ax.axvline(0, color='black', lw=0.8)
-        labels = [f"{row.get('SPEC', '')}: {row.get('VARIABLE', '')}" for _, row in df.iterrows()]
+        labels = [f"{row.get(spec_col, '')}: {row.get('VARIABLE', '')}" for _, row in df.iterrows()]
         ax.set_yticks(range(len(df)))
         ax.set_yticklabels(labels, fontsize=8)
         ax.set_xlabel('Coefficient')
@@ -2529,19 +2546,36 @@ def e3_10_wilcoxon_family(store):
         return _empty_fig('E3-10: No Wilcoxon family data')
     with plt.rc_context(STYLE):
         for col in df.columns:
-            if col not in ('CUT', 'FAMILY', 'TEST'):
+            if col not in ('CUT', 'SUBSET', 'FAMILY', 'TEST', 'DIVERGENCE'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(10, max(5, len(df) * 0.3 + 1)))
-        if 'RAW_P' in df.columns and 'BH_P' in df.columns:
+        # Data uses WILCOXON_PVALUE + T_PVALUE + BH_SIGNIFICANT/HOLM_SIGNIFICANT
+        w_col = 'WILCOXON_PVALUE' if 'WILCOXON_PVALUE' in df.columns else 'RAW_P'
+        t_col = 'T_PVALUE' if 'T_PVALUE' in df.columns else None
+        if w_col in df.columns:
             y = range(len(df))
-            labels = df['CUT'].values if 'CUT' in df.columns else df.index.values
-            raw = df['RAW_P'].apply(_safe_float).values
-            bh = df['BH_P'].apply(_safe_float).values
-            ax.scatter(raw, list(y), marker='o', color='#e74c3c', label='Raw p', zorder=5)
-            ax.scatter(bh, list(y), marker='s', color='#3498db', label='BH-adjusted p', zorder=5)
+            label_col = 'CUT' if 'CUT' in df.columns else None
+            sub_col = 'SUBSET' if 'SUBSET' in df.columns else None
+            if label_col and sub_col:
+                labels = [f"{r.get('CUT', '')}:{r.get('SUBSET', '')}" for _, r in df.iterrows()]
+            elif label_col:
+                labels = df['CUT'].values
+            else:
+                labels = df.index.values
+            raw = df[w_col].apply(_safe_float).values
+            ax.scatter(raw, list(y), marker='o', color='#e74c3c', label='Wilcoxon p', zorder=5)
+            if t_col and t_col in df.columns:
+                t_vals = df[t_col].apply(_safe_float).values
+                ax.scatter(t_vals, list(y), marker='s', color='#3498db', label='t-test p', zorder=5)
+            # Highlight BH-significant rows
+            if 'BH_SIGNIFICANT' in df.columns:
+                bh_sig = df['BH_SIGNIFICANT'].values
+                for i, sig in enumerate(bh_sig):
+                    if _safe_float(sig) == 1:
+                        ax.scatter(raw[i], i, marker='*', color='gold', s=200, zorder=6)
             ax.axvline(0.05, color='grey', lw=1, ls='--', label='α=0.05')
             ax.set_yticks(list(y))
-            ax.set_yticklabels(labels, fontsize=8)
+            ax.set_yticklabels(labels, fontsize=7)
             ax.legend(fontsize=9)
         ax.set_xlabel('p-value')
         ax.set_title('Wilcoxon Family Correction (Holm + BH)')
@@ -2556,14 +2590,25 @@ def e3_11_insider_concentration(store):
     if df.empty:
         return _empty_fig('E3-11: No concentration data')
     with plt.rc_context(STYLE):
+        cat_col = 'EVENT_CATEGORY' if 'EVENT_CATEGORY' in df.columns else 'CUT'
         for col in df.columns:
-            if col not in ('CUT', 'METRIC'):
+            if col not in (cat_col, 'METRIC'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        fig, ax = plt.subplots(figsize=(10, 6))
-        if 'METRIC' in df.columns and 'VALUE' in df.columns:
-            labels = df.apply(lambda r: f"{r.get('CUT', '')}:{r.get('METRIC', '')}", axis=1).values
-            vals = df['VALUE'].apply(_safe_float).values
-            ax.barh(range(len(labels)), vals, color=C_SEQ[:len(labels)])
+        # Focus on interpretable metrics (Gini, HHI, top-K shares), skip raw dollar amounts
+        key_metrics = df[df['METRIC'].isin(['GINI', 'HHI', 'TOP_1PCT_SHARE', 'TOP_5PCT_SHARE',
+                                             'TOP_10PCT_SHARE', 'TOP_20PCT_SHARE', 'TOP_50PCT_SHARE'])]
+        if key_metrics.empty:
+            key_metrics = df
+        fig, ax = plt.subplots(figsize=(10, max(5, len(key_metrics) * 0.3 + 1)))
+        if 'METRIC' in key_metrics.columns and 'VALUE' in key_metrics.columns:
+            labels = key_metrics.apply(
+                lambda r: f"{r.get(cat_col, '')}:{r.get('METRIC', '')}", axis=1).values
+            vals = key_metrics['VALUE'].apply(_safe_float).values
+            colors = []
+            cat_colors = {'FUNDAMENTAL': '#e74c3c', 'CULTURAL': '#3498db', 'ALL': '#2ecc71'}
+            for _, r in key_metrics.iterrows():
+                colors.append(cat_colors.get(str(r.get(cat_col, '')), '#888'))
+            ax.barh(range(len(labels)), vals, color=colors)
             ax.set_yticks(range(len(labels)))
             ax.set_yticklabels(labels, fontsize=8)
         ax.set_xlabel('Value')
@@ -2579,26 +2624,32 @@ def e3_12_tost_equivalence(store):
         return _empty_fig('E3-12: No TOST data')
     with plt.rc_context(STYLE):
         for col in df.columns:
-            if col not in ('TEST', 'MARGIN_NAME'):
+            if col not in ('TEST', 'EVENT_CATEGORY', 'MARGIN_NAME'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(10, 5))
         for i, (_, row) in enumerate(df.iterrows()):
-            delta = _safe_float(row.get('DELTA', 0.2))
-            ci_lo = _safe_float(row.get('CI90_LOWER', 0))
-            ci_hi = _safe_float(row.get('CI90_UPPER', 0))
-            diff = _safe_float(row.get('DIFF_MEAN', 0))
+            delta = _safe_float(row.get('DELTA_RAW', row.get('DELTA', 0.2)))
+            mean = _safe_float(row.get('MEAN', 0))
+            se = _safe_float(row.get('SE', 0))
+            # Build 90% CI from mean ± 1.645*SE
+            ci_lo = mean - 1.645 * se if se > 0 else mean
+            ci_hi = mean + 1.645 * se if se > 0 else mean
             equiv = _safe_float(row.get('EQUIVALENT', 0))
             color = '#27ae60' if equiv == 1 else '#e74c3c'
             ax.plot([ci_lo, ci_hi], [i, i], color=color, lw=3, solid_capstyle='round')
-            ax.plot(diff, i, 'o', color=color, ms=8, zorder=5)
+            ax.plot(mean, i, 'o', color=color, ms=8, zorder=5)
             ax.plot([-delta, -delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
             ax.plot([delta, delta], [i - 0.3, i + 0.3], color='grey', lw=1.5, ls='--')
+            # Annotate with p-value
+            p_tost = _safe_float(row.get('P_TOST', np.nan))
+            ax.text(ci_hi + delta * 0.1, i, f'p={p_tost:.3f}', va='center', fontsize=9)
         ax.axvline(0, color='black', lw=0.8)
-        labels = df['MARGIN_NAME'].values if 'MARGIN_NAME' in df.columns else [str(i) for i in range(len(df))]
+        labels = (df['EVENT_CATEGORY'].values if 'EVENT_CATEGORY' in df.columns
+                  else df.get('MARGIN_NAME', pd.Series([str(i) for i in range(len(df))])).values)
         ax.set_yticks(range(len(df)))
         ax.set_yticklabels(labels)
-        ax.set_xlabel('Difference')
-        ax.set_title('TOST Equivalence Tests')
+        ax.set_xlabel('Mean Abnormal Net Trading')
+        ax.set_title('TOST Equivalence Tests (90% CI vs ±SESOI)')
         fig.tight_layout()
     return fig
 
@@ -2611,11 +2662,12 @@ def e3_13_placebo_test(store):
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(8, 5))
         for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        obs = _safe_float(df.iloc[0].get('OBSERVED_STAT', 0))
-        mean = _safe_float(df.iloc[0].get('PLACEBO_MEAN', 0))
-        std = _safe_float(df.iloc[0].get('PLACEBO_STD', 1))
-        p = _safe_float(df.iloc[0].get('EMPIRICAL_P', 1))
+            if col not in ('TEST',):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        obs = _safe_float(df.iloc[0].get('OBSERVED_DIFF', df.iloc[0].get('OBSERVED_STAT', 0)))
+        mean = _safe_float(df.iloc[0].get('NULL_MEAN', df.iloc[0].get('PLACEBO_MEAN', 0)))
+        std = _safe_float(df.iloc[0].get('NULL_STD', df.iloc[0].get('PLACEBO_STD', 1)))
+        p = _safe_float(df.iloc[0].get('P_VALUE', df.iloc[0].get('EMPIRICAL_P', 1)))
         # Draw normal approximation
         x_range = np.linspace(mean - 4 * std, mean + 4 * std, 200)
         y_range = sp_stats.norm.pdf(x_range, mean, std) if std > 0 else np.zeros_like(x_range)
@@ -2649,8 +2701,9 @@ def e3_14_mean_vs_distributional(store):
             axes[0].set_xlabel('-log₁₀(p)')
             axes[0].set_title('t-test p-values')
             axes[0].legend(fontsize=8)
-        if 'WILCOXON_P' in df.columns:
-            axes[1].barh(range(len(df)), -np.log10(df['WILCOXON_P'].apply(_safe_float).values + 1e-30),
+        w_p_col = 'WILCOXON_PVALUE' if 'WILCOXON_PVALUE' in df.columns else 'WILCOXON_P'
+        if w_p_col in df.columns:
+            axes[1].barh(range(len(df)), -np.log10(df[w_p_col].apply(_safe_float).values + 1e-30),
                          color='#3498db', alpha=0.8)
             axes[1].axvline(-np.log10(0.05), color='grey', ls='--', label='p=0.05')
             axes[1].set_yticks(range(len(df)))
@@ -2685,24 +2738,106 @@ def e3_15_concentration_cuts(store):
 
 
 def e3_16_repeat_traders(store):
-    """Repeat trader analysis."""
+    """Repeat trader analysis: counts, concentration, mean net selling, and test."""
     df = store.e3_repeat_traders
     if df.empty:
         return _empty_fig('E3-16: No repeat trader data')
     with plt.rc_context(STYLE):
         for col in df.columns:
-            if col not in ('CUT',):
+            if col not in ('GROUP',):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        fig, ax = plt.subplots(figsize=(8, 5))
-        labels = df['CUT'].values if 'CUT' in df.columns else df.index.values
-        vals = df['ACCURACY'].apply(_safe_float).values if 'ACCURACY' in df.columns else np.zeros(len(df))
-        ax.bar(range(len(labels)), vals, color=C_SEQ[:len(labels)])
-        ax.axhline(0.5, color='grey', lw=1, ls='--')
-        ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=30, ha='right')
-        ax.set_ylabel('Accuracy')
-        ax.set_title('Repeat Trader Directional Accuracy')
-        fig.tight_layout()
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        c_repeat, c_onetime = '#3498db', '#e74c3c'
+
+        stat_rows = df[df['GROUP'].isin(['ALL_INSIDERS', 'REPEAT_TRADERS', 'ONE_TIME_TRADERS'])]
+        repeat_row = df[df['GROUP'] == 'REPEAT_TRADERS']
+        onetime_row = df[df['GROUP'] == 'ONE_TIME_TRADERS']
+        test_row = df[df['GROUP'] == 'REPEAT_VS_ONETIME_TEST']
+
+        # (0,0) Insider counts — repeat vs one-time only
+        pair = df[df['GROUP'].isin(['REPEAT_TRADERS', 'ONE_TIME_TRADERS'])]
+        if not pair.empty and 'N_INSIDERS' in pair.columns:
+            vals = pair['N_INSIDERS'].apply(_safe_float).values
+            colors = [c_repeat, c_onetime]
+            bars = axes[0, 0].bar([0, 1], vals, color=colors)
+            axes[0, 0].set_xticks([0, 1])
+            axes[0, 0].set_xticklabels(['Repeat\n(≥ 2 events)', 'One-Time\n(1 event)'])
+            for bar, v in zip(bars, vals):
+                axes[0, 0].text(bar.get_x() + bar.get_width() / 2, v,
+                                f'{int(v):,}', ha='center', va='bottom', fontsize=10)
+            axes[0, 0].set_ylabel('N Insiders')
+            axes[0, 0].set_title('Insider Counts')
+            # Add percentage annotation
+            total = sum(vals)
+            if total > 0:
+                pct_r = vals[0] / total * 100
+                axes[0, 0].text(0.95, 0.95, f'{pct_r:.0f}% repeat',
+                                transform=axes[0, 0].transAxes, ha='right', va='top',
+                                fontsize=9, color='grey')
+
+        # (0,1) Share of abnormal net selling
+        if not pair.empty and 'REPEAT_SHARE_OF_NET_SELLING' in pair.columns:
+            share_vals = pair['REPEAT_SHARE_OF_NET_SELLING'].apply(_safe_float).values
+            bars = axes[0, 1].bar([0, 1], share_vals * 100, color=[c_repeat, c_onetime])
+            axes[0, 1].set_xticks([0, 1])
+            axes[0, 1].set_xticklabels(['Repeat', 'One-Time'])
+            for bar, v in zip(bars, share_vals * 100):
+                axes[0, 1].text(bar.get_x() + bar.get_width() / 2, v,
+                                f'{v:.1f}%', ha='center', va='bottom', fontsize=10)
+            axes[0, 1].set_ylabel('Share (%)')
+            axes[0, 1].set_title('Share of Abnormal Net Selling')
+            axes[0, 1].set_ylim(0, 105)
+
+        # (1,0) Mean abnormal net selling per event
+        if not test_row.empty:
+            r_mean = _safe_float(test_row['REPEAT_MEAN_NET_SELLING'].iloc[0])
+            o_mean = _safe_float(test_row['ONETIME_MEAN_NET_SELLING'].iloc[0])
+            vals = [r_mean / 1000, o_mean / 1000]  # in $K
+            bars = axes[1, 0].bar([0, 1], vals, color=[c_repeat, c_onetime])
+            axes[1, 0].set_xticks([0, 1])
+            axes[1, 0].set_xticklabels(['Repeat', 'One-Time'])
+            for bar, v in zip(bars, vals):
+                axes[1, 0].text(bar.get_x() + bar.get_width() / 2, v,
+                                f'${v:,.1f}K', ha='center', va='bottom', fontsize=10)
+            axes[1, 0].set_ylabel('Mean Abnormal Net Selling ($K)')
+            axes[1, 0].set_title('Mean Net Selling per Event')
+
+        # (1,1) Test results summary
+        axes[1, 1].axis('off')
+        if not test_row.empty:
+            tr = test_row.iloc[0]
+            u_p = _safe_float(tr.get('U_PVALUE', np.nan))
+            t_p = _safe_float(tr.get('T_PVALUE', np.nan))
+            n = _safe_float(tr.get('N_INSIDERS', np.nan))
+            diff = _safe_float(tr.get('DIFF_MEAN_NET_SELLING', np.nan))
+            r_mean = _safe_float(tr.get('REPEAT_MEAN_NET_SELLING', np.nan))
+            o_mean = _safe_float(tr.get('ONETIME_MEAN_NET_SELLING', np.nan))
+
+            lines = [
+                ('Repeat vs One-Time Statistical Tests', 'bold', 13),
+            ]
+            text_lines = []
+            text_lines.append(f'Repeat mean:     ${r_mean:>12,.0f}')
+            text_lines.append(f'One-time mean:   ${o_mean:>12,.0f}')
+            text_lines.append(f'Difference:      ${diff:>12,.0f}')
+            text_lines.append(f'')
+            text_lines.append(f'Mann–Whitney U   p = {u_p:.4f}')
+            text_lines.append(f'Welch t-test     p = {t_p:.4f}')
+            text_lines.append(f'N event-insider obs = {int(n):,}')
+            text_lines.append(f'')
+            sig = 'NOT significant' if min(u_p, t_p) > 0.05 else 'Significant'
+            text_lines.append(f'Result: {sig} at α = 0.05')
+
+            axes[1, 1].set_title('Repeat vs One-Time Tests', fontsize=11, fontweight='bold')
+            axes[1, 1].text(0.1, 0.85, '\n'.join(text_lines),
+                            transform=axes[1, 1].transAxes, fontsize=11,
+                            verticalalignment='top', fontfamily='monospace',
+                            bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa',
+                                      edgecolor='#dee2e6', alpha=0.9))
+
+        fig.suptitle('Repeat Trader Analysis', fontsize=14, fontweight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
 
@@ -2715,15 +2850,23 @@ def e3_17_quantile_regression(store):
         for col in df.columns:
             if col not in ('QUANTILE', 'VARIABLE'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+        coef_col = 'COEFFICIENT' if 'COEFFICIENT' in df.columns else 'COEF'
         fig, ax = plt.subplots(figsize=(10, 6))
-        if 'QUANTILE' in df.columns and 'COEF' in df.columns:
-            q = df['QUANTILE'].apply(_safe_float).values
-            c = df['COEF'].apply(_safe_float).values
-            ax.plot(q, c, marker='o', color='#e74c3c', lw=2)
+        if 'QUANTILE' in df.columns and coef_col in df.columns:
+            # Plot each variable separately
+            variables = df['VARIABLE'].unique() if 'VARIABLE' in df.columns else ['ALL']
+            for var in variables:
+                sub = df[df['VARIABLE'] == var] if 'VARIABLE' in df.columns else df
+                sub = sub[sub['QUANTILE'] > 0].sort_values('QUANTILE')  # exclude OLS sentinel
+                if not sub.empty:
+                    q = sub['QUANTILE'].apply(_safe_float).values
+                    c = sub[coef_col].apply(_safe_float).values
+                    ax.plot(q, c, marker='o', lw=2, label=var)
             ax.axhline(0, color='grey', lw=0.8, ls='--')
+            ax.legend(fontsize=9)
         ax.set_xlabel('Quantile')
         ax.set_ylabel('Coefficient')
-        ax.set_title('Quantile Regression: Political Treatment Effect')
+        ax.set_title('Quantile Regression: Coefficients by Quantile')
         fig.tight_layout()
     return fig
 
@@ -2735,21 +2878,27 @@ def e3_18_bootstrap_ci(store):
         return _empty_fig('E3-18: No bootstrap CI data')
     with plt.rc_context(STYLE):
         for col in df.columns:
-            if col not in ('MARGIN',):
+            if col not in ('TEST',):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(8, 5))
         for i, (_, row) in enumerate(df.iterrows()):
-            lo = _safe_float(row.get('CI_LOWER', 0))
-            hi = _safe_float(row.get('CI_UPPER', 0))
-            pt = _safe_float(row.get('POINT_ESTIMATE', 0))
+            lo = _safe_float(row.get('CI_2_5', row.get('CI_LOWER', 0)))
+            hi = _safe_float(row.get('CI_97_5', row.get('CI_UPPER', 0)))
+            pt = _safe_float(row.get('OBSERVED_DIFF', row.get('POINT_ESTIMATE', 0)))
             color = '#e74c3c' if lo > 0 or hi < 0 else '#3498db'
             ax.plot([lo, hi], [i, i], color=color, lw=3, solid_capstyle='round')
             ax.plot(pt, i, 'o', color=color, ms=8, zorder=5)
+            # Annotate
+            zero_in = _safe_float(row.get('ZERO_IN_95CI', np.nan))
+            label = 'Zero excluded' if zero_in == 0 else 'Zero included'
+            ax.text(hi + (hi - lo) * 0.05, i, f'{pt:.4f} [{lo:.4f}, {hi:.4f}]\n{label}',
+                    va='center', fontsize=8)
         ax.axvline(0, color='black', lw=0.8)
-        labels = df['MARGIN'].values if 'MARGIN' in df.columns else [str(i) for i in range(len(df))]
+        labels = (df['TEST'].values if 'TEST' in df.columns
+                  else df.get('MARGIN', pd.Series([str(i) for i in range(len(df))])).values)
         ax.set_yticks(range(len(df)))
         ax.set_yticklabels(labels)
-        ax.set_xlabel('Value')
+        ax.set_xlabel('Fundamental − Cultural Difference')
         ax.set_title('Bootstrap 95% Confidence Intervals')
         fig.tight_layout()
     return fig
@@ -2761,17 +2910,22 @@ def e3_19_stratification(store):
     if df.empty:
         return _empty_fig('E3-19: No stratification data')
     with plt.rc_context(STYLE):
+        # Data uses EVENT_YEAR and ACTIVITY_TERCILE
+        year_col = 'EVENT_YEAR' if 'EVENT_YEAR' in df.columns else 'YEAR'
+        tercile_col = 'ACTIVITY_TERCILE' if 'ACTIVITY_TERCILE' in df.columns else 'TERCILE'
         for col in df.columns:
-            if col not in ('YEAR', 'TERCILE', 'STRATUM'):
+            if col not in (year_col, tercile_col, 'STRATUM', 'EVENT_CATEGORY'):
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         fig, ax = plt.subplots(figsize=(12, 6))
-        if 'YEAR' in df.columns and 'N_EVENTS' in df.columns:
-            pivot = df.pivot_table(values='N_EVENTS', index='YEAR', columns='TERCILE',
-                                   aggfunc='sum', fill_value=0) if 'TERCILE' in df.columns else pd.DataFrame()
+        if year_col in df.columns and 'N_EVENTS' in df.columns:
+            df['N_EVENTS'] = pd.to_numeric(df['N_EVENTS'], errors='coerce').fillna(0)
+            pivot = df.pivot_table(values='N_EVENTS', index=year_col, columns=tercile_col,
+                                   aggfunc='sum', fill_value=0) if tercile_col in df.columns else pd.DataFrame()
             if not pivot.empty:
+                pivot = pivot.astype(float)
                 sns.heatmap(pivot, annot=True, fmt='.0f', cmap='YlOrRd', ax=ax)
             else:
-                yearly = df.groupby('YEAR')['N_EVENTS'].sum()
+                yearly = df.groupby(year_col)['N_EVENTS'].sum()
                 ax.bar(yearly.index, yearly.values, color='#e74c3c')
         ax.set_title('Event Coverage: Year × Activity Tercile')
         fig.tight_layout()
@@ -2786,14 +2940,16 @@ def e3_20_summary_dashboard(store):
         # (0,0) Headline: political vs control accuracy
         df = store.e3_informed_trading
         if not df.empty:
-            main = df[df['CUT'].isin(['ALL_SELLS', 'CONTROL_SELLS'])].copy()
+            # Data uses SELLS_ONLY with SAMPLE=POLITICAL/CONTROL
+            pol_sells = df[(df['CUT'] == 'SELLS_ONLY') & (df['SAMPLE'] == 'POLITICAL')]
+            ctrl_sells = df[(df['CUT'] == 'SELLS_ONLY') & (df['SAMPLE'] == 'CONTROL')]
+            main = pd.concat([pol_sells, ctrl_sells])
             for col in ['METRIC_VALUE']:
                 main[col] = pd.to_numeric(main[col], errors='coerce')
             if not main.empty:
                 vals = main['METRIC_VALUE'].apply(_safe_float).values
-                labels = main['CUT'].values
-                colors = [C_POL_CTRL.get(str(main.iloc[i].get('SAMPLE', '')), '#888')
-                          for i in range(len(main))]
+                labels = main['SAMPLE'].values
+                colors = [C_POL_CTRL.get(str(s), '#888') for s in labels]
                 axes[0, 0].bar(labels, vals, color=colors)
                 axes[0, 0].axhline(0.5, color='grey', lw=1, ls='--')
         axes[0, 0].set_title('Sells Accuracy: Political vs Control')
@@ -2832,10 +2988,13 @@ def e3_20_summary_dashboard(store):
             for col in dol.columns:
                 if col not in ('CUT', 'SAMPLE', 'METRIC_TYPE'):
                     dol[col] = pd.to_numeric(dol[col], errors='coerce')
-            if 'TOTAL_EVENT_PROFIT' in dol.columns:
-                top = dol.head(6)
+            profit_col = 'TOTAL_PROFIT' if 'TOTAL_PROFIT' in dol.columns else 'TOTAL_EVENT_PROFIT'
+            if profit_col in dol.columns:
+                # Show proximity windows only (not severity cuts)
+                prox = dol[dol['CUT'].str.match(r'SELLS_\d+-\d+d$', na=False)]
+                top = prox if not prox.empty else dol.head(6)
                 axes[1, 1].bar(range(len(top)),
-                               top['TOTAL_EVENT_PROFIT'].apply(_safe_float).values,
+                               top[profit_col].apply(_safe_float).values,
                                color=C_SEQ[:len(top)])
                 axes[1, 1].set_xticks(range(len(top)))
                 axes[1, 1].set_xticklabels(top['CUT'].values, rotation=30, ha='right', fontsize=8)
