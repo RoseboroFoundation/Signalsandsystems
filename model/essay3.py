@@ -3608,12 +3608,13 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
     if len(valid_pol) >= 10 and 'EVENT_ID' in valid_pol.columns:
 
-        # Conditional base rate for sells (fraction of sell-matched events
-        # where event CAR < 0 — the base rate a random sell achieves)
-        sell_event_cars = valid_pol.loc[
-            valid_pol['TRADE_TYPE'] == 'sell', 'EVENT_CAR'
-        ].dropna()
-        p_cond_sell = _conditional_sign_base_rate(sell_event_cars)
+        # Pesaran-Timmermann (1992) conditional base rate for sells.
+        # Use ALL panel events' CAR_POST distribution (not just sell-matched
+        # events) to avoid circularity: sell accuracy IS "CAR < 0 for a sell",
+        # so using sell-matched event CARs as the null gives p=1 by construction.
+        all_event_cars = panel['CAR_POST'].dropna()
+        p_cond_sell = _conditional_sign_base_rate(all_event_cars)
+        logger.info("  P-T conditional null (all panel events): %.4f", p_cond_sell)
 
         # Magnitude-gated sell accuracy (|CAR| thresholds)
         for car_thr in [0.02, 0.05, 0.10, 0.15]:
@@ -3752,6 +3753,51 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                         len(sub_valid), p0
                     ).pvalue if len(sub_valid) > 0 else np.nan,
                 })
+
+            # ── Event-level aggregation test (equal-weight, independent) ──────
+            # One observation per event = mean sell accuracy in that event.
+            # Events are independent by construction; this avoids the inflated
+            # variance from large-event domination in the weighted bootstrap.
+            # Method: t-test + bootstrap CI across event-level means.
+            if 'EVENT_ID' in sub_valid.columns:
+                event_acc = (
+                    sub_valid.groupby('EVENT_ID')['EVENT_PROFITABLE']
+                    .mean().dropna()
+                )
+                n_ev = len(event_acc)
+                if n_ev >= 10:
+                    ev_mean = event_acc.mean()
+                    ev_se   = event_acc.std(ddof=1) / np.sqrt(n_ev)
+                    # One-tailed t-test: H1 = accuracy > p0 for sells, < p0 for buys
+                    t_stat, t_two = stats.ttest_1samp(event_acc, p0)
+                    if is_sell is True:
+                        t_pval = t_two / 2 if t_stat > 0 else 1 - t_two / 2
+                    elif is_sell is False:
+                        t_pval = t_two / 2 if t_stat < 0 else 1 - t_two / 2
+                    else:
+                        t_pval = t_two  # two-tailed for mixed
+                    # Bootstrap CI on event-level means
+                    rng_ev = np.random.RandomState(99)
+                    boot_ev = np.array([
+                        rng_ev.choice(event_acc.values, size=n_ev, replace=True).mean()
+                        for _ in range(2000)
+                    ])
+                    cluster_rows.append({
+                        'CUT': cut_label,
+                        'CLUSTER_TYPE': 'EVENT_AGG',
+                        'P0': p0,
+                        'CONDITIONAL_NULL': (cut_label == 'SELLS_COND'),
+                        'N_OBS': n_ev,
+                        'POINT_EST': ev_mean,
+                        'CLUSTER_SE': ev_se,
+                        'CI_LO_95': np.percentile(boot_ev, 2.5),
+                        'CI_HI_95': np.percentile(boot_ev, 97.5),
+                        'G_RAW': n_ev,
+                        'G_EFF': float(n_ev),
+                        'P_VALUE_CLUSTERED': t_pval,
+                        'WEIGHTS_USED': 'event_ttest',
+                        'NAIVE_BINOMIAL_P': np.nan,
+                    })
 
     cluster_inference = pd.DataFrame(cluster_rows) if cluster_rows else pd.DataFrame()
 
