@@ -2050,6 +2050,7 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
                 'HIGH_OPP': ev.get('HIGH_OPP', False),
                 'IS_ROUTINE': is_routine,
                 'HAS_PRIOR_BUY_6M': has_prior_buy_6m,
+                'IS_10B5_1_PLAN': txn.get('is_10b5_1_plan', None),
             })
 
         done += 1
@@ -2340,7 +2341,7 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
         'TRANSACTION_CODE', 'TRADE_VALUE', 'IS_ACTIVE',
         'EVENT_CATEGORY', 'EVENT_TYPE',
         'REGULATORY_PERIOD', 'HIGH_POLITICAL_CONNECTION', 'HIGH_OPP',
-        'IS_ROUTINE', 'HAS_PRIOR_BUY_6M',
+        'IS_ROUTINE', 'HAS_PRIOR_BUY_6M', 'IS_10B5_1_PLAN',
         'CAR_30', 'CAR_60', 'PROFITABLE_30', 'PROFITABLE_60',
         'SIGNED_PROFIT_30', 'SIGNED_PROFIT_60',
     ]
@@ -3266,6 +3267,22 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             r = _summarize(sub, label)
             if r:
                 summary_rows.append(r)
+
+    # Post-2023 10b5-1 plan split (Lambert review 2026-07-06):
+    # Split post-2023 sells into plan-flagged vs non-plan to test whether the
+    # accuracy premium is driven by discretionary trades or pre-scheduled ones.
+    # Trades before 2023-02-27 have is_10b5_1_plan=None (field not collected).
+    if 'IS_10B5_1_PLAN' in sells.columns:
+        sells_post23 = sells[sells['TRADE_DATE'].dt.year >= 2023]
+        if len(sells_post23) >= 10:
+            plan_sells = sells_post23[sells_post23['IS_10B5_1_PLAN'] == True]   # noqa: E712
+            noplan_sells = sells_post23[sells_post23['IS_10B5_1_PLAN'] == False]  # noqa: E712
+            for sub, label in [(sells_post23, 'SELLS_POST2023'),
+                               (plan_sells, 'SELLS_10B5_PLAN'),
+                               (noplan_sells, 'SELLS_NOT_10B5_PLAN')]:
+                r = _summarize(sub, label)
+                if r:
+                    summary_rows.append(r)
 
     # Section 16(b) short-swing cut: sells where the insider bought the same
     # stock within the prior 6 months.  These sellers accept disgorgement risk,
