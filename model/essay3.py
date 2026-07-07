@@ -48,7 +48,7 @@ Methodology:
    13. Quantile/median regression, trimmed robustness, bootstrap
    14. Insider fixed-effects panel
 
-Output tables (24, orphaned tables from prior runs are auto-dropped):
+Output tables (27, orphaned tables from prior runs are auto-dropped):
   ESSAY3_PANEL                  Event-level panel (carried forward)
   ESSAY3_STRATIFICATION         Year x activity-tercile strata
   ESSAY3_MEAN_VS_DISTRIBUTIONAL Side-by-side t-test vs Wilcoxon across all cuts
@@ -66,13 +66,24 @@ Output tables (24, orphaned tables from prior runs are auto-dropped):
   ESSAY3_BOOTSTRAP_CI           Bootstrap confidence intervals (carried forward)
   ESSAY3_CRSP_PROFITS           Trade-level abnormal returns (CRSP profit analysis)
   ESSAY3_CRSP_SUMMARY           Summary of abnormal returns by cut
-  ESSAY3_INFORMED_TRADING       Headline: directional accuracy by cut (headline)
+  ESSAY3_INFORMED_TRADING       Headline: directional accuracy by cut (headline);
+                                also contains MAGNITUDE_GATED, WEIGHTED_PROPORTION,
+                                and SELLS_PREMIUM_TRADE_CAR_FAR (far-window only)
   ESSAY3_INFORMED_PROXIMITY     Accuracy by proximity-to-event window (headline)
   ESSAY3_INFORMED_DOLLARS       Dollar magnitudes by proximity and severity (headline)
-  ESSAY3_SIZE_ACCURACY          Accuracy by trade-size decile × sample (supporting)
+  ESSAY3_SIZE_ACCURACY          Accuracy by trade-size decile × sample (supporting);
+                                political uses EVENT_CAR construct (same as headline),
+                                control uses TRADE_CAR_30 (ACCURACY_CONSTRUCT column)
   ESSAY3_SIZE_ACCURACY_SLOPES   Slope of accuracy on log(median_tv) per sample
-  ESSAY3_REVERSAL_REGRESSION    LPM: accuracy ~ log(size) × political (supporting)
+  ESSAY3_REVERSAL_REGRESSION    LPM: accuracy ~ log(size) × political (supporting);
+                                political DV = EVENT_PROFITABLE, control = PROFITABLE_30
   ESSAY3_CONTROL_TRADES         Non-political matched control trades with CARs
+  ESSAY3_CONTROL_ATTRITION      Retained vs dropped control trades after CAR
+                                computation: N, size, direction by group (Lambert
+                                review 2026-07-06: ~20% attrition, size-selective)
+  ESSAY3_CLUSTER_INFERENCE      Event- & ticker-clustered wild bootstrap CIs,
+                                Pesaran-Timmermann conditional-null variant
+  ESSAY3_DIRECTIONAL_PLACEBO    Date-randomization placebo on directional accuracy
 """
 
 import bisect
@@ -2351,8 +2362,11 @@ def _build_control_trades(panel, form4, store, political_trades):
     """Build matched non-political control trades with forward CARs.
 
     For each political-event trade, draws a same-firm trade outside any
-    political-event window, matched on calendar quarter. Computes
-    FF5-adjusted forward CARs for matched controls.
+    political-event window, matched on ticker only (ticker-quarter matching
+    was dropped because the 425-day exclusion window removes most quarters
+    with political activity, yielding degenerate samples; year FE in the
+    LPM specs absorb time-period variation). Computes FF5-adjusted forward
+    CARs for matched controls.
     """
     if political_trades.empty:
         return pd.DataFrame()
@@ -2523,9 +2537,17 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
       3. Pre/post 2023 amendments interaction (regulatory architecture test)
       4. Ticker FE specification (absorbs firm-level variation)
 
-    Returns (size_accuracy, size_accuracy_slopes, reversal_regression, control_trades).
+    Returns (size_accuracy, size_accuracy_slopes, reversal_regression,
+             control_trades, control_attrition).
+
+    Lambert review 2026-07-06:
+    - SIZE_ACCURACY for political uses EVENT_PROFITABLE (event-CAR construct,
+      same as the headline directional accuracy) rather than PROFITABLE_30
+      (30-day forward-CAR, which straddles the event drop for near-event trades).
+    - control_attrition documents the ~20% of matched control trades that lose
+      valid CARs (compared by size, year, direction).
     """
-    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     if crsp_profits is None or crsp_profits.empty:
         logger.warning("  No CRSP profits for directional accuracy analysis")
         return empty
@@ -2568,19 +2590,28 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
             political['SIZE_DECILE'] = 1
 
     # ── Step 3: Accuracy by trade-size decile ─────────────────────────
+    # Lambert review 2026-07-06: political sample uses EVENT_PROFITABLE
+    # (event-CAR construct, identical to the headline test) so both directional
+    # accuracy numbers refer to the same quantity.  Control uses PROFITABLE_30
+    # (forward-CAR) since control trades have no event-date anchor.
     size_rows = []
     slope_rows = []
     for sample_label, df in [('POLITICAL', political), ('CONTROL', control)]:
         if df.empty:
             continue
-        valid = df[df['PROFITABLE_30'].notna()]
+        accuracy_col = (
+            'EVENT_PROFITABLE'
+            if sample_label == 'POLITICAL' and 'EVENT_PROFITABLE' in df.columns
+            else 'PROFITABLE_30'
+        )
+        valid = df[df[accuracy_col].notna()]
         for decile in sorted(valid['SIZE_DECILE'].unique()):
             dec = valid[valid['SIZE_DECILE'] == decile]
             n = len(dec)
             if n < 5:
                 continue
-            pct = dec['PROFITABLE_30'].mean()
-            n_acc = int(dec['PROFITABLE_30'].sum())
+            pct = dec[accuracy_col].mean()
+            n_acc = int(dec[accuracy_col].sum())
             size_rows.append({
                 'SAMPLE': sample_label,
                 'SIZE_DECILE': int(decile),
@@ -2590,14 +2621,15 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
                 'PCT_ACCURATE': pct,
                 'N_ACCURATE': n_acc,
                 'BINOM_PVAL': stats.binomtest(n_acc, n, 0.5).pvalue,
-                'MEAN_CAR_30': dec['CAR_30'].mean(),
+                'MEAN_CAR_30': dec['CAR_30'].mean() if 'CAR_30' in dec.columns else np.nan,
+                'ACCURACY_CONSTRUCT': 'EVENT_CAR' if accuracy_col == 'EVENT_PROFITABLE' else 'TRADE_CAR_30',
             })
 
         # Slope test: regress decile-level accuracy on log(median_tv)
         # (not on decile rank, which isn't comparable across samples)
         if len(valid['SIZE_DECILE'].unique()) >= 3:
             decile_data = valid.groupby('SIZE_DECILE').agg(
-                accuracy=('PROFITABLE_30', 'mean'),
+                accuracy=(accuracy_col, 'mean'),
                 log_tv=('TRADE_VALUE', lambda x: np.log(x.median())),
             )
             slope, _, r_val, p_val, _ = stats.linregress(
@@ -2610,10 +2642,40 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
                 'SLOPE_R2': r_val ** 2,
                 'N_TRADES': len(valid),
                 'N_DECILES': len(decile_data),
+                'ACCURACY_CONSTRUCT': 'EVENT_CAR' if accuracy_col == 'EVENT_PROFITABLE' else 'TRADE_CAR_30',
             })
 
     size_accuracy = pd.DataFrame(size_rows)
     size_accuracy_slopes = pd.DataFrame(slope_rows)
+
+    # ── Control attrition table ────────────────────────────────────────
+    # Lambert review 2026-07-06: ~20% of matched control trades drop out when
+    # the 30-day forward CAR cannot be computed.  Document size, year, and
+    # direction differences between retained and dropped trades so the reviewer
+    # can assess whether attrition is size-selective (which would bias the
+    # accuracy premium upward on the control side).
+    attrition_rows = []
+    if not control.empty and 'PROFITABLE_30' in control.columns:
+        for grp_label, grp in [
+            ('RETAINED', control[control['PROFITABLE_30'].notna()]),
+            ('DROPPED',  control[control['PROFITABLE_30'].isna()]),
+        ]:
+            if grp.empty:
+                continue
+            td_g = pd.to_datetime(grp['TRADE_DATE'])
+            attrition_rows.append({
+                'GROUP':               grp_label,
+                'N':                   len(grp),
+                'N_SELLS':             int((grp['TRADE_TYPE'] == 'sell').sum()),
+                'N_BUYS':              int((grp['TRADE_TYPE'] == 'buy').sum()),
+                'MEAN_TRADE_VALUE':    grp['TRADE_VALUE'].mean(),
+                'MEDIAN_TRADE_VALUE':  grp['TRADE_VALUE'].median(),
+                'P90_TRADE_VALUE':     grp['TRADE_VALUE'].quantile(0.90),
+                'YEAR_MEAN':           td_g.dt.year.mean(),
+                'YEAR_MIN':            int(td_g.dt.year.min()),
+                'YEAR_MAX':            int(td_g.dt.year.max()),
+            })
+    control_attrition = pd.DataFrame(attrition_rows)
 
     # ── Step 4: LPM regressions ───────────────────────────────────────
     regression_rows = []
@@ -2629,7 +2691,20 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
     else:
         combined = political.copy()
 
-    valid = combined[combined['PROFITABLE_30'].notna()].copy()
+    # LPM dependent variable: EVENT_PROFITABLE for political (event-CAR construct,
+    # same as headline), PROFITABLE_30 for control (forward-CAR).
+    # This ensures both size-analysis tables and LPM specs use the same accuracy
+    # measure as the headline directional test (Lambert review 2026-07-06 §5).
+    if 'EVENT_PROFITABLE' in combined.columns:
+        combined['_ACCURATE'] = np.where(
+            combined['SAMPLE'] == 'POLITICAL',
+            combined['EVENT_PROFITABLE'],
+            combined['PROFITABLE_30'],
+        )
+    else:
+        combined['_ACCURATE'] = combined['PROFITABLE_30']
+
+    valid = combined[combined['_ACCURATE'].notna()].copy()
     if len(valid) < 30:
         logger.warning("  Too few valid trades for LPM regression")
         return size_accuracy, size_accuracy_slopes, pd.DataFrame(), control
@@ -2673,7 +2748,7 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
         else:
             x_all = x_use
         X = sm.add_constant(subset[x_all].astype(float))
-        y = subset['PROFITABLE_30'].astype(float)
+        y = subset['_ACCURATE'].astype(float)
         try:
             model = sm.OLS(y, X).fit(
                 cov_type='cluster',
@@ -2875,11 +2950,190 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
     reversal_regression = pd.DataFrame(regression_rows)
 
     logger.info("  §12 complete: %d accuracy rows, %d slope rows, "
-                "%d regression rows, %d control trades",
+                "%d regression rows, %d control trades, %d attrition rows",
                 len(size_accuracy), len(size_accuracy_slopes),
-                len(reversal_regression), len(control))
+                len(reversal_regression), len(control), len(control_attrition))
 
-    return size_accuracy, size_accuracy_slopes, reversal_regression, control
+    return size_accuracy, size_accuracy_slopes, reversal_regression, control, control_attrition
+
+
+# ═════════════════════════════════════════════════════════════════════
+# CLUSTERED INFERENCE HELPERS
+# ═════════════════════════════════════════════════════════════════════
+
+def _effective_cluster_count(cluster_labels):
+    """Effective cluster count G* (MacKinnon-Webb 2017).
+
+    G* = N^2 / sum(n_g^2).  When G* < 12, Webb 6-point weights should
+    replace 2-point Rademacher weights in wild cluster bootstrap.
+    Returns (G_raw, G_eff).
+    """
+    unique, counts = np.unique(cluster_labels, return_counts=True)
+    G = len(unique)
+    sq_sum = float((counts ** 2).sum())
+    g_eff = float(counts.sum()) ** 2 / sq_sum if sq_sum > 0 else float(G)
+    return G, g_eff
+
+
+def _wild_cluster_bootstrap_proportion(outcomes, cluster_labels,
+                                        p0=0.5, n_boot=1000, seed=42):
+    """Wild cluster bootstrap CI and test for a proportion.
+
+    Treats each unique value in cluster_labels as a cluster.  Uses 2-point
+    Rademacher weights (±1 with equal probability) unless G_eff < 12, in
+    which case Webb (2014) 6-point weights are substituted.
+
+    Cameron-Gelbach-Miller (2011, JBE); MacKinnon-Webb (2017, 2018).
+
+    Returns dict with: point_est, cluster_se, ci_lo_95, ci_hi_95,
+                       n_obs, g_raw, g_eff, p_value_vs_p0, p0, weights_used.
+    Returns None if fewer than 10 valid observations.
+    """
+    outcomes = np.asarray(outcomes, dtype=float)
+    cluster_labels = np.asarray(cluster_labels)
+    valid = ~np.isnan(outcomes)
+    outcomes = outcomes[valid]
+    cluster_labels = cluster_labels[valid]
+    n = len(outcomes)
+    if n < 10:
+        return None
+
+    clusters = np.unique(cluster_labels)
+    G = len(clusters)
+    _, g_eff = _effective_cluster_count(cluster_labels)
+
+    p_hat = outcomes.mean()
+
+    # Cluster-level quantities
+    n_g = np.array([np.sum(cluster_labels == g) for g in clusters], dtype=float)
+    y_bar_g = np.array([outcomes[cluster_labels == g].mean() for g in clusters])
+    w_g = n_g / n  # cluster weights
+
+    # Choose weight distribution
+    use_webb = g_eff < 12
+    if use_webb:
+        weight_pool = np.array([-np.sqrt(1.5), -1.0, -np.sqrt(0.5),
+                                  np.sqrt(0.5),  1.0,  np.sqrt(1.5)])
+        weights_used = 'webb6'
+    else:
+        weight_pool = np.array([-1.0, 1.0])
+        weights_used = 'rademacher2'
+
+    rng = np.random.RandomState(seed)
+
+    # Bootstrap distribution for CI (centred at p_hat)
+    boot_props = np.empty(n_boot)
+    for b in range(n_boot):
+        eps = rng.choice(weight_pool, size=G)
+        boot_props[b] = p_hat + np.dot(w_g * (y_bar_g - p_hat), eps)
+
+    cluster_se = boot_props.std(ddof=1)
+    ci_lo_95 = np.percentile(boot_props, 2.5)
+    ci_hi_95 = np.percentile(boot_props, 97.5)
+
+    # Bootstrap test vs p0 (centred at p0, use fresh seed)
+    t_obs = abs(p_hat - p0)
+    rng2 = np.random.RandomState(seed + 1)
+    t_star = np.empty(n_boot)
+    for b in range(n_boot):
+        eps = rng2.choice(weight_pool, size=G)
+        t_star[b] = abs(np.dot(w_g * (y_bar_g - p0), eps))
+    p_value = (t_star >= t_obs).mean()
+
+    return {
+        'point_est': p_hat,
+        'cluster_se': cluster_se,
+        'ci_lo_95': ci_lo_95,
+        'ci_hi_95': ci_hi_95,
+        'n_obs': n,
+        'g_raw': G,
+        'g_eff': g_eff,
+        'p_value_vs_p0': p_value,
+        'p0': p0,
+        'weights_used': weights_used,
+    }
+
+
+def _conditional_sign_base_rate(event_cars):
+    """Pesaran-Timmermann (1992) conditional base rate for sign tests.
+
+    For a sell-accuracy test the natural null is not 50% but the fraction of
+    events in the sample that have a negative CAR.  Events in this paper are
+    selected for large adverse reactions, so p_c >> 0.5 by construction, and
+    testing against 50% mechanically inflates significance.
+
+    Returns float p_c (fraction of provided CARs that are < 0).
+    """
+    cars = np.asarray(event_cars, dtype=float)
+    valid = ~np.isnan(cars)
+    if valid.sum() == 0:
+        return 0.5
+    return float((cars[valid] < 0).mean())
+
+
+def _date_randomization_placebo_directional(pol_df, n_perms=1000, seed=42):
+    """Date-randomization placebo for directional accuracy.
+
+    Randomly shuffles EVENT_CAR labels across events, recomputes directional
+    accuracy each time.  The permutation distribution should centre near the
+    conditional base rate under H0 (no informed trading).  An empirical
+    p-value is computed as the fraction of permutations at least as accurate
+    as the observed value.
+
+    pol_df must contain columns: TRADE_TYPE, EVENT_CAR, EVENT_ID.
+    Returns a single-row DataFrame (or empty if inputs are insufficient).
+    """
+    if pol_df.empty or 'EVENT_CAR' not in pol_df.columns:
+        return pd.DataFrame()
+
+    valid = pol_df[
+        pol_df['EVENT_CAR'].notna() &
+        pol_df['TRADE_TYPE'].isin(['buy', 'sell'])
+    ].copy()
+
+    if len(valid) < 10:
+        return pd.DataFrame()
+
+    def _compute_accuracy(df):
+        sells = df[df['TRADE_TYPE'] == 'sell']
+        buys  = df[df['TRADE_TYPE'] == 'buy']
+        correct = int((sells['EVENT_CAR'] < 0).sum()) + int((buys['EVENT_CAR'] > 0).sum())
+        total   = len(sells) + len(buys)
+        return correct / total if total > 0 else np.nan
+
+    observed_acc = _compute_accuracy(valid)
+    if np.isnan(observed_acc):
+        return pd.DataFrame()
+
+    # Map of event_id -> event CAR (one value per event)
+    event_car_map = valid.groupby('EVENT_ID')['EVENT_CAR'].first()
+    event_ids  = event_car_map.index.values
+    car_values = event_car_map.values
+
+    rng = np.random.RandomState(seed)
+    perm_accs = []
+    for _ in range(n_perms):
+        shuffled = rng.permutation(car_values)
+        car_shuffle = dict(zip(event_ids, shuffled))
+        perm_df = valid.copy()
+        perm_df['EVENT_CAR'] = perm_df['EVENT_ID'].map(car_shuffle)
+        perm_accs.append(_compute_accuracy(perm_df))
+
+    perm_accs = np.array(perm_accs)
+    p_value = float((perm_accs >= observed_acc).mean())
+
+    return pd.DataFrame([{
+        'TEST': 'DATE_RANDOMIZATION_PLACEBO_DIRECTIONAL',
+        'OBSERVED_ACCURACY': observed_acc,
+        'PERM_MEAN': perm_accs.mean(),
+        'PERM_STD': perm_accs.std(),
+        'PERM_CI_2_5': np.percentile(perm_accs, 2.5),
+        'PERM_CI_97_5': np.percentile(perm_accs, 97.5),
+        'P_VALUE_VS_PERMUTATION': p_value,
+        'N_OBS': len(valid),
+        'N_EVENTS': len(event_ids),
+        'N_PERMS': n_perms,
+    }])
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -2897,9 +3151,15 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
       - Sell and CAR_POST < 0 (sold before price drop)
       - Buy and CAR_POST > 0 (bought before price rise)
 
-    Returns (informed_trading, informed_proximity, informed_dollars).
+    Returns (informed_trading, informed_proximity, informed_dollars,
+             cluster_inference, directional_placebo).
+    cluster_inference (ESSAY3_CLUSTER_INFERENCE): event- and ticker-clustered
+      wild bootstrap CIs and p-values for the headline proportion, plus
+      Pesaran-Timmermann conditional-null variant.
+    directional_placebo (ESSAY3_DIRECTIONAL_PLACEBO): date-randomization
+      placebo that shuffles EVENT_CAR labels across events.
     """
-    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     if crsp_profits is None or crsp_profits.empty:
         logger.warning("  No CRSP profits for informed trading test")
         return empty
@@ -3320,12 +3580,179 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
     informed_dollars = pd.DataFrame(dollar_rows) if dollar_rows else pd.DataFrame()
 
-    logger.info("  Informed trading test complete: %d summary rows, "
-                "%d proximity rows, %d dollar rows",
-                len(informed_trading), len(informed_proximity),
-                len(informed_dollars))
+    # ── Table 4: CLUSTER_INFERENCE — event-clustered CIs and tests ────
+    # Lambert (2026-07-06): the exact-binomial test treats 26,817 sells as
+    # independent but they are nested in ~160 events (within-event outcome
+    # correlation ≈ 1).  Wild cluster bootstrap on EVENT_ID inflates the SE
+    # by ~sqrt(N_trades/N_events) ≈ 13x and yields the honest CI.
+    # The conditional sign test (Pesaran-Timmermann 1992) replaces the fixed
+    # 50% null with the realized fraction of events having CAR < 0.
+    cluster_rows = []
 
-    return informed_trading, informed_proximity, informed_dollars
+    if len(valid_pol) >= 10 and 'EVENT_ID' in valid_pol.columns:
+
+        # Conditional base rate for sells (fraction of sell-matched events
+        # where event CAR < 0 — the base rate a random sell achieves)
+        sell_event_cars = valid_pol.loc[
+            valid_pol['TRADE_TYPE'] == 'sell', 'EVENT_CAR'
+        ].dropna()
+        p_cond_sell = _conditional_sign_base_rate(sell_event_cars)
+
+        # Magnitude-gated sell accuracy (|CAR| thresholds)
+        for car_thr in [0.02, 0.05, 0.10, 0.15]:
+            mag_sells = valid_pol[
+                (valid_pol['TRADE_TYPE'] == 'sell') &
+                (valid_pol['EVENT_CAR'].abs() >= car_thr)
+            ]
+            if len(mag_sells) >= 10:
+                r = _summarize(mag_sells, f'SELLS_|CAR|>={int(car_thr*100)}pct')
+                if r:
+                    r['METRIC_TYPE'] = 'MAGNITUDE_GATED'
+                    summary_rows.append(r)
+
+        # |CAR|-weighted accuracy on all sells
+        wt_sells = valid_pol[
+            (valid_pol['TRADE_TYPE'] == 'sell') &
+            valid_pol['EVENT_PROFITABLE'].notna() &
+            valid_pol['EVENT_CAR'].notna()
+        ]
+        if len(wt_sells) >= 10:
+            weights = wt_sells['EVENT_CAR'].abs()
+            if weights.sum() > 0:
+                wt_acc = (wt_sells['EVENT_PROFITABLE'] * weights).sum() / weights.sum()
+                summary_rows.append({
+                    'CUT': 'SELLS_CAR_WEIGHTED',
+                    'SAMPLE': 'POLITICAL',
+                    'METRIC_TYPE': 'WEIGHTED_PROPORTION',
+                    'N_TRADES': len(wt_sells),
+                    'METRIC_VALUE': wt_acc,
+                    'METRIC_PVAL': np.nan,   # no simple binomial for weighted
+                    'MEAN_TRADE_VALUE': wt_sells['TRADE_VALUE'].mean(),
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': wt_sells['EVENT_CAR'].mean(),
+                })
+
+        # Far-from-event apples-to-apples (days 61-180 only; eliminates
+        # forward-window/event-return overlap for near-event trades)
+        if ('PROFITABLE_30' in crsp_profits.columns and
+                control_trades is not None and not control_trades.empty):
+            pol_far = crsp_profits[
+                crsp_profits['TRADE_TYPE'].isin(['sell']) &
+                crsp_profits['PROFITABLE_30'].notna()
+            ].copy()
+            if 'EVENT_DATE_PANEL' in pol_far.columns:
+                pol_far['DAYS_BEFORE'] = (
+                    pd.to_datetime(pol_far['EVENT_DATE_PANEL']) -
+                    pd.to_datetime(pol_far['TRADE_DATE'])
+                ).dt.days
+            elif 'DAYS_BEFORE_EVENT' in pol_far.columns:
+                pol_far['DAYS_BEFORE'] = pol_far['DAYS_BEFORE_EVENT']
+            else:
+                pol_far = pd.DataFrame()
+
+            if not pol_far.empty:
+                pol_far = pol_far[
+                    pol_far['DAYS_BEFORE'].between(61, 180)
+                ]
+            ctrl_far = control_trades[
+                control_trades['TRADE_TYPE'] == 'sell'
+            ] if not control_trades.empty else pd.DataFrame()
+            if len(pol_far) >= 5 and len(ctrl_far) >= 5:
+                ctrl_far_v = ctrl_far[ctrl_far['PROFITABLE_30'].notna()]
+                pct_pol_f = pol_far['PROFITABLE_30'].mean()
+                pct_ctrl_f = ctrl_far_v['PROFITABLE_30'].mean()
+                n1f, n2f = len(pol_far), len(ctrl_far_v)
+                p_pool_f = (pol_far['PROFITABLE_30'].sum() +
+                            ctrl_far_v['PROFITABLE_30'].sum()) / (n1f + n2f)
+                se_f = np.sqrt(p_pool_f * (1 - p_pool_f) * (1/n1f + 1/n2f))
+                z_f = (pct_pol_f - pct_ctrl_f) / se_f if se_f > 0 else np.nan
+                z_pf = 2 * (1 - stats.norm.cdf(abs(z_f))) if not np.isnan(z_f) else np.nan
+                summary_rows.append({
+                    'CUT': 'SELLS_PREMIUM_TRADE_CAR_FAR',
+                    'SAMPLE': 'DIFFERENCE',
+                    'METRIC_TYPE': 'DIFFERENCE',
+                    'N_TRADES': n1f + n2f,
+                    'METRIC_VALUE': pct_pol_f - pct_ctrl_f,
+                    'METRIC_PVAL': z_pf,
+                    'MEAN_TRADE_VALUE': np.nan,
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': np.nan,
+                })
+
+        # Rebuild informed_trading now that we've appended more rows
+        informed_trading = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
+
+        # ── Event-clustered wild cluster bootstrap ──────────────────
+        cut_specs = [
+            ('ALL_SELLS',    valid_pol[valid_pol['TRADE_TYPE'] == 'sell'],  0.5,         True),
+            ('ALL_BUYS',     valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],   0.5,         False),
+            ('ALL_TRADES',   valid_pol,                                     0.5,         None),
+            ('SELLS_COND',   valid_pol[valid_pol['TRADE_TYPE'] == 'sell'],  p_cond_sell, True),
+        ]
+        for cut_label, sub_df, p0, is_sell in cut_specs:
+            if len(sub_df) < 10:
+                continue
+            sub_valid = sub_df[sub_df['EVENT_PROFITABLE'].notna()].copy()
+            if len(sub_valid) < 10:
+                continue
+
+            # Event-clustered bootstrap
+            ev_boot = _wild_cluster_bootstrap_proportion(
+                sub_valid['EVENT_PROFITABLE'].values,
+                sub_valid['EVENT_ID'].values,
+                p0=p0, n_boot=1000, seed=42,
+            )
+            # Ticker-clustered bootstrap (robustness)
+            tkr_boot = None
+            if 'TICKER' in sub_valid.columns:
+                tkr_boot = _wild_cluster_bootstrap_proportion(
+                    sub_valid['EVENT_PROFITABLE'].values,
+                    sub_valid['TICKER'].values,
+                    p0=p0, n_boot=1000, seed=43,
+                )
+
+            for boot_result, cluster_type in [(ev_boot, 'EVENT'), (tkr_boot, 'TICKER')]:
+                if boot_result is None:
+                    continue
+                cluster_rows.append({
+                    'CUT': cut_label,
+                    'CLUSTER_TYPE': cluster_type,
+                    'P0': p0,
+                    'CONDITIONAL_NULL': (cut_label == 'SELLS_COND'),
+                    'N_OBS': boot_result['n_obs'],
+                    'POINT_EST': boot_result['point_est'],
+                    'CLUSTER_SE': boot_result['cluster_se'],
+                    'CI_LO_95': boot_result['ci_lo_95'],
+                    'CI_HI_95': boot_result['ci_hi_95'],
+                    'G_RAW': boot_result['g_raw'],
+                    'G_EFF': boot_result['g_eff'],
+                    'P_VALUE_CLUSTERED': boot_result['p_value_vs_p0'],
+                    'WEIGHTS_USED': boot_result['weights_used'],
+                    'NAIVE_BINOMIAL_P': stats.binomtest(
+                        int(sub_valid['EVENT_PROFITABLE'].sum()),
+                        len(sub_valid), p0
+                    ).pvalue if len(sub_valid) > 0 else np.nan,
+                })
+
+    cluster_inference = pd.DataFrame(cluster_rows) if cluster_rows else pd.DataFrame()
+
+    # ── Table 5: DIRECTIONAL_PLACEBO — date-randomization placebo ────
+    # Shuffles EVENT_CAR assignments across events; accuracy should centre
+    # near the conditional base rate under H0.
+    directional_placebo = _date_randomization_placebo_directional(
+        valid_pol, n_perms=1000, seed=42
+    ) if len(valid_pol) >= 10 else pd.DataFrame()
+
+    logger.info("  Informed trading test complete: %d summary rows, "
+                "%d proximity rows, %d dollar rows, "
+                "%d cluster inference rows, directional placebo: %s",
+                len(informed_trading), len(informed_proximity),
+                len(informed_dollars), len(cluster_inference),
+                'yes' if not directional_placebo.empty else 'no')
+
+    return informed_trading, informed_proximity, informed_dollars, cluster_inference, directional_placebo
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -3444,6 +3871,9 @@ def save_essay3_results(store, results_dict):
         'size_accuracy_slopes': 'ESSAY3_SIZE_ACCURACY_SLOPES',
         'reversal_regression': 'ESSAY3_REVERSAL_REGRESSION',
         'control_trades': 'ESSAY3_CONTROL_TRADES',
+        'control_attrition': 'ESSAY3_CONTROL_ATTRITION',
+        'cluster_inference': 'ESSAY3_CLUSTER_INFERENCE',
+        'directional_placebo': 'ESSAY3_DIRECTIONAL_PLACEBO',
     }
     current_tables = set(table_map.values())
 
@@ -3595,13 +4025,49 @@ def run_essay3(store=None):
 
     # ── §12 CG size-accuracy attenuation (supporting) ─────────────────
     logger.info("§12 CG size-accuracy attenuation (supporting evidence)...")
-    size_accuracy, size_accuracy_slopes, reversal_regression, control_trades = (
-        compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=crsp_profits)
+    # Merge event-CAR onto crsp_profits before the size analysis so that
+    # ESSAY3_SIZE_ACCURACY uses the same construct as the headline directional
+    # accuracy (EVENT_PROFITABLE) rather than the 30-day forward-CAR
+    # (PROFITABLE_30), which straddles the event drop for near-event trades.
+    # Lambert review 2026-07-06 §5.
+    crsp_profits_with_event_car = crsp_profits.copy()
+    if not crsp_profits_with_event_car.empty and 'EVENT_ID' in crsp_profits_with_event_car.columns:
+        # Merge on (EVENT_ID, TICKER) so each trade gets the CAR for its own firm.
+        # Cultural events share one EVENT_ID across multiple tickers; a plain
+        # EVENT_ID merge would fan out.  Fundamental events already encode
+        # the ticker in the EVENT_ID, so the (EVENT_ID, TICKER) key is
+        # always 1:1 in the panel.
+        ev_cars = (panel[['EVENT_ID', 'TICKER', 'CAR_POST']]
+                   .rename(columns={'CAR_POST': 'EVENT_CAR'})
+                   .drop_duplicates(subset=['EVENT_ID', 'TICKER'])
+                   .copy())
+        ev_cars['EVENT_CAR'] = pd.to_numeric(ev_cars['EVENT_CAR'], errors='coerce')
+        crsp_profits_with_event_car = crsp_profits_with_event_car.merge(
+            ev_cars, on=['EVENT_ID', 'TICKER'], how='left')
+        has_ec = crsp_profits_with_event_car['EVENT_CAR'].notna()
+        crsp_profits_with_event_car['EVENT_PROFITABLE'] = np.nan
+        crsp_profits_with_event_car.loc[
+            has_ec & (crsp_profits_with_event_car['TRADE_TYPE'] == 'sell'),
+            'EVENT_PROFITABLE'
+        ] = (crsp_profits_with_event_car.loc[
+            has_ec & (crsp_profits_with_event_car['TRADE_TYPE'] == 'sell'),
+            'EVENT_CAR'] < 0).astype(float)
+        crsp_profits_with_event_car.loc[
+            has_ec & (crsp_profits_with_event_car['TRADE_TYPE'] == 'buy'),
+            'EVENT_PROFITABLE'
+        ] = (crsp_profits_with_event_car.loc[
+            has_ec & (crsp_profits_with_event_car['TRADE_TYPE'] == 'buy'),
+            'EVENT_CAR'] > 0).astype(float)
+
+    size_accuracy, size_accuracy_slopes, reversal_regression, control_trades, control_attrition = (
+        compute_directional_accuracy_reversal(
+            panel, form4, store, crsp_profits=crsp_profits_with_event_car)
     )
 
     # ── §12b Informed trading test (HEADLINE) ─────────────────────────
     logger.info("§12b Informed trading test (headline)...")
-    informed_trading, informed_proximity, informed_dollars = (
+    (informed_trading, informed_proximity, informed_dollars,
+     cluster_inference, directional_placebo) = (
         compute_informed_trading_test(panel, crsp_profits, control_trades)
     )
 
@@ -3637,6 +4103,9 @@ def run_essay3(store=None):
         'size_accuracy_slopes': size_accuracy_slopes,
         'reversal_regression': reversal_regression,
         'control_trades': control_trades,
+        'control_attrition': control_attrition,
+        'cluster_inference': cluster_inference,
+        'directional_placebo': directional_placebo,
     }
 
     logger.info("Saving results...")
