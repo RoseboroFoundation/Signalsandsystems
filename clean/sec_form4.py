@@ -340,6 +340,20 @@ class Form4Downloader:
                 acq_disp_tag = trans.find('transactionAcquiredDisposedCode')
                 shares_owned_tag = trans.find('sharesOwnedFollowingTransaction')
 
+                # 10b5-1 plan flag: SEC Amendment (effective Feb 27, 2023) added
+                # <transactionPlanAdoption> inside each transaction element.
+                # If present, the trade was made pursuant to a Rule 10b5-1(c) plan.
+                # Returns None (not False) for pre-2023 filings where the field
+                # didn't exist in the schema — None = unknown, False = confirmed no plan.
+                plan_tag = trans.find('transactionPlanAdoption')
+                if plan_tag is not None:
+                    plan_val = plan_tag.find('value')
+                    plan_date = plan_val.text.strip() if plan_val and plan_val.text else None
+                    is_10b5_1_plan = True if plan_date else False
+                else:
+                    plan_date = None
+                    is_10b5_1_plan = None   # unknown (pre-2023 schema)
+
                 transaction = {
                     'owner_name': owner_name,
                     'transaction_date': (
@@ -369,7 +383,9 @@ class Form4Downloader:
                         float(shares_owned_tag.find('value').text)
                         if shares_owned_tag and shares_owned_tag.find('value')
                         else None
-                    )
+                    ),
+                    'is_10b5_1_plan': is_10b5_1_plan,
+                    'plan_adoption_date': plan_date,
                 }
                 transactions.append(transaction)
             except Exception as e:
