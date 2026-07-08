@@ -3212,14 +3212,32 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     logger.info("  Informed trading test: %d political trades with event CAR "
                 "(of %d total)", len(valid_pol), len(crsp_profits))
 
+    # Compute conditional base rate NOW from the analysis events (not full panel).
+    # Using valid_pol['EVENT_CAR'] ensures the base rate matches the exact events
+    # that appear in the analysis — avoiding a subtle population mismatch.
+    _analysis_event_cars = valid_pol.groupby('EVENT_ID')['EVENT_CAR'].first().dropna()
+    p_cond_sell = _conditional_sign_base_rate(_analysis_event_cars)
+    p_cond_buy  = 1.0 - p_cond_sell  # symmetric null for buys
+    logger.info("  P-T conditional null (analysis events): sell=%.4f buy=%.4f",
+                p_cond_sell, p_cond_buy)
+
     # ── Helper: summarize a subset ────────────────────────────────────
-    def _summarize(sub, label, sample='POLITICAL'):
+    def _summarize(sub, label, sample='POLITICAL', p_cond=None):
+        """Summarize directional accuracy for a trade subset.
+
+        p_cond: if provided, also report METRIC_PVAL_COND (vs conditional null).
+                Should be p_cond_sell for sell subsets, p_cond_buy for buy subsets.
+        """
         n = len(sub)
         if n < 5:
             return None
         pct = sub['EVENT_PROFITABLE'].mean()
         n_prof = int(sub['EVENT_PROFITABLE'].sum())
-        binom_p = stats.binomtest(n_prof, n, 0.5).pvalue
+        binom_p_50 = stats.binomtest(n_prof, n, 0.5).pvalue
+        binom_p_cond = (
+            stats.binomtest(n_prof, n, p_cond).pvalue
+            if p_cond is not None else np.nan
+        )
         sp = sub['EVENT_PROFIT'].dropna()
         tv = sub['TRADE_VALUE'].dropna()
         return {
@@ -3228,7 +3246,9 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             'METRIC_TYPE': 'PROPORTION',
             'N_TRADES': n,
             'METRIC_VALUE': pct,
-            'METRIC_PVAL': binom_p,
+            'METRIC_PVAL': binom_p_50,       # naive vs 50% — DO NOT use as headline
+            'METRIC_PVAL_COND': binom_p_cond, # honest vs conditional base rate
+            'COND_NULL': p_cond if p_cond is not None else np.nan,
             'MEAN_TRADE_VALUE': tv.mean() if len(tv) > 0 else np.nan,
             'MEAN_EVENT_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
             'TOTAL_EVENT_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
@@ -3245,11 +3265,12 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     if r:
         summary_rows.append(r)
 
-    # By direction
+    # By direction — pass conditional null to sell and buy subsets
     sells = valid_pol[valid_pol['TRADE_TYPE'] == 'sell']
     buys = valid_pol[valid_pol['TRADE_TYPE'] == 'buy']
-    for sub, label in [(sells, 'SELLS_ONLY'), (buys, 'BUYS_ONLY')]:
-        r = _summarize(sub, label)
+    for sub, label, pc in [(sells, 'SELLS_ONLY', p_cond_sell),
+                           (buys, 'BUYS_ONLY', p_cond_buy)]:
+        r = _summarize(sub, label, p_cond=pc)
         if r:
             summary_rows.append(r)
 
@@ -3260,10 +3281,10 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         ps_only = valid_pol[valid_pol['TRANSACTION_CODE'].isin(['P', 'S'])]
         ps_sells = ps_only[ps_only['TRADE_TYPE'] == 'sell']
         ps_buys = ps_only[ps_only['TRADE_TYPE'] == 'buy']
-        for sub, label in [(ps_only, 'ALL_PS_ONLY'),
-                           (ps_sells, 'SELLS_PS_ONLY'),
-                           (ps_buys, 'BUYS_PS_ONLY')]:
-            r = _summarize(sub, label)
+        for sub, label, pc in [(ps_only, 'ALL_PS_ONLY', None),
+                               (ps_sells, 'SELLS_PS_ONLY', p_cond_sell),
+                               (ps_buys, 'BUYS_PS_ONLY', p_cond_buy)]:
+            r = _summarize(sub, label, p_cond=pc)
             if r:
                 summary_rows.append(r)
 
@@ -3275,23 +3296,23 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         rout_sells = sells[sells['IS_ROUTINE'] == True]  # noqa: E712
         for sub, label in [(opp_sells, 'SELLS_OPPORTUNISTIC'),
                            (rout_sells, 'SELLS_ROUTINE')]:
-            r = _summarize(sub, label)
+            r = _summarize(sub, label, p_cond=p_cond_sell)
             if r:
                 summary_rows.append(r)
 
     # Post-2023 10b5-1 plan split (Lambert review 2026-07-06):
     # Split post-2023 sells into plan-flagged vs non-plan to test whether the
     # accuracy premium is driven by discretionary trades or pre-scheduled ones.
-    # Trades before 2023-02-27 have is_10b5_1_plan=None (field not collected).
+    # Amendment effective 2023-02-27 — use that exact cutoff, not Jan 1.
     if 'IS_10B5_1_PLAN' in sells.columns:
-        sells_post23 = sells[sells['TRADE_DATE'].dt.year >= 2023]
+        sells_post23 = sells[sells['TRADE_DATE'] >= pd.Timestamp('2023-02-27')]
         if len(sells_post23) >= 10:
             plan_sells = sells_post23[sells_post23['IS_10B5_1_PLAN'] == True]   # noqa: E712
             noplan_sells = sells_post23[sells_post23['IS_10B5_1_PLAN'] == False]  # noqa: E712
             for sub, label in [(sells_post23, 'SELLS_POST2023'),
                                (plan_sells, 'SELLS_10B5_PLAN'),
                                (noplan_sells, 'SELLS_NOT_10B5_PLAN')]:
-                r = _summarize(sub, label)
+                r = _summarize(sub, label, p_cond=p_cond_sell)
                 if r:
                     summary_rows.append(r)
 
@@ -3304,7 +3325,7 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         s_no16b = sells[sells['HAS_PRIOR_BUY_6M'] == False]  # noqa: E712
         for sub, label in [(s16b, 'SELLS_16B_ELIGIBLE'),
                            (s_no16b, 'SELLS_NO_16B')]:
-            r = _summarize(sub, label)
+            r = _summarize(sub, label, p_cond=p_cond_sell)
             if r:
                 summary_rows.append(r)
 
@@ -3322,6 +3343,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 'N_TRADES': n_ctrl,
                 'METRIC_VALUE': pct_ctrl,
                 'METRIC_PVAL': binom_ctrl,
+                'METRIC_PVAL_COND': np.nan,
+                'COND_NULL': np.nan,
                 'MEAN_TRADE_VALUE': ctrl['TRADE_VALUE'].mean(),
                 'MEAN_EVENT_PROFIT': np.nan,
                 'TOTAL_EVENT_PROFIT': np.nan,
@@ -3341,34 +3364,43 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                         'METRIC_PVAL': stats.binomtest(
                             int(csub['PROFITABLE_30'].sum()), n_cs, 0.5
                         ).pvalue,
+                        'METRIC_PVAL_COND': np.nan,
+                        'COND_NULL': np.nan,
                         'MEAN_TRADE_VALUE': csub['TRADE_VALUE'].mean(),
                         'MEAN_EVENT_PROFIT': np.nan,
                         'TOTAL_EVENT_PROFIT': np.nan,
                         'MEAN_EVENT_CAR': np.nan,
                     })
 
-    # Political vs control difference (sells)
-    pol_sell_pct = sells['EVENT_PROFITABLE'].mean() if len(sells) >= 5 else np.nan
-    if (control_trades is not None and not control_trades.empty):
-        ctrl_sells = control_trades[
+    # Political vs control difference (sells) — apples-to-apples via PROFITABLE_30
+    # Both sides use 30-day post-trade CAR profitability (same window, same definition).
+    # NOTE: earlier versions used EVENT_PROFITABLE for political vs PROFITABLE_30 for
+    # control — that was methodologically inconsistent and has been removed.
+    if ('PROFITABLE_30' in valid_pol.columns and
+            control_trades is not None and not control_trades.empty):
+        pol_sells_30 = sells[sells['PROFITABLE_30'].notna()]
+        ctrl_sells_30 = control_trades[
             (control_trades['TRADE_TYPE'] == 'sell') &
             control_trades['PROFITABLE_30'].notna()
         ]
-        ctrl_sell_pct = ctrl_sells['PROFITABLE_30'].mean() if len(ctrl_sells) >= 5 else np.nan
-        if not np.isnan(pol_sell_pct) and not np.isnan(ctrl_sell_pct):
+        if len(pol_sells_30) >= 5 and len(ctrl_sells_30) >= 5:
+            pol_sell_pct = pol_sells_30['PROFITABLE_30'].mean()
+            ctrl_sell_pct = ctrl_sells_30['PROFITABLE_30'].mean()
             premium = pol_sell_pct - ctrl_sell_pct
-            # Two-proportion z-test
-            n1, n2 = len(sells), len(ctrl_sells)
-            p_pool = (sells['EVENT_PROFITABLE'].sum() + ctrl_sells['PROFITABLE_30'].sum()) / (n1 + n2)
+            n1, n2 = len(pol_sells_30), len(ctrl_sells_30)
+            p_pool = (pol_sells_30['PROFITABLE_30'].sum() +
+                      ctrl_sells_30['PROFITABLE_30'].sum()) / (n1 + n2)
             se = np.sqrt(p_pool * (1 - p_pool) * (1/n1 + 1/n2))
             z = premium / se if se > 0 else np.nan
             z_pval = 2 * (1 - stats.norm.cdf(abs(z))) if not np.isnan(z) else np.nan
             summary_rows.append({
                 'CUT': 'SELLS_PREMIUM', 'SAMPLE': 'DIFFERENCE',
                 'METRIC_TYPE': 'DIFFERENCE',
+                'METRIC_PVAL': z_pval,
+                'METRIC_PVAL_COND': np.nan,
+                'COND_NULL': np.nan,
                 'N_TRADES': n1 + n2,
                 'METRIC_VALUE': premium,
-                'METRIC_PVAL': z_pval,
                 'MEAN_TRADE_VALUE': np.nan,
                 'MEAN_EVENT_PROFIT': np.nan,
                 'TOTAL_EVENT_PROFIT': np.nan,
@@ -3534,6 +3566,20 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
     informed_proximity = pd.DataFrame(proximity_rows) if proximity_rows else pd.DataFrame()
 
+    # Bonferroni correction for the 4 proximity windows (multiple-testing adjustment)
+    # Applies to POLITICAL PROPORTION rows only (not control, not DIFFERENCE rows).
+    if not informed_proximity.empty and 'METRIC_PVAL' in informed_proximity.columns:
+        n_windows = len(windows)  # 4
+        mask = (
+            (informed_proximity['SAMPLE'] == 'POLITICAL') &
+            (informed_proximity['METRIC_TYPE'] == 'PROPORTION')
+        )
+        informed_proximity.loc[mask, 'METRIC_PVAL_BONF'] = (
+            informed_proximity.loc[mask, 'METRIC_PVAL'] * n_windows
+        ).clip(upper=1.0)
+        informed_proximity['METRIC_PVAL_BONF'] = informed_proximity.get(
+            'METRIC_PVAL_BONF', np.nan)
+
     # ── Table 3: INFORMED_DOLLARS — by severity and proximity ────────
     dollar_rows = []
 
@@ -3618,14 +3664,7 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     cluster_rows = []
 
     if len(valid_pol) >= 10 and 'EVENT_ID' in valid_pol.columns:
-
-        # Pesaran-Timmermann (1992) conditional base rate for sells.
-        # Use ALL panel events' CAR_POST distribution (not just sell-matched
-        # events) to avoid circularity: sell accuracy IS "CAR < 0 for a sell",
-        # so using sell-matched event CARs as the null gives p=1 by construction.
-        all_event_cars = panel['CAR_POST'].dropna()
-        p_cond_sell = _conditional_sign_base_rate(all_event_cars)
-        logger.info("  P-T conditional null (all panel events): %.4f", p_cond_sell)
+        # p_cond_sell and p_cond_buy were computed earlier (from analysis events)
 
         # Magnitude-gated sell accuracy (|CAR| thresholds)
         for car_thr in [0.02, 0.05, 0.10, 0.15]:
@@ -3715,10 +3754,15 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
         # ── Event-clustered wild cluster bootstrap ──────────────────
         cut_specs = [
-            ('ALL_SELLS',    valid_pol[valid_pol['TRADE_TYPE'] == 'sell'],  0.5,         True),
-            ('ALL_BUYS',     valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],   0.5,         False),
-            ('ALL_TRADES',   valid_pol,                                     0.5,         None),
-            ('SELLS_COND',   valid_pol[valid_pol['TRADE_TYPE'] == 'sell'],  p_cond_sell, True),
+            # (label, subset, null_p0, is_sell)
+            # is_sell=True → one-tailed (accuracy > p0); False → one-tailed (accuracy < p0);
+            # None → two-tailed
+            ('ALL_SELLS',  valid_pol[valid_pol['TRADE_TYPE'] == 'sell'], 0.5,         True),
+            ('ALL_BUYS',   valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  0.5,         False),
+            ('ALL_TRADES', valid_pol,                                    0.5,         None),
+            # Conditional-null rows: correct for base-rate selection
+            ('SELLS_COND', valid_pol[valid_pol['TRADE_TYPE'] == 'sell'], p_cond_sell, True),
+            ('BUYS_COND',  valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  p_cond_buy,  False),
         ]
         for cut_label, sub_df, p0, is_sell in cut_specs:
             if len(sub_df) < 10:
@@ -3745,11 +3789,23 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             for boot_result, cluster_type in [(ev_boot, 'EVENT'), (tkr_boot, 'TICKER')]:
                 if boot_result is None:
                     continue
+                # Convert two-tailed bootstrap p to one-tailed for directional H1.
+                # sells: H1 = accuracy > p0; buys: H1 = accuracy < p0.
+                # Two-tailed bootstrap already uses abs() so p_two = 2*p_one when
+                # the observed effect is in the right direction.
+                p_two = boot_result['p_value_vs_p0']
+                p_hat = boot_result['point_est']
+                if is_sell is True:
+                    p_clust = p_two / 2 if p_hat > p0 else 1.0 - p_two / 2
+                elif is_sell is False:
+                    p_clust = p_two / 2 if p_hat < p0 else 1.0 - p_two / 2
+                else:
+                    p_clust = p_two  # ALL_TRADES: two-tailed
                 cluster_rows.append({
                     'CUT': cut_label,
                     'CLUSTER_TYPE': cluster_type,
                     'P0': p0,
-                    'CONDITIONAL_NULL': (cut_label == 'SELLS_COND'),
+                    'CONDITIONAL_NULL': cut_label in ('SELLS_COND', 'BUYS_COND'),
                     'N_OBS': boot_result['n_obs'],
                     'POINT_EST': boot_result['point_est'],
                     'CLUSTER_SE': boot_result['cluster_se'],
@@ -3757,7 +3813,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     'CI_HI_95': boot_result['ci_hi_95'],
                     'G_RAW': boot_result['g_raw'],
                     'G_EFF': boot_result['g_eff'],
-                    'P_VALUE_CLUSTERED': boot_result['p_value_vs_p0'],
+                    'P_VALUE_CLUSTERED': p_clust,
+                    'P_VALUE_TWO_TAILED': p_two,
                     'WEIGHTS_USED': boot_result['weights_used'],
                     'NAIVE_BINOMIAL_P': stats.binomtest(
                         int(sub_valid['EVENT_PROFITABLE'].sum()),
