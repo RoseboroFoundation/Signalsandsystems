@@ -84,6 +84,10 @@ Output tables (27, orphaned tables from prior runs are auto-dropped):
   ESSAY3_CLUSTER_INFERENCE      Event- & ticker-clustered wild bootstrap CIs,
                                 Pesaran-Timmermann conditional-null variant
   ESSAY3_DIRECTIONAL_PLACEBO    Date-randomization placebo on directional accuracy
+  ESSAY3_CAR_NET_SLOPE          OLS of event CAR on net sell direction (one row
+                                per event, HC3 SE); base-rate-immune
+  ESSAY3_JOINT_PT               Joint Pesaran-Timmermann 2x2 sign test (buys +
+                                sells against independence null)
 """
 
 import bisect
@@ -3153,14 +3157,21 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
       - Buy and CAR_POST > 0 (bought before price rise)
 
     Returns (informed_trading, informed_proximity, informed_dollars,
-             cluster_inference, directional_placebo).
+             cluster_inference, directional_placebo, car_net_slope, joint_pt).
     cluster_inference (ESSAY3_CLUSTER_INFERENCE): event- and ticker-clustered
       wild bootstrap CIs and p-values for the headline proportion, plus
       Pesaran-Timmermann conditional-null variant.
     directional_placebo (ESSAY3_DIRECTIONAL_PLACEBO): date-randomization
       placebo that shuffles EVENT_CAR labels across events.
+    car_net_slope (ESSAY3_CAR_NET_SLOPE): OLS of event-level CAR on net sell
+      direction (sign of $ sells minus $ buys), one row per event, HC3 SE.
+      Base-rate-immune: selection shifts mean CAR, not its covariance with
+      what insiders did.
+    joint_pt (ESSAY3_JOINT_PT): joint Pesaran-Timmermann 2x2 sign test
+      (buys + sells against independence null).
     """
-    empty = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    empty = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+             pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
     if crsp_profits is None or crsp_profits.empty:
         logger.warning("  No CRSP profits for informed trading test")
         return empty
@@ -3808,14 +3819,123 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         valid_pol, n_perms=1000, seed=42
     ) if len(valid_pol) >= 10 else pd.DataFrame()
 
+    # ── Table 6: CAR_NET_SLOPE — OLS event CAR on net sell direction ──
+    # One row per event; base-rate-immune because selection shifts mean CAR
+    # not its covariance with what insiders did.
+    car_net_slope = pd.DataFrame()
+    try:
+        from statsmodels.api import OLS, add_constant
+        from statsmodels.stats.sandwich_covariance import cov_hc3
+        if not valid_pol.empty and 'EVENT_CAR' in valid_pol.columns:
+            ev_grp = valid_pol.copy()
+            _dollar_col = 'TRADE_VALUE' if 'TRADE_VALUE' in ev_grp.columns else 'SHARES'
+            ev_grp['_SELL_USD'] = np.where(
+                ev_grp['TRADE_TYPE'] == 'sell',
+                ev_grp[_dollar_col].fillna(1.0).abs(),
+                0.0)
+            ev_grp['_BUY_USD'] = np.where(
+                ev_grp['TRADE_TYPE'] == 'buy',
+                ev_grp[_dollar_col].fillna(1.0).abs(),
+                0.0)
+            ev_agg = ev_grp.groupby('EVENT_ID').agg(
+                EVENT_CAR=('EVENT_CAR', 'first'),
+                NET_SELL_USD=('_SELL_USD', 'sum'),
+                NET_BUY_USD=('_BUY_USD', 'sum'),
+            ).dropna(subset=['EVENT_CAR']).reset_index()
+            ev_agg['NET_DIRECTION'] = np.sign(
+                ev_agg['NET_SELL_USD'] - ev_agg['NET_BUY_USD'])
+            ev_fit = ev_agg.dropna(subset=['EVENT_CAR', 'NET_DIRECTION'])
+            ev_fit = ev_fit[ev_fit['NET_DIRECTION'] != 0]
+            if len(ev_fit) >= 10:
+                X = add_constant(ev_fit['NET_DIRECTION'].values)
+                y = ev_fit['EVENT_CAR'].values
+                model = OLS(y, X).fit()
+                hc3 = cov_hc3(model)
+                se_hc3 = np.sqrt(np.diag(hc3))
+                t_stat = model.params[1] / se_hc3[1]
+                p_two = 2 * (1 - stats.t.cdf(abs(t_stat), df=len(y) - 2))
+                car_net_slope = pd.DataFrame([{
+                    'N_EVENTS': len(ev_fit),
+                    'COEF_NET_DIRECTION': model.params[1],
+                    'SE_HC3': se_hc3[1],
+                    'T_STAT': t_stat,
+                    'P_VALUE_TWO': p_two,
+                    'INTERCEPT': model.params[0],
+                    'R_SQUARED': model.rsquared,
+                    'INTERPRETATION': (
+                        'Negative coef = events where insiders net-sold had '
+                        'more negative CARs; positive = net-bought events '
+                        'had positive CARs. Independent of base-rate.'),
+                }])
+                logger.info(
+                    "  CAR-on-net-direction: coef=%.4f SE=%.4f p=%.4f (n=%d events)",
+                    model.params[1], se_hc3[1], p_two, len(ev_fit))
+    except Exception as _e:
+        logger.warning("  CAR net slope failed: %s", _e)
+
+    # ── Table 7: JOINT_PT — joint Pesaran-Timmermann 2x2 sign test ───
+    # Tests buy+sell direction against independence null.
+    # P_null = P(sell)*P(neg_car) + P(buy)*P(pos_car)
+    # Uses Pesaran-Timmermann (1992) eq. 7 variance.
+    joint_pt = pd.DataFrame()
+    try:
+        if not valid_pol.empty and 'EVENT_CAR' in valid_pol.columns and 'TRADE_TYPE' in valid_pol.columns:
+            jp = valid_pol[['TRADE_TYPE', 'EVENT_CAR', 'EVENT_ID']].dropna()
+            if len(jp) >= 20:
+                n_tot = len(jp)
+                p_sell = (jp['TRADE_TYPE'] == 'sell').mean()
+                p_buy = 1.0 - p_sell
+                p_neg_car = (jp['EVENT_CAR'] < 0).mean()
+                p_pos_car = 1.0 - p_neg_car
+                # Joint correct = sell+negCAR OR buy+posCAR
+                correct = (
+                    ((jp['TRADE_TYPE'] == 'sell') & (jp['EVENT_CAR'] < 0)) |
+                    ((jp['TRADE_TYPE'] == 'buy') & (jp['EVENT_CAR'] > 0))
+                )
+                obs_acc = correct.mean()
+                # Independence null accuracy
+                p_star = p_sell * p_neg_car + p_buy * p_pos_car
+                # PT (1992) eq. 7 variance
+                var_p_star = (
+                    (2 * p_neg_car - 1) ** 2 * p_sell * (1 - p_sell) / n_tot +
+                    (2 * p_sell - 1) ** 2 * p_neg_car * (1 - p_neg_car) / n_tot +
+                    4 * p_sell * p_neg_car * (1 - p_sell) * (1 - p_neg_car) / n_tot ** 2
+                )
+                var_obs = obs_acc * (1 - obs_acc) / n_tot
+                var_diff = var_obs + var_p_star
+                z_pt = (obs_acc - p_star) / np.sqrt(var_diff) if var_diff > 0 else np.nan
+                p_pt = 2 * (1 - stats.norm.cdf(abs(z_pt))) if not np.isnan(z_pt) else np.nan
+                joint_pt = pd.DataFrame([{
+                    'N_TRADES': n_tot,
+                    'P_SELL': p_sell,
+                    'P_NEG_CAR': p_neg_car,
+                    'NULL_ACCURACY': p_star,
+                    'OBS_ACCURACY': obs_acc,
+                    'EXCESS_ACCURACY': obs_acc - p_star,
+                    'PT_Z_STAT': z_pt,
+                    'PT_P_VALUE': p_pt,
+                    'INTERPRETATION': (
+                        'Joint PT: observed joint accuracy vs independence null '
+                        '(P_null=P(sell)*P(neg_car)+P(buy)*P(pos_car)). '
+                        'Base-rate-aware two-sided test.'),
+                }])
+                logger.info(
+                    "  Joint PT: obs_acc=%.4f null=%.4f excess=%.4f z=%.3f p=%.4f",
+                    obs_acc, p_star, obs_acc - p_star, z_pt, p_pt)
+    except Exception as _e:
+        logger.warning("  Joint PT failed: %s", _e)
+
     logger.info("  Informed trading test complete: %d summary rows, "
                 "%d proximity rows, %d dollar rows, "
-                "%d cluster inference rows, directional placebo: %s",
+                "%d cluster inference rows, directional placebo: %s, "
+                "car_net_slope: %d rows, joint_pt: %d rows",
                 len(informed_trading), len(informed_proximity),
                 len(informed_dollars), len(cluster_inference),
-                'yes' if not directional_placebo.empty else 'no')
+                'yes' if not directional_placebo.empty else 'no',
+                len(car_net_slope), len(joint_pt))
 
-    return informed_trading, informed_proximity, informed_dollars, cluster_inference, directional_placebo
+    return (informed_trading, informed_proximity, informed_dollars,
+            cluster_inference, directional_placebo, car_net_slope, joint_pt)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -3937,6 +4057,8 @@ def save_essay3_results(store, results_dict):
         'control_attrition': 'ESSAY3_CONTROL_ATTRITION',
         'cluster_inference': 'ESSAY3_CLUSTER_INFERENCE',
         'directional_placebo': 'ESSAY3_DIRECTIONAL_PLACEBO',
+        'car_net_slope': 'ESSAY3_CAR_NET_SLOPE',
+        'joint_pt': 'ESSAY3_JOINT_PT',
     }
     current_tables = set(table_map.values())
 
@@ -4130,7 +4252,8 @@ def run_essay3(store=None):
     # ── §12b Informed trading test (HEADLINE) ─────────────────────────
     logger.info("§12b Informed trading test (headline)...")
     (informed_trading, informed_proximity, informed_dollars,
-     cluster_inference, directional_placebo) = (
+     cluster_inference, directional_placebo,
+     car_net_slope, joint_pt) = (
         compute_informed_trading_test(panel, crsp_profits, control_trades)
     )
 
@@ -4169,6 +4292,8 @@ def run_essay3(store=None):
         'control_attrition': control_attrition,
         'cluster_inference': cluster_inference,
         'directional_placebo': directional_placebo,
+        'car_net_slope': car_net_slope,
+        'joint_pt': joint_pt,
     }
 
     logger.info("Saving results...")
