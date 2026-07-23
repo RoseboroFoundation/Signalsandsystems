@@ -81,8 +81,17 @@ def _extract_plan_flag_from_xml(xml_bytes: bytes) -> list[dict]:
     Disclosures appear in free-text footnotes referenced by <footnoteId>
     elements inside each transaction block.  We detect 10b5-1 plan trades
     by checking whether any footnote linked to a transaction mentions
-    '10b5-1' or 'rule 10b5-1'.  Absent any such footnote = False (not a
-    plan trade), since post-2023 filers are required to disclose plans.
+    '10b5-1' or 'rule 10b5-1'.
+
+    Coding convention:
+      True  — footnote explicitly references 10b5-1 plan language.
+      False — transaction has at least one linked footnote but none match
+              the plan pattern; filer chose to footnote other things,
+              providing evidence of no plan.
+      None  — transaction has no linked footnotes at all; absence of
+              disclosure is ambiguous (regex miss, non-compliance, or
+              genuinely no plan but no footnote added).  Treat as unknown,
+              not as confirmed discretionary.
     """
     soup = BeautifulSoup(xml_bytes, 'lxml-xml')
     if not (soup.find('ownershipDocument') or soup.find('reportingOwner')):
@@ -117,14 +126,19 @@ def _extract_plan_flag_from_xml(xml_bytes: bytes) -> list[dict]:
                 except Exception:
                     pass
 
-            # Check referenced footnotes for 10b5-1 plan language
+            # Check referenced footnotes for 10b5-1 plan language.
+            # No footnotes at all → None (unknown); footnotes present but
+            # none match → False (checked, no plan language found).
             fn_ids = [f.get('id') for f in trans.find_all('footnoteId') if f.get('id')]
-            is_plan = False
-            for fid in fn_ids:
-                txt = footnote_map.get(fid, '')
-                if _PLAN_RE.search(txt):
-                    is_plan = True
-                    break
+            if not fn_ids:
+                is_plan = None   # ambiguous: no footnotes to inspect
+            else:
+                is_plan = False
+                for fid in fn_ids:
+                    txt = footnote_map.get(fid, '')
+                    if _PLAN_RE.search(txt):
+                        is_plan = True
+                        break
 
             records.append({
                 'transaction_date':  td,
