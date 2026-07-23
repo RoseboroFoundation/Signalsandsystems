@@ -602,7 +602,11 @@ def build_insider_panel(form4, culture_events, political_events,
                 event_id_base = ev.get('EVENT_ID', f"POL_{event_date.strftime('%Y%m%d')}")
                 fundamental_rows.append({
                     'TICKER': ticker,
-                    'EVENT_ID': f"{event_id_base}_{ticker}",
+                    # Include event_date in the ID so different votes in the
+                    # same chamber-year get distinct IDs.  Without the date,
+                    # e.g. all 2017 House votes on WFC share "vote_H_2017_WFC",
+                    # causing a 26% fan-out when §12b merges on EVENT_ID.
+                    'EVENT_ID': f"{event_id_base}_{event_date.strftime('%Y%m%d')}_{ticker}",
                     'EVENT_DATE': event_date, 'EVENT_CATEGORY': 'FUNDAMENTAL',
                     'EVENT_TYPE': ev.get('EVENT_TYPE', 'POLITICAL'),
                     'IS_TREATMENT': True, 'LEAN': 'N/A',
@@ -2349,9 +2353,11 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
 
     crsp_summary = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
 
-    # Trade-level table: save a compact version
+    # Trade-level table: save a compact version.
+    # EVENT_DATE is included so §12b can merge on (EVENT_ID, TICKER, EVENT_DATE)
+    # and avoid fan-out when EVENT_IDs are not yet fully date-stamped.
     save_cols = [
-        'OWNER', 'TICKER', 'EVENT_ID', 'TRADE_DATE', 'TRADE_TYPE',
+        'OWNER', 'TICKER', 'EVENT_ID', 'EVENT_DATE', 'TRADE_DATE', 'TRADE_TYPE',
         'TRANSACTION_CODE', 'TRADE_VALUE', 'IS_ACTIVE',
         'EVENT_CATEGORY', 'EVENT_TYPE',
         'REGULATORY_PERIOD', 'HIGH_POLITICAL_CONNECTION', 'HIGH_OPP',
@@ -3187,13 +3193,24 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         return empty
 
     # ── Merge event-level CAR and EVENT_DATE onto trades ──────────────
-    event_info = panel[['EVENT_ID', 'EVENT_DATE', 'CAR_POST']].copy()
-    event_info = event_info.rename(columns={
-        'EVENT_DATE': 'EVENT_DATE_PANEL',
-        'CAR_POST': 'EVENT_CAR',
-    })
+    # Merge on (EVENT_ID, TICKER, EVENT_DATE) to prevent fan-out when multiple
+    # events share the same EVENT_ID (e.g. several 2017 House votes before the
+    # upstream ID was made date-specific).  drop_duplicates ensures the lookup
+    # table is at most one row per key, so the merge is always many-to-one.
+    # Rename CAR_POST only; keep EVENT_DATE as the merge key and alias it to
+    # EVENT_DATE_PANEL after the join.
+    event_info = (
+        panel[['EVENT_ID', 'TICKER', 'EVENT_DATE', 'CAR_POST']]
+        .drop_duplicates(subset=['EVENT_ID', 'TICKER', 'EVENT_DATE'])
+        .rename(columns={'CAR_POST': 'EVENT_CAR'})
+        .copy()
+    )
 
-    pol = crsp_profits.merge(event_info, on='EVENT_ID', how='left')
+    pol = crsp_profits.merge(
+        event_info, on=['EVENT_ID', 'TICKER', 'EVENT_DATE'], how='left'
+    )
+    # Alias EVENT_DATE to EVENT_DATE_PANEL (the name the rest of §12b expects).
+    pol['EVENT_DATE_PANEL'] = pol['EVENT_DATE']
     pol['EVENT_DATE_PANEL'] = pd.to_datetime(pol['EVENT_DATE_PANEL'])
     pol['TRADE_DATE'] = pd.to_datetime(pol['TRADE_DATE'])
 
@@ -3544,9 +3561,10 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
     # ── Table 2: INFORMED_PROXIMITY — by days-before-event window ────
     proximity_rows = []
-    # Start windows at day 1 (not 0): DAYS_BEFORE_EVENT=0 means the trade
-    # occurred on the event date itself and may be post-announcement.
-    windows = [(1, 30), (31, 60), (61, 90), (91, 180)]
+    # PRE_FULL extraction ends at event_date−1, so DAYS_BEFORE_EVENT=0 trades
+    # cannot enter the analysis set via the normal pipeline.  Windows start at 0
+    # so they span [0,30], [31,60], [61,90], [91,180] as defined.
+    windows = [(0, 30), (31, 60), (61, 90), (91, 180)]
     for w_start, w_end in windows:
         sub = valid_pol[
             (valid_pol['DAYS_BEFORE_EVENT'] >= w_start) &
@@ -3634,9 +3652,9 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 'METRIC_VALUE': sub_sells['EVENT_PROFITABLE'].mean(),
             })
 
-    # Sells before events with negative CARs (severity cuts); start at day 1.
+    # Sells before events with negative CARs (severity cuts).
     for car_threshold in [-0.05, -0.10, -0.15]:
-        for w_start, w_end in [(1, 30), (1, 60), (1, 180)]:
+        for w_start, w_end in [(0, 30), (0, 60), (0, 180)]:
             sub = valid_pol[
                 (valid_pol['TRADE_TYPE'] == 'sell') &
                 (valid_pol['EVENT_CAR'] <= car_threshold) &
