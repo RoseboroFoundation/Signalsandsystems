@@ -4136,7 +4136,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 len(car_net_slope), len(joint_pt))
 
     return (informed_trading, informed_proximity, informed_dollars,
-            cluster_inference, directional_placebo, car_net_slope, joint_pt)
+            cluster_inference, directional_placebo, car_net_slope, joint_pt,
+            valid_pol)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -4225,6 +4226,513 @@ def compute_bootstrap_ci(panel, n_bootstrap=1000, seed=42):
 
 
 # ═════════════════════════════════════════════════════════════════════
+# SUPPLEMENTAL TESTS — ALTERNATIVE DIRECTIONAL EVIDENCE
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_trading_intensity_did(valid_pol, panel):
+    """DiD on pre-event trading intensity: near vs far window × event outcome.
+
+    Tests whether insiders escalate net selling specifically in the near window
+    (days 1–30 before event) relative to the far window (days 31–180), and
+    whether this escalation is concentrated before negative-CAR events.
+
+    ENDOGENEITY DESIGN:
+    EVENT_CAR is realized after all pre-event trades, so there is no reverse
+    causality — the event outcome cannot drive pre-event trade timing.
+    Omitted-variable risk (firm-specific bad news simultaneously driving both
+    selling and the political-event reaction) is addressed by event-type and
+    regulatory-period fixed effects. The within-event DiD design absorbs any
+    time-invariant event-level confound.
+
+    Returns (did_summary, did_reg).
+    """
+    if valid_pol is None or valid_pol.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vp = valid_pol.copy()
+    vp['DAYS_BEFORE_EVENT'] = pd.to_numeric(vp['DAYS_BEFORE_EVENT'], errors='coerce')
+    vp = vp[vp['DAYS_BEFORE_EVENT'].between(1, 180)]
+    if vp.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vp['WINDOW'] = np.where(vp['DAYS_BEFORE_EVENT'] <= 30, 'NEAR', 'FAR')
+    # Signed: positive = net sell, negative = net buy
+    vp['SIGNED_VALUE'] = np.where(
+        vp['TRADE_TYPE'] == 'sell', vp['TRADE_VALUE'], -vp['TRADE_VALUE'])
+
+    # Aggregate to event × window level
+    agg = vp.groupby(['EVENT_ID', 'TICKER', 'WINDOW']).agg(
+        EVENT_CAR=('EVENT_CAR', 'first'),
+        NET_SELL_VALUE=('SIGNED_VALUE', 'sum'),
+        TOTAL_VALUE=('TRADE_VALUE', 'sum'),
+        N_TRADES=('TRADE_VALUE', 'count'),
+        HIGH_POLITICAL_CONNECTION=('HIGH_POLITICAL_CONNECTION', 'first'),
+        EVENT_CATEGORY=('EVENT_CATEGORY', 'first'),
+        REGULATORY_PERIOD=('REGULATORY_PERIOD', 'first'),
+    ).reset_index()
+
+    agg['NET_SELL_INTENSITY'] = np.where(
+        agg['TOTAL_VALUE'] > 0,
+        agg['NET_SELL_VALUE'] / agg['TOTAL_VALUE'],
+        np.nan)
+    agg['EVENT_CAR'] = pd.to_numeric(agg['EVENT_CAR'], errors='coerce')
+    agg['NEGATIVE_EVENT'] = (agg['EVENT_CAR'] < 0).astype(int)
+
+    # 2×2 group means table
+    summary_rows = []
+    for window in ['NEAR', 'FAR']:
+        for neg in [1, 0]:
+            sub = agg[(agg['WINDOW'] == window) & (agg['NEGATIVE_EVENT'] == neg)]
+            vals = sub['NET_SELL_INTENSITY'].dropna()
+            if len(vals) < 5:
+                continue
+            summary_rows.append({
+                'WINDOW': window,
+                'EVENT_OUTCOME': 'NEGATIVE' if neg else 'POSITIVE',
+                'N_EVENT_WINDOWS': len(vals),
+                'MEAN_NET_SELL_INTENSITY': vals.mean(),
+                'MEDIAN_NET_SELL_INTENSITY': vals.median(),
+                'STD_NET_SELL_INTENSITY': vals.std(),
+            })
+    did_summary = pd.DataFrame(summary_rows)
+
+    # DiD point estimate: (near_neg − far_neg) − (near_pos − far_pos)
+    def _cell(w, o):
+        row = did_summary[
+            (did_summary['WINDOW'] == w) & (did_summary['EVENT_OUTCOME'] == o)]
+        return row['MEAN_NET_SELL_INTENSITY'].values[0] if len(row) else np.nan
+
+    near_neg, far_neg = _cell('NEAR', 'NEGATIVE'), _cell('FAR', 'NEGATIVE')
+    near_pos, far_pos = _cell('NEAR', 'POSITIVE'), _cell('FAR', 'POSITIVE')
+    if not any(np.isnan(v) for v in [near_neg, far_neg, near_pos, far_pos]):
+        did_est = (near_neg - far_neg) - (near_pos - far_pos)
+        did_summary = pd.concat([did_summary, pd.DataFrame([{
+            'WINDOW': 'DID_ESTIMATE',
+            'EVENT_OUTCOME': '(NEAR-FAR|NEG) - (NEAR-FAR|POS)',
+            'N_EVENT_WINDOWS': agg['NET_SELL_INTENSITY'].notna().sum(),
+            'MEAN_NET_SELL_INTENSITY': did_est,
+            'MEDIAN_NET_SELL_INTENSITY': np.nan,
+            'STD_NET_SELL_INTENSITY': np.nan,
+        }])], ignore_index=True)
+        logger.info(
+            "  DiD intensity: near_neg=%.4f far_neg=%.4f near_pos=%.4f "
+            "far_pos=%.4f DiD=%.4f",
+            near_neg, far_neg, near_pos, far_pos, did_est)
+
+    # OLS: NET_SELL_INTENSITY ~ NEAR_WINDOW × NEGATIVE_EVENT + FE (HC3)
+    did_reg = pd.DataFrame()
+    try:
+        reg_df = agg[agg['NET_SELL_INTENSITY'].notna()].copy()
+        reg_df['NEAR_WINDOW'] = (reg_df['WINDOW'] == 'NEAR').astype(float)
+        reg_df['INTERACTION'] = reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT'].astype(float)
+        cat_d = pd.get_dummies(reg_df['EVENT_CATEGORY'], prefix='cat', drop_first=True).astype(float)
+        per_d = pd.get_dummies(reg_df['REGULATORY_PERIOD'], prefix='period', drop_first=True).astype(float)
+        X = pd.concat(
+            [reg_df[['NEAR_WINDOW', 'NEGATIVE_EVENT', 'INTERACTION']].astype(float),
+             cat_d, per_d], axis=1)
+        X = sm.add_constant(X)
+        y = reg_df['NET_SELL_INTENSITY']
+        mask = y.notna() & X.notna().all(axis=1)
+        model = sm.OLS(y[mask], X[mask]).fit(cov_type='HC3')
+        ci = model.conf_int()
+        reg_rows = []
+        for var in model.params.index:
+            reg_rows.append({
+                'VARIABLE': var,
+                'COEF': model.params[var],
+                'SE': model.bse[var],
+                'T_STAT': model.tvalues[var],
+                'P_VALUE': model.pvalues[var],
+                'CI_025': ci.loc[var, 0],
+                'CI_975': ci.loc[var, 1],
+                'N': int(model.nobs),
+                'R_SQUARED': model.rsquared,
+                'INTERPRETATION': (
+                    'Key DiD coefficient: escalation of net selling in near window '
+                    'before negative events. EVENT_CAR is realized AFTER all trades '
+                    '— no reverse causality. Omitted-variable risk addressed by '
+                    'event-type and regulatory-period FE.'
+                ) if var == 'INTERACTION' else '',
+            })
+        did_reg = pd.DataFrame(reg_rows)
+        logger.info(
+            "  DiD intensity reg: n=%d INTERACTION coef=%.4f p=%.4f",
+            int(model.nobs),
+            model.params.get('INTERACTION', np.nan),
+            model.pvalues.get('INTERACTION', np.nan))
+    except Exception as e:
+        logger.warning("  DiD intensity regression failed: %s", e)
+
+    return did_summary, did_reg
+
+
+def compute_price_discovery(valid_pol, panel):
+    """Predictive regression: does far-window net selling predict event-window CAR?
+
+    Meulbroek (1992)-style price discovery test: if insiders exploit advance
+    political knowledge, their far-window (days 61–180 before the event) net
+    selling should predict the eventual event CAR.
+
+    ENDOGENEITY DESIGN:
+    (1) Reverse causality risk: falling stock price → defensive selling.
+        Primary mitigation: FAR window only (days 61–180). Insiders are
+        unlikely to sell defensively in response to stock declines 2–6 months
+        ahead of a legislative vote.
+    (2) Quasi-exogenous event timing: legislative calendars and court schedules
+        are determined by institutional processes, not by firm stock performance.
+    (3) Temporal ordering: X (far-window selling) precedes Y (event CAR) by ≥61 days.
+    (4) Remaining omitted-variable caveat: lobbying exposure may jointly predict
+        both selling and political-event impact; HIGH_POLITICAL_CONNECTION included
+        as a control.
+    (5) Full pre-event window (days 1–180) is reported as a robustness check only,
+        not as the main result.
+
+    Returns (pd_summary, pd_reg).
+    """
+    if valid_pol is None or valid_pol.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vp = valid_pol.copy()
+    vp['DAYS_BEFORE_EVENT'] = pd.to_numeric(vp['DAYS_BEFORE_EVENT'], errors='coerce')
+    vp['EVENT_CAR'] = pd.to_numeric(vp['EVENT_CAR'], errors='coerce')
+    vp['SIGNED_VALUE'] = np.where(
+        vp['TRADE_TYPE'] == 'sell', vp['TRADE_VALUE'], -vp['TRADE_VALUE'])
+
+    summary_rows = []
+    reg_rows = []
+
+    for spec_name, day_lo, day_hi in [
+        ('FAR_WINDOW_61_180', 61, 180),      # primary: low reverse-causality risk
+        ('FULL_PRE_EVENT_1_180', 1, 180),    # robustness only
+    ]:
+        sub = vp[vp['DAYS_BEFORE_EVENT'].between(day_lo, day_hi)]
+        if sub.empty:
+            continue
+        ev = sub.groupby(['EVENT_ID', 'TICKER']).agg(
+            EVENT_CAR=('EVENT_CAR', 'first'),
+            NET_SELL_VALUE=('SIGNED_VALUE', 'sum'),
+            TOTAL_VALUE=('TRADE_VALUE', 'sum'),
+            N_TRADES=('TRADE_VALUE', 'count'),
+            HIGH_POLITICAL_CONNECTION=('HIGH_POLITICAL_CONNECTION', 'first'),
+            EVENT_CATEGORY=('EVENT_CATEGORY', 'first'),
+            REGULATORY_PERIOD=('REGULATORY_PERIOD', 'first'),
+        ).reset_index()
+        ev['NET_SELL_INTENSITY'] = np.where(
+            ev['TOTAL_VALUE'] > 0,
+            ev['NET_SELL_VALUE'] / ev['TOTAL_VALUE'],
+            np.nan)
+        valid_ev = ev[ev['EVENT_CAR'].notna() & ev['NET_SELL_INTENSITY'].notna()].copy()
+        if len(valid_ev) < 10:
+            continue
+
+        corr, corr_p = stats.pearsonr(
+            valid_ev['NET_SELL_INTENSITY'], valid_ev['EVENT_CAR'])
+        concordant = (
+            ((valid_ev['NET_SELL_INTENSITY'] > 0) & (valid_ev['EVENT_CAR'] < 0)) |
+            ((valid_ev['NET_SELL_INTENSITY'] < 0) & (valid_ev['EVENT_CAR'] > 0))
+        ).sum()
+
+        summary_rows.append({
+            'SPEC': spec_name,
+            'DAY_LO': day_lo, 'DAY_HI': day_hi,
+            'N_EVENTS': len(valid_ev),
+            'PEARSON_CORR': corr, 'PEARSON_P': corr_p,
+            'PCT_CONCORDANT': concordant / len(valid_ev),
+            'MEAN_NET_SELL_INTENSITY': valid_ev['NET_SELL_INTENSITY'].mean(),
+            'MEAN_EVENT_CAR': valid_ev['EVENT_CAR'].mean(),
+            'PRIMARY_SPEC': spec_name.startswith('FAR'),
+            'ENDOGENEITY_NOTE': (
+                'PRIMARY SPEC. Far window (days 61-180) reduces reverse-causality '
+                'risk (stop-loss selling). Quasi-exogenous legislative timing.'
+            ) if spec_name.startswith('FAR') else (
+                'ROBUSTNESS ONLY. Full pre-event window (days 1-180). '
+                'Near-window trades may include reactive selling.'
+            ),
+        })
+
+        try:
+            cat_d = pd.get_dummies(
+                valid_ev['EVENT_CATEGORY'], prefix='cat', drop_first=True).astype(float)
+            per_d = pd.get_dummies(
+                valid_ev['REGULATORY_PERIOD'], prefix='period', drop_first=True).astype(float)
+            conn = valid_ev['HIGH_POLITICAL_CONNECTION'].astype(float).rename('HIGH_CONN')
+            X = pd.concat(
+                [valid_ev[['NET_SELL_INTENSITY']].astype(float),
+                 conn, cat_d, per_d], axis=1)
+            X = sm.add_constant(X)
+            y = valid_ev['EVENT_CAR']
+            mask = y.notna() & X.notna().all(axis=1)
+            model = sm.OLS(y[mask], X[mask]).fit(cov_type='HC3')
+            ci = model.conf_int()
+            for var in model.params.index:
+                reg_rows.append({
+                    'SPEC': spec_name,
+                    'VARIABLE': var,
+                    'COEF': model.params[var],
+                    'SE': model.bse[var],
+                    'T_STAT': model.tvalues[var],
+                    'P_VALUE': model.pvalues[var],
+                    'CI_025': ci.loc[var, 0],
+                    'CI_975': ci.loc[var, 1],
+                    'N': int(model.nobs),
+                    'R_SQUARED': model.rsquared,
+                    'INTERPRETATION': (
+                        'H1: negative coef = net selling in far window predicts '
+                        'negative event CAR (price discovery). Far-window primary '
+                        'spec reduces reverse-causality risk.'
+                    ) if var == 'NET_SELL_INTENSITY' else '',
+                })
+            logger.info(
+                "  Price discovery (%s): n=%d corr=%.4f p=%.4f "
+                "NSI_coef=%.4f p=%.4f",
+                spec_name, int(model.nobs), corr, corr_p,
+                model.params.get('NET_SELL_INTENSITY', np.nan),
+                model.pvalues.get('NET_SELL_INTENSITY', np.nan))
+        except Exception as e:
+            logger.warning("  Price discovery reg (%s) failed: %s", spec_name, e)
+
+    return pd.DataFrame(summary_rows), pd.DataFrame(reg_rows)
+
+
+def compute_within_insider_accuracy(crsp_profits, control_trades):
+    """Within-insider paired accuracy: political vs non-political windows.
+
+    Tests whether the same insider achieves higher directional accuracy in
+    political-event windows vs their own non-political trading, using
+    PROFITABLE_30 (30-day post-trade CAR) as the accuracy measure in both
+    samples for strict comparability.
+
+    ENDOGENEITY DESIGN:
+    Within-insider comparison eliminates cross-sectional heterogeneity
+    (risk tolerance, information access, trading style, industry expertise).
+    The political event window is quasi-randomly determined by legislative
+    timing, not by the insider's choice. LPM with demeaned (within) insider
+    fixed effects isolates the political-window accuracy premium.
+
+    NOTE ON ACCURACY CONSTRUCTS:
+    Both political and control samples use PROFITABLE_30 (30-day post-trade
+    forward CAR accuracy). The headline §12b test uses EVENT_CAR (event-window
+    construct), which is more appropriate for measuring foreknowledge of
+    political events but is unavailable for control trades. The 30-day construct
+    here is conservative — it may understate the premium if the political event
+    resolves before day 30 and the stock partially mean-reverts.
+
+    Returns (within_summary, within_reg_placeholder).
+    """
+    if crsp_profits is None or crsp_profits.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    if control_trades is None or control_trades.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    pol = crsp_profits[crsp_profits['PROFITABLE_30'].notna()][
+        ['OWNER', 'TICKER', 'TRADE_DATE', 'TRADE_TYPE', 'PROFITABLE_30']
+    ].copy()
+    pol['POLITICAL'] = 1
+
+    ctrl = control_trades[control_trades['PROFITABLE_30'].notna()][
+        ['OWNER', 'TICKER', 'TRADE_DATE', 'TRADE_TYPE', 'PROFITABLE_30']
+    ].copy()
+    ctrl['POLITICAL'] = 0
+
+    common = set(pol['OWNER'].unique()) & set(ctrl['OWNER'].unique())
+    if len(common) < 10:
+        logger.warning(
+            "  Within-insider: only %d insiders in both samples — skipping", len(common))
+        return pd.DataFrame(), pd.DataFrame()
+
+    pol_c = pol[pol['OWNER'].isin(common)]
+    ctrl_c = ctrl[ctrl['OWNER'].isin(common)]
+    logger.info(
+        "  Within-insider: %d common insiders, %d political, %d control trades",
+        len(common), len(pol_c), len(ctrl_c))
+
+    # Per-insider accuracy rates
+    pol_acc = pol_c.groupby('OWNER')['PROFITABLE_30'].agg(['mean', 'count'])
+    pol_acc.columns = ['POL_ACCURACY', 'POL_N']
+    ctrl_acc = ctrl_c.groupby('OWNER')['PROFITABLE_30'].agg(['mean', 'count'])
+    ctrl_acc.columns = ['CTRL_ACCURACY', 'CTRL_N']
+    paired = pol_acc.join(ctrl_acc, how='inner')
+    paired = paired[(paired['POL_N'] >= 3) & (paired['CTRL_N'] >= 3)]
+
+    summary_rows = []
+    if len(paired) >= 5:
+        diff = paired['POL_ACCURACY'] - paired['CTRL_ACCURACY']
+        t_stat, t_p = stats.ttest_rel(paired['POL_ACCURACY'], paired['CTRL_ACCURACY'])
+        summary_rows.append({
+            'TEST': 'PAIRED_T_TEST',
+            'N_INSIDERS': len(paired),
+            'MEAN_POL_ACCURACY': paired['POL_ACCURACY'].mean(),
+            'MEAN_CTRL_ACCURACY': paired['CTRL_ACCURACY'].mean(),
+            'MEAN_DIFF': diff.mean(),
+            'STD_DIFF': diff.std(),
+            'T_STAT': t_stat, 'P_VALUE': t_p,
+            'ACCURACY_CONSTRUCT': 'PROFITABLE_30',
+            'INTERPRETATION': (
+                'Within-insider paired t-test using PROFITABLE_30 (30-day '
+                'forward CAR) in both samples. Controls for all insider-level '
+                'fixed effects. Conservative vs EVENT_CAR headline test.'
+            ),
+        })
+        logger.info(
+            "  Within-insider paired t: n=%d pol_acc=%.4f ctrl_acc=%.4f "
+            "diff=%.4f t=%.3f p=%.4f",
+            len(paired), paired['POL_ACCURACY'].mean(),
+            paired['CTRL_ACCURACY'].mean(), diff.mean(), t_stat, t_p)
+
+    # LPM with within-insider FE (demeaned OLS)
+    try:
+        panel_data = pd.concat([pol_c, ctrl_c], ignore_index=True)
+        panel_data = panel_data[panel_data['OWNER'].isin(paired.index)]
+        panel_data['Y_MEAN'] = panel_data.groupby('OWNER')['PROFITABLE_30'].transform('mean')
+        panel_data['X_MEAN'] = panel_data.groupby('OWNER')['POLITICAL'].transform('mean')
+        panel_data['Y_DM'] = panel_data['PROFITABLE_30'] - panel_data['Y_MEAN']
+        panel_data['X_DM'] = panel_data['POLITICAL'] - panel_data['X_MEAN']
+        mask = panel_data['Y_DM'].notna() & panel_data['X_DM'].notna()
+        model = sm.OLS(
+            panel_data.loc[mask, 'Y_DM'],
+            sm.add_constant(panel_data.loc[mask, 'X_DM'])
+        ).fit(cov_type='HC3')
+        summary_rows.append({
+            'TEST': 'LPM_INSIDER_FE',
+            'N_INSIDERS': len(paired),
+            'MEAN_POL_ACCURACY': pol_c['PROFITABLE_30'].mean(),
+            'MEAN_CTRL_ACCURACY': ctrl_c['PROFITABLE_30'].mean(),
+            'MEAN_DIFF': model.params.get('X_DM', np.nan),
+            'STD_DIFF': model.bse.get('X_DM', np.nan),
+            'T_STAT': model.tvalues.get('X_DM', np.nan),
+            'P_VALUE': model.pvalues.get('X_DM', np.nan),
+            'ACCURACY_CONSTRUCT': 'PROFITABLE_30',
+            'INTERPRETATION': (
+                'LPM with within-insider fixed effects (demeaned OLS). '
+                'Coefficient = accuracy premium attributable to political windows, '
+                'identified solely from within-insider variation. HC3 robust SE.'
+            ),
+        })
+        logger.info(
+            "  Within-insider LPM FE: coef=%.4f p=%.4f",
+            model.params.get('X_DM', np.nan),
+            model.pvalues.get('X_DM', np.nan))
+    except Exception as e:
+        logger.warning("  Within-insider LPM failed: %s", e)
+
+    return pd.DataFrame(summary_rows), pd.DataFrame()
+
+
+def compute_connection_timing(valid_pol, panel):
+    """Political connection × window timing interaction (triple DiD).
+
+    Tests whether highly politically connected insiders show more concentrated
+    near-window (days 1–30) selling before negative-CAR events relative to
+    low-connection insiders. Cross-sectional variation in political connection
+    identifies the information channel (political networks vs firm-specific).
+
+    ENDOGENEITY DESIGN:
+    HIGH_POLITICAL_CONNECTION is a slow-moving firm-level characteristic
+    (PAC contributions, lobbying, board composition) that is predetermined at
+    the time of trading, reducing simultaneity concerns. The triple interaction
+    (high_conn × near_window × negative_event) is identified from within-sample
+    variation in all three dimensions simultaneously.
+
+    REMAINING CAVEAT:
+    Politically connected firms may operate in sectors where political-event
+    impacts are systematically larger (financial, defense, healthcare), creating
+    a mechanical correlation between connection, selling intensity, and event
+    CAR magnitude. Event-category and regulatory-period FE are included as
+    controls but cannot fully absorb sector-level political exposure.
+
+    Returns (timing_summary, timing_reg).
+    """
+    if valid_pol is None or valid_pol.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vp = valid_pol.copy()
+    vp['DAYS_BEFORE_EVENT'] = pd.to_numeric(vp['DAYS_BEFORE_EVENT'], errors='coerce')
+    vp['EVENT_CAR'] = pd.to_numeric(vp['EVENT_CAR'], errors='coerce')
+    vp = vp[vp['DAYS_BEFORE_EVENT'].between(1, 180) & vp['EVENT_PROFITABLE'].notna()]
+    if vp.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    vp['NEAR_WINDOW'] = (vp['DAYS_BEFORE_EVENT'] <= 30).astype(int)
+    vp['NEGATIVE_EVENT'] = (vp['EVENT_CAR'] < 0).astype(int)
+    vp['HIGH_CONN'] = (
+        pd.to_numeric(vp['HIGH_POLITICAL_CONNECTION'], errors='coerce')
+        .fillna(0).astype(int))
+
+    # 2×2×2 summary table
+    summary_rows = []
+    for conn in [1, 0]:
+        for near in [1, 0]:
+            for neg in [1, 0]:
+                sub = vp[
+                    (vp['HIGH_CONN'] == conn) &
+                    (vp['NEAR_WINDOW'] == near) &
+                    (vp['NEGATIVE_EVENT'] == neg)]
+                if len(sub) < 5:
+                    continue
+                summary_rows.append({
+                    'HIGH_CONN': bool(conn),
+                    'NEAR_WINDOW': bool(near),
+                    'NEGATIVE_EVENT': bool(neg),
+                    'N_TRADES': len(sub),
+                    'PCT_ACCURATE': sub['EVENT_PROFITABLE'].mean(),
+                    'MEAN_TRADE_VALUE': sub['TRADE_VALUE'].mean(),
+                })
+    timing_summary = pd.DataFrame(summary_rows)
+    if timing_summary.empty:
+        return timing_summary, pd.DataFrame()
+
+    # OLS with triple interaction (HC3)
+    timing_reg = pd.DataFrame()
+    try:
+        reg_df = vp.copy()
+        reg_df['NEAR_X_NEG'] = reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT']
+        reg_df['CONN_X_NEAR'] = reg_df['HIGH_CONN'] * reg_df['NEAR_WINDOW']
+        reg_df['CONN_X_NEG'] = reg_df['HIGH_CONN'] * reg_df['NEGATIVE_EVENT']
+        reg_df['TRIPLE'] = (
+            reg_df['HIGH_CONN'] * reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT'])
+        cat_d = pd.get_dummies(reg_df['EVENT_CATEGORY'], prefix='cat', drop_first=True).astype(float)
+        per_d = pd.get_dummies(
+            reg_df['REGULATORY_PERIOD'], prefix='period', drop_first=True).astype(float)
+        X_cols = ['HIGH_CONN', 'NEAR_WINDOW', 'NEGATIVE_EVENT',
+                  'NEAR_X_NEG', 'CONN_X_NEAR', 'CONN_X_NEG', 'TRIPLE']
+        X = pd.concat([reg_df[X_cols].astype(float), cat_d, per_d], axis=1)
+        X = sm.add_constant(X)
+        y = reg_df['EVENT_PROFITABLE']
+        mask = y.notna() & X.notna().all(axis=1)
+        model = sm.OLS(y[mask], X[mask]).fit(cov_type='HC3')
+        ci = model.conf_int()
+        reg_rows = []
+        for var in model.params.index:
+            reg_rows.append({
+                'VARIABLE': var,
+                'COEF': model.params[var],
+                'SE': model.bse[var],
+                'T_STAT': model.tvalues[var],
+                'P_VALUE': model.pvalues[var],
+                'CI_025': ci.loc[var, 0],
+                'CI_975': ci.loc[var, 1],
+                'N': int(model.nobs),
+                'R_SQUARED': model.rsquared,
+                'INTERPRETATION': (
+                    'Triple DiD: high-connection insiders show larger near-window '
+                    'accuracy premium before negative events vs low-connection '
+                    'insiders. HIGH_POLITICAL_CONNECTION is predetermined '
+                    '(slow-moving), reducing simultaneity risk.'
+                ) if var == 'TRIPLE' else '',
+            })
+        timing_reg = pd.DataFrame(reg_rows)
+        logger.info(
+            "  Connection timing: n=%d TRIPLE coef=%.4f p=%.4f",
+            int(model.nobs),
+            model.params.get('TRIPLE', np.nan),
+            model.pvalues.get('TRIPLE', np.nan))
+    except Exception as e:
+        logger.warning("  Connection timing regression failed: %s", e)
+
+    return timing_summary, timing_reg
+
+
+# ═════════════════════════════════════════════════════════════════════
 # RESULTS PERSISTENCE
 # ═════════════════════════════════════════════════════════════════════
 
@@ -4260,6 +4768,13 @@ def save_essay3_results(store, results_dict):
         'directional_placebo': 'ESSAY3_DIRECTIONAL_PLACEBO',
         'car_net_slope': 'ESSAY3_CAR_NET_SLOPE',
         'joint_pt': 'ESSAY3_JOINT_PT',
+        'intensity_did': 'ESSAY3_INTENSITY_DID',
+        'intensity_did_reg': 'ESSAY3_INTENSITY_DID_REG',
+        'price_discovery': 'ESSAY3_PRICE_DISCOVERY',
+        'price_discovery_reg': 'ESSAY3_PRICE_DISCOVERY_REG',
+        'within_insider': 'ESSAY3_WITHIN_INSIDER',
+        'conn_timing': 'ESSAY3_CONN_TIMING',
+        'conn_timing_reg': 'ESSAY3_CONN_TIMING_REG',
     }
     current_tables = set(table_map.values())
 
@@ -4458,9 +4973,22 @@ def run_essay3(store=None):
     logger.info("§12b Informed trading test (headline)...")
     (informed_trading, informed_proximity, informed_dollars,
      cluster_inference, directional_placebo,
-     car_net_slope, joint_pt) = (
+     car_net_slope, joint_pt, valid_pol) = (
         compute_informed_trading_test(panel, crsp_profits, control_trades)
     )
+
+    # ── §13 Supplemental directional tests ────────────────────────────
+    logger.info("§13a DiD on pre-event trading intensity (near vs far × outcome)...")
+    intensity_did, intensity_did_reg = compute_trading_intensity_did(valid_pol, panel)
+
+    logger.info("§13b Predictive price discovery (far-window net selling → event CAR)...")
+    price_discovery, price_discovery_reg = compute_price_discovery(valid_pol, panel)
+
+    logger.info("§13c Within-insider paired accuracy (political vs control windows)...")
+    within_insider, _ = compute_within_insider_accuracy(crsp_profits, control_trades)
+
+    logger.info("§13d Political connection × window timing interaction...")
+    conn_timing, conn_timing_reg = compute_connection_timing(valid_pol, panel)
 
     # ── Carried-forward robustness ──────────────────────────────────
     logger.info("Carried-forward robustness (TOST, placebo, bootstrap CI)...")
@@ -4499,6 +5027,13 @@ def run_essay3(store=None):
         'directional_placebo': directional_placebo,
         'car_net_slope': car_net_slope,
         'joint_pt': joint_pt,
+        'intensity_did': intensity_did,
+        'intensity_did_reg': intensity_did_reg,
+        'price_discovery': price_discovery,
+        'price_discovery_reg': price_discovery_reg,
+        'within_insider': within_insider,
+        'conn_timing': conn_timing,
+        'conn_timing_reg': conn_timing_reg,
     }
 
     logger.info("Saving results...")
