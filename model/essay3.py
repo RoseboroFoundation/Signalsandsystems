@@ -3384,28 +3384,39 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             control_trades['PROFITABLE_30'].notna()
         ]
         if len(pol_sells_30) >= 5 and len(ctrl_sells_30) >= 5:
-            pol_sell_pct = pol_sells_30['PROFITABLE_30'].mean()
-            ctrl_sell_pct = ctrl_sells_30['PROFITABLE_30'].mean()
-            premium = pol_sell_pct - ctrl_sell_pct
-            n1, n2 = len(pol_sells_30), len(ctrl_sells_30)
-            p_pool = (pol_sells_30['PROFITABLE_30'].sum() +
-                      ctrl_sells_30['PROFITABLE_30'].sum()) / (n1 + n2)
-            se = np.sqrt(p_pool * (1 - p_pool) * (1/n1 + 1/n2))
-            z = premium / se if se > 0 else np.nan
-            z_pval = 2 * (1 - stats.norm.cdf(abs(z))) if not np.isnan(z) else np.nan
-            summary_rows.append({
-                'CUT': 'SELLS_PREMIUM', 'SAMPLE': 'DIFFERENCE',
-                'METRIC_TYPE': 'DIFFERENCE',
-                'METRIC_PVAL': z_pval,
-                'METRIC_PVAL_COND': np.nan,
-                'COND_NULL': np.nan,
-                'N_TRADES': n1 + n2,
-                'METRIC_VALUE': premium,
-                'MEAN_TRADE_VALUE': np.nan,
-                'MEAN_EVENT_PROFIT': np.nan,
-                'TOTAL_EVENT_PROFIT': np.nan,
-                'MEAN_EVENT_CAR': np.nan,
-            })
+            # Fix inflated-N: aggregate to cluster level before computing SE.
+            # Political sells cluster within events → collapse to event-level means.
+            # Control sells cluster within tickers → collapse to ticker-level means.
+            # Welch t-test on the resulting independent cluster-level proportions.
+            pol_ev_acc = (
+                pol_sells_30.groupby('EVENT_ID')['PROFITABLE_30'].mean()
+                if 'EVENT_ID' in pol_sells_30.columns
+                else pol_sells_30['PROFITABLE_30']
+            )
+            ctrl_tkr_acc = (
+                ctrl_sells_30.groupby('TICKER')['PROFITABLE_30'].mean()
+                if 'TICKER' in ctrl_sells_30.columns
+                else ctrl_sells_30['PROFITABLE_30']
+            )
+            n1_eff, n2_eff = len(pol_ev_acc), len(ctrl_tkr_acc)
+            if n1_eff >= 5 and n2_eff >= 5:
+                premium = pol_ev_acc.mean() - ctrl_tkr_acc.mean()
+                _, z_pval = stats.ttest_ind(
+                    pol_ev_acc.values, ctrl_tkr_acc.values, equal_var=False
+                )
+                summary_rows.append({
+                    'CUT': 'SELLS_PREMIUM', 'SAMPLE': 'DIFFERENCE',
+                    'METRIC_TYPE': 'DIFFERENCE',
+                    'METRIC_PVAL': z_pval,
+                    'METRIC_PVAL_COND': np.nan,
+                    'COND_NULL': np.nan,
+                    'N_TRADES': len(pol_sells_30) + len(ctrl_sells_30),
+                    'METRIC_VALUE': premium,
+                    'MEAN_TRADE_VALUE': np.nan,
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': np.nan,
+                })
 
     # Apples-to-apples comparison using trade-window CAR_30 for both samples
     if ('PROFITABLE_30' in crsp_profits.columns and
@@ -3419,26 +3430,34 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             control_trades['PROFITABLE_30'].notna()
         ]
         if len(pol_sells_pt) >= 5 and len(ctrl_sells_pt) >= 5:
-            pct_pol = pol_sells_pt['PROFITABLE_30'].mean()
-            pct_ctrl = ctrl_sells_pt['PROFITABLE_30'].mean()
-            premium_pt = pct_pol - pct_ctrl
-            n1, n2 = len(pol_sells_pt), len(ctrl_sells_pt)
-            p_pool = (pol_sells_pt['PROFITABLE_30'].sum()
-                      + ctrl_sells_pt['PROFITABLE_30'].sum()) / (n1 + n2)
-            se = np.sqrt(p_pool * (1 - p_pool) * (1/n1 + 1/n2))
-            z = premium_pt / se if se > 0 else np.nan
-            z_p = 2 * (1 - stats.norm.cdf(abs(z))) if not np.isnan(z) else np.nan
-            summary_rows.append({
-                'CUT': 'SELLS_PREMIUM_TRADE_CAR', 'SAMPLE': 'DIFFERENCE',
-                'METRIC_TYPE': 'DIFFERENCE',
-                'N_TRADES': n1 + n2,
-                'METRIC_VALUE': premium_pt,
-                'METRIC_PVAL': z_p,
-                'MEAN_TRADE_VALUE': np.nan,
-                'MEAN_EVENT_PROFIT': np.nan,
-                'TOTAL_EVENT_PROFIT': np.nan,
-                'MEAN_EVENT_CAR': np.nan,
-            })
+            # Fix inflated-N: same cluster-level aggregation as SELLS_PREMIUM.
+            pol_ev_acc_pt = (
+                pol_sells_pt.groupby('EVENT_ID')['PROFITABLE_30'].mean()
+                if 'EVENT_ID' in pol_sells_pt.columns
+                else pol_sells_pt['PROFITABLE_30']
+            )
+            ctrl_tkr_acc_pt = (
+                ctrl_sells_pt.groupby('TICKER')['PROFITABLE_30'].mean()
+                if 'TICKER' in ctrl_sells_pt.columns
+                else ctrl_sells_pt['PROFITABLE_30']
+            )
+            n1_eff_pt, n2_eff_pt = len(pol_ev_acc_pt), len(ctrl_tkr_acc_pt)
+            if n1_eff_pt >= 5 and n2_eff_pt >= 5:
+                premium_pt = pol_ev_acc_pt.mean() - ctrl_tkr_acc_pt.mean()
+                _, z_p = stats.ttest_ind(
+                    pol_ev_acc_pt.values, ctrl_tkr_acc_pt.values, equal_var=False
+                )
+                summary_rows.append({
+                    'CUT': 'SELLS_PREMIUM_TRADE_CAR', 'SAMPLE': 'DIFFERENCE',
+                    'METRIC_TYPE': 'DIFFERENCE',
+                    'N_TRADES': len(pol_sells_pt) + len(ctrl_sells_pt),
+                    'METRIC_VALUE': premium_pt,
+                    'METRIC_PVAL': z_p,
+                    'MEAN_TRADE_VALUE': np.nan,
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': np.nan,
+                })
 
     # By regulatory period (min 30 trades for meaningful inference)
     for period in sorted(valid_pol['REGULATORY_PERIOD'].dropna().unique()):
@@ -3764,6 +3783,18 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             ('SELLS_COND', valid_pol[valid_pol['TRADE_TYPE'] == 'sell'], p_cond_sell, True),
             ('BUYS_COND',  valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  p_cond_buy,  False),
         ]
+        # Post-2023 plan/non-plan split: add cluster bootstrap rows if available
+        if 'IS_10B5_1_PLAN' in valid_pol.columns and 'TRADE_DATE' in valid_pol.columns:
+            _s23 = valid_pol[
+                (valid_pol['TRADE_TYPE'] == 'sell') &
+                (valid_pol['TRADE_DATE'] >= pd.Timestamp('2023-02-27'))
+            ]
+            _plan_ci   = _s23[_s23['IS_10B5_1_PLAN'] == True]   # noqa: E712
+            _noplan_ci = _s23[_s23['IS_10B5_1_PLAN'] == False]  # noqa: E712
+            for _lbl, _sub in [('SELLS_10B5_PLAN', _plan_ci),
+                                ('SELLS_NOT_10B5_PLAN', _noplan_ci)]:
+                if len(_sub) >= 10:
+                    cut_specs.append((_lbl, _sub, 0.5, True))
         for cut_label, sub_df, p0, is_sell in cut_specs:
             if len(sub_df) < 10:
                 continue
@@ -3959,7 +3990,9 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     4 * p_sell * p_neg_car * (1 - p_sell) * (1 - p_neg_car) / n_tot ** 2
                 )
                 var_obs = obs_acc * (1 - obs_acc) / n_tot
-                var_diff = var_obs + var_p_star
+                # PT (1992) eq. 7: Cov(P_hat, P*) = Var(P*), so
+                # Var(P_hat - P*) = Var(P_hat) + Var(P*) - 2*Cov = Var(P_hat) - Var(P*)
+                var_diff = var_obs - var_p_star
                 z_pt = (obs_acc - p_star) / np.sqrt(var_diff) if var_diff > 0 else np.nan
                 p_pt = 2 * (1 - stats.norm.cdf(abs(z_pt))) if not np.isnan(z_pt) else np.nan
                 joint_pt = pd.DataFrame([{
