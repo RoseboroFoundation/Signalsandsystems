@@ -232,21 +232,31 @@ def _build_routine_cache(form4):
     return cache
 
 
-def _is_routine_from_cache(cache, ticker, owner, event_date, lookback_years=5):
+def _is_routine_from_cache(cache, ticker, owner, event_date, lookback_years=5,
+                           data_start_year=2000):
     """Month-of-trade routine classification, modified from CMP (2012).
 
     Cohen-Malloy-Pomorski define routine at the insider-year level; our version
     is finer-grained — evaluated per (ticker, owner, event_month).  An insider
     is routine for this month if they traded in the same calendar month in >= 3
     of the prior 5 years.
+
+    If the full lookback window extends before `data_start_year`, fewer than
+    `lookback_years` years of history are available.  When fewer than 3 years
+    are observable we cannot distinguish routine from opportunistic and return
+    None rather than risk systematic misclassification of early-sample insiders.
     """
     event_month = event_date.month
     event_year = event_date.year
+    lookback_start = event_year - lookback_years
+    # Guard: require at least 3 observable years in the lookback window.
+    available_years = event_year - max(lookback_start, data_start_year)
+    if available_years < 3:
+        return None
     years_traded = cache.get((ticker, owner, event_month))
     if not years_traded:
         return None
     # Count years in the lookback window [event_year - lookback_years, event_year - 1]
-    lookback_start = event_year - lookback_years
     n_years = sum(1 for y in years_traded if lookback_start <= y < event_year)
     return n_years >= 3
 
@@ -3217,7 +3227,10 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     # that appear in the analysis — avoiding a subtle population mismatch.
     _analysis_event_cars = valid_pol.groupby('EVENT_ID')['EVENT_CAR'].first().dropna()
     p_cond_sell = _conditional_sign_base_rate(_analysis_event_cars)
-    p_cond_buy  = 1.0 - p_cond_sell  # symmetric null for buys
+    # p_cond_buy = P(CAR >= 0) = 1 - P(CAR < 0).  EVENT_PROFITABLE for buys
+    # is defined as (EVENT_CAR > 0), so informed buying implies accuracy >
+    # p_cond_buy.  The one-tailed test is H1: buy accuracy > p_cond_buy (is_sell=True).
+    p_cond_buy  = 1.0 - p_cond_sell
     logger.info("  P-T conditional null (analysis events): sell=%.4f buy=%.4f",
                 p_cond_sell, p_cond_buy)
 
@@ -3529,11 +3542,11 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         if r:
             summary_rows.append(r)
 
-    informed_trading = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
-
     # ── Table 2: INFORMED_PROXIMITY — by days-before-event window ────
     proximity_rows = []
-    windows = [(0, 30), (31, 60), (61, 90), (91, 180)]
+    # Start windows at day 1 (not 0): DAYS_BEFORE_EVENT=0 means the trade
+    # occurred on the event date itself and may be post-announcement.
+    windows = [(1, 30), (31, 60), (61, 90), (91, 180)]
     for w_start, w_end in windows:
         sub = valid_pol[
             (valid_pol['DAYS_BEFORE_EVENT'] >= w_start) &
@@ -3621,9 +3634,9 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 'METRIC_VALUE': sub_sells['EVENT_PROFITABLE'].mean(),
             })
 
-    # Sells before events with negative CARs (severity cuts)
+    # Sells before events with negative CARs (severity cuts); start at day 1.
     for car_threshold in [-0.05, -0.10, -0.15]:
-        for w_start, w_end in [(0, 30), (0, 60), (0, 180)]:
+        for w_start, w_end in [(1, 30), (1, 60), (1, 180)]:
             sub = valid_pol[
                 (valid_pol['TRADE_TYPE'] == 'sell') &
                 (valid_pol['EVENT_CAR'] <= car_threshold) &
@@ -3673,6 +3686,64 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
 
     informed_dollars = pd.DataFrame(dollar_rows) if dollar_rows else pd.DataFrame()
 
+    # ── Far-window apples-to-apples (days 61-180; no event-return overlap) ──
+    # Placed outside the EVENT_ID cluster guard so it is always computed when
+    # crsp_profits and control_trades are available.  Uses cluster-level Welch
+    # t-test (same pattern as SELLS_PREMIUM / SELLS_PREMIUM_TRADE_CAR).
+    if ('PROFITABLE_30' in crsp_profits.columns and
+            control_trades is not None and not control_trades.empty):
+        pol_far = crsp_profits[
+            crsp_profits['TRADE_TYPE'].isin(['sell']) &
+            crsp_profits['PROFITABLE_30'].notna()
+        ].copy()
+        if 'EVENT_DATE_PANEL' in pol_far.columns:
+            pol_far['DAYS_BEFORE'] = (
+                pd.to_datetime(pol_far['EVENT_DATE_PANEL']) -
+                pd.to_datetime(pol_far['TRADE_DATE'])
+            ).dt.days
+        elif 'DAYS_BEFORE_EVENT' in pol_far.columns:
+            pol_far['DAYS_BEFORE'] = pol_far['DAYS_BEFORE_EVENT']
+        else:
+            pol_far = pd.DataFrame()
+
+        if not pol_far.empty:
+            pol_far = pol_far[pol_far['DAYS_BEFORE'].between(61, 180)]
+        ctrl_far = (
+            control_trades[control_trades['TRADE_TYPE'] == 'sell']
+            if not control_trades.empty else pd.DataFrame()
+        )
+        if len(pol_far) >= 5 and len(ctrl_far) >= 5:
+            ctrl_far_v = ctrl_far[ctrl_far['PROFITABLE_30'].notna()]
+            # Fix inflated-N: aggregate to cluster level before computing SE.
+            pol_ev_acc_f = (
+                pol_far.groupby('EVENT_ID')['PROFITABLE_30'].mean()
+                if 'EVENT_ID' in pol_far.columns
+                else pol_far['PROFITABLE_30']
+            )
+            ctrl_tkr_acc_f = (
+                ctrl_far_v.groupby('TICKER')['PROFITABLE_30'].mean()
+                if 'TICKER' in ctrl_far_v.columns
+                else ctrl_far_v['PROFITABLE_30']
+            )
+            n1f_eff, n2f_eff = len(pol_ev_acc_f), len(ctrl_tkr_acc_f)
+            if n1f_eff >= 5 and n2f_eff >= 5:
+                premium_f = pol_ev_acc_f.mean() - ctrl_tkr_acc_f.mean()
+                _, z_pf = stats.ttest_ind(
+                    pol_ev_acc_f.values, ctrl_tkr_acc_f.values, equal_var=False
+                )
+                summary_rows.append({
+                    'CUT': 'SELLS_PREMIUM_TRADE_CAR_FAR',
+                    'SAMPLE': 'DIFFERENCE',
+                    'METRIC_TYPE': 'DIFFERENCE',
+                    'N_TRADES': len(pol_far) + len(ctrl_far_v),
+                    'METRIC_VALUE': premium_f,
+                    'METRIC_PVAL': z_pf,
+                    'MEAN_TRADE_VALUE': np.nan,
+                    'MEAN_EVENT_PROFIT': np.nan,
+                    'TOTAL_EVENT_PROFIT': np.nan,
+                    'MEAN_EVENT_CAR': np.nan,
+                })
+
     # ── Table 4: CLUSTER_INFERENCE — event-clustered CIs and tests ────
     # Lambert (2026-07-06): the exact-binomial test treats 26,817 sells as
     # independent but they are nested in ~160 events (within-event outcome
@@ -3697,7 +3768,10 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     r['METRIC_TYPE'] = 'MAGNITUDE_GATED'
                     summary_rows.append(r)
 
-        # |CAR|-weighted accuracy on all sells
+        # |CAR|-weighted accuracy on all sells.
+        # Bootstrap p-value: permute EVENT_PROFITABLE labels within each event
+        # (preserving within-event structure) and compute the null distribution
+        # of the weighted accuracy.
         wt_sells = valid_pol[
             (valid_pol['TRADE_TYPE'] == 'sell') &
             valid_pol['EVENT_PROFITABLE'].notna() &
@@ -3707,69 +3781,62 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             weights = wt_sells['EVENT_CAR'].abs()
             if weights.sum() > 0:
                 wt_acc = (wt_sells['EVENT_PROFITABLE'] * weights).sum() / weights.sum()
+                # Bootstrap null: shuffle EVENT_PROFITABLE across all trades
+                _rng_wt = np.random.RandomState(77)
+                _ep = wt_sells['EVENT_PROFITABLE'].values
+                _wt = weights.values
+                _boot_wt = np.array([
+                    (_rng_wt.permutation(_ep) * _wt).sum() / _wt.sum()
+                    for _ in range(2000)
+                ])
+                wt_pval = (np.abs(_boot_wt - 0.5) >= np.abs(wt_acc - 0.5)).mean()
                 summary_rows.append({
                     'CUT': 'SELLS_CAR_WEIGHTED',
                     'SAMPLE': 'POLITICAL',
                     'METRIC_TYPE': 'WEIGHTED_PROPORTION',
                     'N_TRADES': len(wt_sells),
                     'METRIC_VALUE': wt_acc,
-                    'METRIC_PVAL': np.nan,   # no simple binomial for weighted
+                    'METRIC_PVAL': wt_pval,
                     'MEAN_TRADE_VALUE': wt_sells['TRADE_VALUE'].mean(),
                     'MEAN_EVENT_PROFIT': np.nan,
                     'TOTAL_EVENT_PROFIT': np.nan,
                     'MEAN_EVENT_CAR': wt_sells['EVENT_CAR'].mean(),
                 })
 
-        # Far-from-event apples-to-apples (days 61-180 only; eliminates
-        # forward-window/event-return overlap for near-event trades)
-        if ('PROFITABLE_30' in crsp_profits.columns and
-                control_trades is not None and not control_trades.empty):
-            pol_far = crsp_profits[
-                crsp_profits['TRADE_TYPE'].isin(['sell']) &
-                crsp_profits['PROFITABLE_30'].notna()
-            ].copy()
-            if 'EVENT_DATE_PANEL' in pol_far.columns:
-                pol_far['DAYS_BEFORE'] = (
-                    pd.to_datetime(pol_far['EVENT_DATE_PANEL']) -
-                    pd.to_datetime(pol_far['TRADE_DATE'])
-                ).dt.days
-            elif 'DAYS_BEFORE_EVENT' in pol_far.columns:
-                pol_far['DAYS_BEFORE'] = pol_far['DAYS_BEFORE_EVENT']
-            else:
-                pol_far = pd.DataFrame()
-
-            if not pol_far.empty:
-                pol_far = pol_far[
-                    pol_far['DAYS_BEFORE'].between(61, 180)
-                ]
-            ctrl_far = control_trades[
-                control_trades['TRADE_TYPE'] == 'sell'
-            ] if not control_trades.empty else pd.DataFrame()
-            if len(pol_far) >= 5 and len(ctrl_far) >= 5:
-                ctrl_far_v = ctrl_far[ctrl_far['PROFITABLE_30'].notna()]
-                pct_pol_f = pol_far['PROFITABLE_30'].mean()
-                pct_ctrl_f = ctrl_far_v['PROFITABLE_30'].mean()
-                n1f, n2f = len(pol_far), len(ctrl_far_v)
-                p_pool_f = (pol_far['PROFITABLE_30'].sum() +
-                            ctrl_far_v['PROFITABLE_30'].sum()) / (n1f + n2f)
-                se_f = np.sqrt(p_pool_f * (1 - p_pool_f) * (1/n1f + 1/n2f))
-                z_f = (pct_pol_f - pct_ctrl_f) / se_f if se_f > 0 else np.nan
-                z_pf = 2 * (1 - stats.norm.cdf(abs(z_f))) if not np.isnan(z_f) else np.nan
-                summary_rows.append({
-                    'CUT': 'SELLS_PREMIUM_TRADE_CAR_FAR',
-                    'SAMPLE': 'DIFFERENCE',
-                    'METRIC_TYPE': 'DIFFERENCE',
-                    'N_TRADES': n1f + n2f,
-                    'METRIC_VALUE': pct_pol_f - pct_ctrl_f,
-                    'METRIC_PVAL': z_pf,
-                    'MEAN_TRADE_VALUE': np.nan,
-                    'MEAN_EVENT_PROFIT': np.nan,
-                    'TOTAL_EVENT_PROFIT': np.nan,
-                    'MEAN_EVENT_CAR': np.nan,
-                })
-
         # Rebuild informed_trading now that we've appended more rows
         informed_trading = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
+
+        # ── Benjamini-Hochberg FDR correction across all PROPORTION cuts ──
+        # The large number of direction × period × year cuts inflates Type I
+        # error. BH is applied across POLITICAL PROPORTION rows only; CONTROL,
+        # DIFFERENCE, MAGNITUDE_GATED, and WEIGHTED_PROPORTION rows are excluded
+        # (they either use independent two-sample tests or are descriptive).
+        if not informed_trading.empty and 'METRIC_PVAL' in informed_trading.columns:
+            _mask_prop = (
+                (informed_trading['SAMPLE'] == 'POLITICAL') &
+                (informed_trading['METRIC_TYPE'] == 'PROPORTION') &
+                informed_trading['METRIC_PVAL'].notna()
+            )
+            _prop_pvals = np.where(
+                np.isnan(informed_trading.loc[_mask_prop, 'METRIC_PVAL'].values),
+                1.0,
+                informed_trading.loc[_mask_prop, 'METRIC_PVAL'].values,
+            )
+            _bh_sig = _benjamini_hochberg(_prop_pvals, alpha=0.05)
+            informed_trading['BH_SIGNIFICANT'] = np.nan
+            informed_trading.loc[_mask_prop, 'BH_SIGNIFICANT'] = _bh_sig.astype(int)
+            # Store BH-adjusted p (Benjamini-Hochberg step-up adjusted value)
+            _n_tests = int(_mask_prop.sum())
+            _sorted_idx = np.argsort(_prop_pvals)
+            _bh_adj = np.ones(len(_prop_pvals))
+            _running_min = 1.0
+            for _rank in range(_n_tests - 1, -1, -1):
+                _i = _sorted_idx[_rank]
+                _bh_adj[_i] = min(_running_min,
+                                   _prop_pvals[_i] * _n_tests / (_rank + 1))
+                _running_min = _bh_adj[_i]
+            informed_trading['METRIC_PVAL_BH'] = np.nan
+            informed_trading.loc[_mask_prop, 'METRIC_PVAL_BH'] = _bh_adj
 
         # ── Event-clustered wild cluster bootstrap ──────────────────
         cut_specs = [
@@ -3777,11 +3844,14 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             # is_sell=True → one-tailed (accuracy > p0); False → one-tailed (accuracy < p0);
             # None → two-tailed
             ('ALL_SELLS',  valid_pol[valid_pol['TRADE_TYPE'] == 'sell'], 0.5,         True),
-            ('ALL_BUYS',   valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  0.5,         False),
+            # is_sell=True for buys: EVENT_PROFITABLE=(CAR>0), so informed buys
+            # imply accuracy > p0, the same direction as sells.
+            ('ALL_BUYS',   valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  0.5,         True),
             ('ALL_TRADES', valid_pol,                                    0.5,         None),
-            # Conditional-null rows: correct for base-rate selection
+            # Conditional-null rows: correct for base-rate selection.
+            # p_cond_buy = P(CAR>=0) = 1 - p_cond_sell; H1: buy accuracy > p_cond_buy.
             ('SELLS_COND', valid_pol[valid_pol['TRADE_TYPE'] == 'sell'], p_cond_sell, True),
-            ('BUYS_COND',  valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  p_cond_buy,  False),
+            ('BUYS_COND',  valid_pol[valid_pol['TRADE_TYPE'] == 'buy'],  p_cond_buy,  True),
         ]
         # Post-2023 plan/non-plan split: add cluster bootstrap rows if available
         if 'IS_10B5_1_PLAN' in valid_pol.columns and 'TRADE_DATE' in valid_pol.columns:
@@ -3968,17 +4038,37 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     joint_pt = pd.DataFrame()
     try:
         if not valid_pol.empty and 'EVENT_CAR' in valid_pol.columns and 'TRADE_TYPE' in valid_pol.columns:
-            jp = valid_pol[['TRADE_TYPE', 'EVENT_CAR', 'EVENT_ID']].dropna()
-            if len(jp) >= 20:
-                n_tot = len(jp)
-                p_sell = (jp['TRADE_TYPE'] == 'sell').mean()
+            # Aggregate to event level: one observation per event.
+            # PT (1992) assumes independent predictions; multiple trades from the
+            # same event share an identical EVENT_CAR (within-event correlation =1),
+            # so the trade-level N severely understates the variance.  Use net
+            # direction (majority trade-type by count) as the single prediction
+            # per event; exclude tied events (equal buy and sell counts).
+            jp_raw = valid_pol[['TRADE_TYPE', 'EVENT_CAR', 'EVENT_ID']].dropna()
+            jp_ev = (
+                jp_raw.groupby('EVENT_ID')
+                .agg(
+                    EVENT_CAR=('EVENT_CAR', 'first'),
+                    N_SELLS=('TRADE_TYPE', lambda x: (x == 'sell').sum()),
+                    N_BUYS=('TRADE_TYPE', lambda x: (x == 'buy').sum()),
+                )
+                .reset_index()
+            )
+            # Net direction: +1 = net sell, -1 = net buy, 0 = tie (excluded)
+            jp_ev['NET_DIR'] = np.sign(jp_ev['N_SELLS'] - jp_ev['N_BUYS'])
+            jp_ev = jp_ev[jp_ev['NET_DIR'] != 0].copy()
+            jp_ev['TRADE_DIRECTION'] = np.where(jp_ev['NET_DIR'] > 0, 'sell', 'buy')
+
+            if len(jp_ev) >= 10:
+                n_tot = len(jp_ev)
+                p_sell = (jp_ev['TRADE_DIRECTION'] == 'sell').mean()
                 p_buy = 1.0 - p_sell
-                p_neg_car = (jp['EVENT_CAR'] < 0).mean()
+                p_neg_car = (jp_ev['EVENT_CAR'] < 0).mean()
                 p_pos_car = 1.0 - p_neg_car
                 # Joint correct = sell+negCAR OR buy+posCAR
                 correct = (
-                    ((jp['TRADE_TYPE'] == 'sell') & (jp['EVENT_CAR'] < 0)) |
-                    ((jp['TRADE_TYPE'] == 'buy') & (jp['EVENT_CAR'] > 0))
+                    ((jp_ev['TRADE_DIRECTION'] == 'sell') & (jp_ev['EVENT_CAR'] < 0)) |
+                    ((jp_ev['TRADE_DIRECTION'] == 'buy') & (jp_ev['EVENT_CAR'] > 0))
                 )
                 obs_acc = correct.mean()
                 # Independence null accuracy
@@ -3996,7 +4086,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 z_pt = (obs_acc - p_star) / np.sqrt(var_diff) if var_diff > 0 else np.nan
                 p_pt = 2 * (1 - stats.norm.cdf(abs(z_pt))) if not np.isnan(z_pt) else np.nan
                 joint_pt = pd.DataFrame([{
-                    'N_TRADES': n_tot,
+                    'N_EVENTS': n_tot,
+                    'N_TRADES_RAW': len(jp_raw),
                     'P_SELL': p_sell,
                     'P_NEG_CAR': p_neg_car,
                     'NULL_ACCURACY': p_star,
@@ -4005,13 +4096,15 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     'PT_Z_STAT': z_pt,
                     'PT_P_VALUE': p_pt,
                     'INTERPRETATION': (
-                        'Joint PT: observed joint accuracy vs independence null '
-                        '(P_null=P(sell)*P(neg_car)+P(buy)*P(pos_car)). '
+                        'Joint PT (event-level): one obs per event, net trade '
+                        'direction vs independence null '
+                        '(P_null=P(net-sell)*P(neg_car)+P(net-buy)*P(pos_car)). '
                         'Base-rate-aware two-sided test.'),
                 }])
                 logger.info(
-                    "  Joint PT: obs_acc=%.4f null=%.4f excess=%.4f z=%.3f p=%.4f",
-                    obs_acc, p_star, obs_acc - p_star, z_pt, p_pt)
+                    "  Joint PT (event-level): n_ev=%d obs_acc=%.4f null=%.4f "
+                    "excess=%.4f z=%.3f p=%.4f",
+                    n_tot, obs_acc, p_star, obs_acc - p_star, z_pt, p_pt)
     except Exception as _e:
         logger.warning("  Joint PT failed: %s", _e)
 
@@ -4160,7 +4253,11 @@ def save_essay3_results(store, results_dict):
             existing = {r[0] for r in cursor.fetchall()}
             orphaned = existing - current_tables
             for orphan in sorted(orphaned):
-                cursor.execute(f'DROP TABLE IF EXISTS "{orphan}"')
+                # Use bracket quoting with escaped brackets; names come from
+                # sqlite_master so there is no external injection path, but
+                # bracket-escaping is more robust than double-quote f-strings.
+                safe_name = orphan.replace(']', ']]')
+                cursor.execute(f'DROP TABLE IF EXISTS [{safe_name}]')
                 logger.info("  Dropped orphaned table: %s", orphan)
             if orphaned:
                 store._conn.commit()
@@ -4401,7 +4498,7 @@ def _build_stratification_summary(panel):
     for cat in ['CULTURAL', 'FUNDAMENTAL']:
         sub = panel[panel['EVENT_CATEGORY'] == cat]
         matched = sub[sub['MATCHED'] == True]  # noqa: E712
-        for year in sorted(panel['EVENT_YEAR'].unique()):
+        for year in sorted(panel['EVENT_YEAR'].dropna().unique()):
             for tercile in sorted(panel['ACTIVITY_TERCILE'].unique()):
                 stratum = sub[(sub['EVENT_YEAR'] == year) &
                               (sub['ACTIVITY_TERCILE'] == tercile)]
