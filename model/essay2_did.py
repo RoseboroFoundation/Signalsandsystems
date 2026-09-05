@@ -327,6 +327,73 @@ def compute_car(
     )
 
 
+def compute_car_decomposed(
+    ticker: str,
+    store,
+    event_id: str,
+    event_date: pd.Timestamp,
+    is_treatment: bool,
+    regime: str,
+    pre_window: Tuple[int, int] = _PRE_EVENT_WINDOW,
+) -> Optional[dict]:
+    """Compute decomposed CARs from a single FF5 model estimation.
+
+    Fits the factor model once over the estimation window [-250, -11], then
+    slices the abnormal return series into non-overlapping sub-windows:
+
+        car_announce  [0, +1]   immediate announcement reaction
+        car_drift     [+2, +60] subsequent drift
+        car_post      [0, +60]  blended post-event window (= announce + drift)
+        car_remaining [+11, +60] drift after a 10-day post-announcement window
+        car_post_10   [0, +10]  original short post-event window (same as compute_car default)
+        car_pre       pre_window (default [-10, -1])
+
+    Returns None if estimation fails or fewer than 5 event-window observations.
+    Robustness sub-windows for Test B:
+        car_remaining_5   [+6, +60]  outcome for [0,+5] trade window
+        car_remaining_20  [+21, +60] outcome for [0,+20] trade window
+    """
+    estimate = _estimate_normal_returns(ticker, store, event_date)
+    if estimate is None:
+        return None
+
+    merged = estimate.event_data
+    ols_fit = estimate.fit
+    full_lo = pre_window[0]
+    full_hi = 60
+
+    event_obs = merged[
+        (merged['TD_OFFSET'] >= full_lo) &
+        (merged['TD_OFFSET'] <= full_hi)
+    ].copy()
+
+    if len(event_obs) < 5:
+        return None
+
+    X_event = sm.add_constant(event_obs[_FF5_ALL])
+    expected = ols_fit.predict(X_event)
+    event_obs = event_obs.copy()
+    event_obs['AR'] = event_obs['EXCESS_RETURN'] - expected.values
+
+    def _sum(lo, hi):
+        obs = event_obs[(event_obs['TD_OFFSET'] >= lo) & (event_obs['TD_OFFSET'] <= hi)]
+        return float(obs['AR'].sum()) if len(obs) > 0 else np.nan
+
+    return {
+        'car_pre':          _sum(pre_window[0], pre_window[1]),
+        'car_announce':     _sum(0, 1),
+        'car_drift':        _sum(2, 60),
+        'car_post':         _sum(0, 60),
+        'car_remaining':    _sum(11, 60),
+        'car_post_10':      _sum(0, 10),   # original compute_car default window
+        'car_remaining_5':  _sum(6, 60),   # outcome for [0,+5] trade window
+        'car_remaining_20': _sum(21, 60),  # outcome for [0,+20] trade window
+        'n_event_obs':      len(event_obs),
+        'r_squared':        float(ols_fit.rsquared),
+        'alpha':            float(ols_fit.params['const']),
+    }
+
+
 # =========================================================================
 # MULTI-WINDOW EVENT STUDY
 # =========================================================================
@@ -473,11 +540,19 @@ def build_multi_window_panel(
     regime_dates = regime_result.regime_assignments[['DATE', 'REGIME_LABEL']].copy()
     regime_dates['DATE'] = pd.to_datetime(regime_dates['DATE'])
 
-    # Fall back to computed alignment if events table lacks lean
+    # Canonical lean source: ALIGNMENT_SCORE from NLP pipeline, classified
+    # via classify_alignment(). This unifies with build_car_panel() which
+    # also uses ALIGNMENT_SCORE. The hand-coded ESTIMATED_POLITICAL_LEANING
+    # is used ONLY for validation, never for estimation.
+    from .essay2 import classify_alignment
     alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
-    alignment_map = {}
-    if not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
-        alignment_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
+    alignment_score_map = {}  # ticker -> numeric score
+    alignment_lean_map = {}   # ticker -> categorical lean
+    if not alignment_df.empty and 'ALIGNMENT_SCORE' in alignment_df.columns:
+        alignment_score_map = dict(zip(alignment_df['TICKER'], alignment_df['ALIGNMENT_SCORE']))
+        alignment_lean_map = {t: classify_alignment(s) for t, s in alignment_score_map.items()}
+    elif not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
+        alignment_lean_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
 
     rows = []
     n_computed = 0
@@ -490,7 +565,7 @@ def build_multi_window_panel(
             continue
 
         event_id = f"cw_{ticker}_{event_date.strftime('%Y%m%d')}"
-        lean = event.get('ESTIMATED_POLITICAL_LEANING', '') or alignment_map.get(ticker, '')
+        lean = alignment_lean_map.get(ticker, '')
 
         # Determine regime at event date
         regime_label = _lookup_regime(event_date, regime_dates)
@@ -563,9 +638,12 @@ class MultiWindowResult:
     summary: pd.DataFrame                       # per-window summary stats
     treatment_vs_control: pd.DataFrame           # t-tests per window
     by_lean: pd.DataFrame                        # CARs by political lean x window
-    n_events: int
-    n_treatment: int
-    n_control: int
+    by_lean_tests: pd.DataFrame = field(default_factory=pd.DataFrame)  # per-lean t-tests
+    lean_pairwise: pd.DataFrame = field(default_factory=pd.DataFrame)  # pairwise lean comparisons
+    descriptive_stats: pd.DataFrame = field(default_factory=pd.DataFrame)  # headline stats
+    n_events: int = 0
+    n_treatment: int = 0
+    n_control: int = 0
 
 
 def run_multi_window_event_study(
@@ -602,6 +680,42 @@ def run_multi_window_event_study(
         if panel is None:
             return None
 
+    # ---- Load market cap for value-weighting ----
+    # Market cap = SHARES_OUTSTANDING (from SEC 10-K/10-Q) x close price at event date
+    mktcap_map = {}  # (ticker, event_id) -> market_cap
+    try:
+        fundamentals = store.read_table('SEC_FUNDAMENTALS')
+        if not fundamentals.empty and 'SHARES_OUTSTANDING' in fundamentals.columns:
+            fundamentals['PERIOD_END'] = pd.to_datetime(fundamentals['PERIOD_END'], errors='coerce')
+            treat_tickers = panel[panel['IS_TREATMENT']]['TICKER'].unique()
+            n_matched = 0
+            for ticker in treat_tickers:
+                tk_fund = fundamentals[fundamentals['TICKER'] == ticker].sort_values('PERIOD_END')
+                if tk_fund.empty:
+                    continue
+                tk_returns = store.get_ticker_returns(ticker)
+                if tk_returns.empty or 'CLOSE' not in tk_returns.columns:
+                    continue
+                tk_returns['DATE'] = pd.to_datetime(tk_returns['DATE'])
+                for _, row in panel[panel['TICKER'] == ticker][['EVENT_ID', 'EVENT_DATE']].drop_duplicates().iterrows():
+                    edate = pd.to_datetime(row['EVENT_DATE'])
+                    # Use shares outstanding from most recent filing before event
+                    prior = tk_fund[tk_fund['PERIOD_END'] <= edate]
+                    if prior.empty:
+                        shares = tk_fund.iloc[0]['SHARES_OUTSTANDING']
+                    else:
+                        shares = prior.iloc[-1]['SHARES_OUTSTANDING']
+                    if pd.notna(shares) and shares > 0:
+                        mask = tk_returns['DATE'] <= edate
+                        if mask.any():
+                            price = tk_returns.loc[mask, 'CLOSE'].iloc[-1]
+                            mktcap_map[(ticker, row['EVENT_ID'])] = shares * price
+                            n_matched += 1
+            logger.info("Market cap: matched %d / %d treatment (ticker, event) pairs",
+                        n_matched, len(panel[panel['IS_TREATMENT']][['TICKER', 'EVENT_ID']].drop_duplicates()))
+    except Exception as e:
+        logger.debug("Market cap data not available — VW stats will be N/A: %s", e)
+
     # ---- Summary stats per window ----
     summary_rows = []
     for w in windows:
@@ -615,14 +729,41 @@ def run_multi_window_event_study(
         else:
             t_stat, p_val = np.nan, np.nan
 
+        # Value-weighted mean CAR
+        vw_mean = np.nan
+        if len(treat) > 0 and mktcap_map:
+            weights = treat.apply(
+                lambda r: mktcap_map.get((r['TICKER'], r['EVENT_ID']), np.nan), axis=1)
+            valid = weights.notna()
+            if valid.sum() >= 3:
+                w_arr = weights[valid].values
+                w_arr = w_arr / w_arr.sum()
+                vw_mean = (treat.loc[valid, 'CAR'].values * w_arr).sum()
+
+        # BHAR: product of (1 + daily AR) - 1
+        # Approximation from CAR: BHAR ≈ exp(CAR) - 1 for log returns
+        bhar_treat = np.nan
+        if len(treat) > 0:
+            bhar_treat = np.exp(treat['CAR']).mean() - 1
+
+        # Per-event significance: fraction with |CAR/std| > 1.96
+        pct_sig = np.nan
+        if len(treat) >= 5:
+            car_std = treat['CAR'].std()
+            if car_std > 0:
+                pct_sig = (treat['CAR'].abs() / car_std > 1.96).mean()
+
         summary_rows.append({
             'WINDOW': f'[-1, +{w}]',
             'WINDOW_DAYS': w,
             'N_TREAT': len(treat),
             'N_CTRL': len(ctrl),
             'MEAN_CAR_TREAT': treat['CAR'].mean() if len(treat) > 0 else np.nan,
+            'VW_MEAN_CAR_TREAT': vw_mean,
+            'BHAR_TREAT': bhar_treat,
             'STD_CAR_TREAT': treat['CAR'].std() if len(treat) > 0 else np.nan,
             'MEDIAN_CAR_TREAT': treat['CAR'].median() if len(treat) > 0 else np.nan,
+            'PCT_SIGNIFICANT': pct_sig,
             'MEAN_CAR_CTRL': ctrl['CAR'].mean() if len(ctrl) > 0 else np.nan,
             'T_STAT_VS_ZERO': t_stat,
             'P_VALUE_VS_ZERO': p_val,
@@ -664,13 +805,31 @@ def run_multi_window_event_study(
     if not tvc_df.empty:
         tvc_df['BH_SIGNIFICANT'] = benjamini_hochberg(tvc_df['P_VALUE'].tolist(), q=0.10)
 
-    # ---- CARs by political lean x window ----
+    # ---- Determine lean column: prefer LEAN if categorical, else classify from score ----
+    lean_col = 'LEAN'
+    if lean_col in panel.columns and pd.api.types.is_numeric_dtype(panel[lean_col]):
+        # LEAN is numeric (ALIGNMENT_SCORE) — need categorical for grouping
+        from .essay2 import classify_alignment
+        panel['LEAN_CAT'] = panel['LEAN'].apply(
+            lambda s: classify_alignment(s) if pd.notna(s) else '')
+        lean_col = 'LEAN_CAT'
+    elif 'LEAN_CAT' in panel.columns:
+        lean_col = 'LEAN_CAT'
+
+    # ---- CARs by political lean x window (Item 2: with per-group t-tests) ----
     lean_rows = []
+    lean_test_rows = []
     for w in windows:
         w_treat = panel[(panel['WINDOW'] == w) & (panel['IS_TREATMENT'])].dropna(subset=['CAR'])
         for lean_val in ['Liberal', 'Conservative', 'Mixed']:
-            lean_data = w_treat[w_treat['LEAN'].str.strip() == lean_val]
+            lean_data = w_treat[w_treat[lean_col].astype(str).str.strip() == lean_val]
             if len(lean_data) > 0:
+                # Per-lean one-sample t-test: CARs != 0
+                if len(lean_data) >= 3:
+                    t_stat_l, p_val_l = stats.ttest_1samp(lean_data['CAR'], 0)
+                else:
+                    t_stat_l, p_val_l = np.nan, np.nan
+
                 lean_rows.append({
                     'WINDOW': f'[-1, +{w}]',
                     'WINDOW_DAYS': w,
@@ -679,9 +838,110 @@ def run_multi_window_event_study(
                     'MEAN_CAR': lean_data['CAR'].mean(),
                     'STD_CAR': lean_data['CAR'].std(),
                     'MEDIAN_CAR': lean_data['CAR'].median(),
+                    'T_STAT_VS_ZERO': t_stat_l,
+                    'P_VALUE_VS_ZERO': p_val_l,
+                })
+
+                lean_test_rows.append({
+                    'WINDOW': f'[-1, +{w}]',
+                    'WINDOW_DAYS': w,
+                    'LEAN': lean_val,
+                    'N': len(lean_data),
+                    'MEAN_CAR': lean_data['CAR'].mean(),
+                    'T_STAT': t_stat_l,
+                    'P_VALUE': p_val_l,
                 })
 
     lean_df = pd.DataFrame(lean_rows)
+    lean_test_df = pd.DataFrame(lean_test_rows)
+
+    # ---- Pairwise lean comparisons (Item 2: Conservative vs Liberal gap) ----
+    lean_pairwise_rows = []
+    for w in windows:
+        w_treat = panel[(panel['WINDOW'] == w) & (panel['IS_TREATMENT'])].dropna(subset=['CAR'])
+        groups = {}
+        for lean_val in ['Liberal', 'Conservative', 'Mixed']:
+            g = w_treat[w_treat[lean_col].astype(str).str.strip() == lean_val]['CAR']
+            if len(g) >= 3:
+                groups[lean_val] = g
+
+        for (a, b) in [('Conservative', 'Liberal'), ('Mixed', 'Liberal'), ('Mixed', 'Conservative')]:
+            if a in groups and b in groups:
+                t_s, p_v = stats.ttest_ind(groups[a], groups[b], equal_var=False)
+                diff = groups[a].mean() - groups[b].mean()
+                pooled = np.sqrt((groups[a].std()**2 + groups[b].std()**2) / 2)
+                cd = diff / pooled if pooled > 0 else np.nan
+                lean_pairwise_rows.append({
+                    'WINDOW': f'[-1, +{w}]',
+                    'WINDOW_DAYS': w,
+                    'COMPARISON': f'{a} - {b}',
+                    'DIFF': diff,
+                    'T_STAT': t_s,
+                    'P_VALUE': p_v,
+                    'COHENS_D': cd,
+                    'N_A': len(groups[a]),
+                    'N_B': len(groups[b]),
+                })
+
+    lean_pairwise_df = pd.DataFrame(lean_pairwise_rows)
+
+    # ---- Headline descriptive stats (all windows) ----
+    desc_rows = []
+    for w in windows:
+        w_treat_w = panel[
+            (panel['WINDOW'] == w) & (panel['IS_TREATMENT'])
+        ].dropna(subset=['CAR'])
+        if len(w_treat_w) == 0:
+            continue
+
+        label = f'[-1,+{w}]'
+        ew_mean = w_treat_w['CAR'].mean()
+        ew_median = w_treat_w['CAR'].median()
+
+        # Value-weighted
+        vw_mean_w = np.nan
+        vw_median_w = np.nan
+        if mktcap_map:
+            weights = w_treat_w.apply(
+                lambda r: mktcap_map.get((r['TICKER'], r['EVENT_ID']), np.nan), axis=1)
+            valid = weights.notna()
+            if valid.sum() >= 3:
+                w_arr = weights[valid].values
+                w_arr = w_arr / w_arr.sum()
+                vw_mean_w = (w_treat_w.loc[valid, 'CAR'].values * w_arr).sum()
+                vw_median_arr = w_treat_w.loc[valid, 'CAR'].values
+                sorted_idx = np.argsort(vw_median_arr)
+                cum_w = np.cumsum(w_arr[sorted_idx])
+                vw_median_w = vw_median_arr[sorted_idx[np.searchsorted(cum_w, 0.5)]]
+
+        # BHAR
+        bhar_mean = np.exp(w_treat_w['CAR']).mean() - 1
+
+        # Per-event significance
+        car_std = w_treat_w['CAR'].std()
+        pct_sig_w = np.nan
+        if car_std > 0 and len(w_treat_w) >= 5:
+            pct_sig_w = (w_treat_w['CAR'].abs() / car_std > 1.96).mean()
+
+        # One-sample t-test
+        t_stat_w, p_val_w = stats.ttest_1samp(w_treat_w['CAR'], 0) if len(w_treat_w) >= 3 else (np.nan, np.nan)
+
+        desc_rows.append({
+            'WINDOW': label,
+            'WINDOW_DAYS': w,
+            'N_EVENTS': len(w_treat_w),
+            'N_FIRMS': w_treat_w['TICKER'].nunique(),
+            'EW_MEAN_CAR': ew_mean,
+            'VW_MEAN_CAR': vw_mean_w,
+            'EW_MEDIAN_CAR': ew_median,
+            'VW_MEDIAN_CAR': vw_median_w if mktcap_map else np.nan,
+            'MEAN_BHAR': bhar_mean,
+            'PCT_SIGNIFICANT': pct_sig_w,
+            'T_STAT': t_stat_w,
+            'P_VALUE': p_val_w,
+        })
+
+    descriptive_df = pd.DataFrame(desc_rows)
 
     n_treat = panel[panel['IS_TREATMENT']]['TICKER'].nunique()
     n_ctrl = panel[~panel['IS_TREATMENT']]['TICKER'].nunique()
@@ -695,6 +955,9 @@ def run_multi_window_event_study(
         summary=summary_df,
         treatment_vs_control=tvc_df,
         by_lean=lean_df,
+        by_lean_tests=lean_test_df,
+        lean_pairwise=lean_pairwise_df,
+        descriptive_stats=descriptive_df,
         n_events=n_events,
         n_treatment=n_treat,
         n_control=n_ctrl,
@@ -728,6 +991,24 @@ def save_multi_window_results(
         results['ESSAY2_MULTI_WINDOW_BY_LEAN'] = store.write_table(
             result.by_lean.assign(RUN_TIMESTAMP=timestamp),
             'ESSAY2_MULTI_WINDOW_BY_LEAN', replace=True,
+        )
+
+    if not result.by_lean_tests.empty:
+        results['ESSAY2_MULTI_WINDOW_LEAN_TESTS'] = store.write_table(
+            result.by_lean_tests.assign(RUN_TIMESTAMP=timestamp),
+            'ESSAY2_MULTI_WINDOW_LEAN_TESTS', replace=True,
+        )
+
+    if not result.lean_pairwise.empty:
+        results['ESSAY2_MULTI_WINDOW_LEAN_PAIRWISE'] = store.write_table(
+            result.lean_pairwise.assign(RUN_TIMESTAMP=timestamp),
+            'ESSAY2_MULTI_WINDOW_LEAN_PAIRWISE', replace=True,
+        )
+
+    if not result.descriptive_stats.empty:
+        results['ESSAY2_DESCRIPTIVE_STATS'] = store.write_table(
+            result.descriptive_stats.assign(RUN_TIMESTAMP=timestamp),
+            'ESSAY2_DESCRIPTIVE_STATS', replace=True,
         )
 
     saved = sum(1 for v in results.values() if v is not None)
@@ -869,11 +1150,15 @@ def run_contagion_test(
 
     all_tickers = list(ticker_industry.keys())
 
-    # Fall back to computed alignment if events table lacks lean
+    # Canonical lean: derive from ALIGNMENT_SCORE (unified with multi-window panel)
+    from .essay2 import classify_alignment
     alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
-    alignment_map = {}
-    if not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
-        alignment_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
+    alignment_lean_map = {}
+    if not alignment_df.empty and 'ALIGNMENT_SCORE' in alignment_df.columns:
+        alignment_lean_map = {t: classify_alignment(s) for t, s in
+                              zip(alignment_df['TICKER'], alignment_df['ALIGNMENT_SCORE'])}
+    elif not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
+        alignment_lean_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
 
     # Regime assignments — callers should pass regime_result to avoid
     # redundant Markov-switching estimation (which is deterministic but slow).
@@ -896,7 +1181,7 @@ def run_contagion_test(
             continue
 
         event_id = f"cw_{event_ticker}_{event_date.strftime('%Y%m%d')}"
-        event_lean = event.get('ESTIMATED_POLITICAL_LEANING', '') or alignment_map.get(event_ticker, '')
+        event_lean = alignment_lean_map.get(event_ticker, '')
         event_ind, event_naics = ticker_industry.get(event_ticker, ('Unknown', '999999'))
 
         # Determine regime
@@ -1219,11 +1504,15 @@ def run_enhanced_contagion(
         logger.info("Enhanced contagion: %d/%d firms UNCLASSIFIED (excluded from "
                      "consumer-vs-B2B analysis)", n_unclassified, len(ticker_meta))
 
-    # Fall back to computed alignment if events table lacks lean
+    # Canonical lean: derive from ALIGNMENT_SCORE (unified with multi-window panel)
+    from .essay2 import classify_alignment
     alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
-    alignment_map = {}
-    if not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
-        alignment_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
+    alignment_lean_map = {}
+    if not alignment_df.empty and 'ALIGNMENT_SCORE' in alignment_df.columns:
+        alignment_lean_map = {t: classify_alignment(s) for t, s in
+                              zip(alignment_df['TICKER'], alignment_df['ALIGNMENT_SCORE'])}
+    elif not alignment_df.empty and 'COMPUTED_LEANING' in alignment_df.columns:
+        alignment_lean_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
 
     if regime_result is None:
         regime_result = estimate_vix_regimes(store)
@@ -1244,7 +1533,7 @@ def run_enhanced_contagion(
             continue
 
         event_id = f"cw_{event_ticker}_{event_date.strftime('%Y%m%d')}"
-        event_lean = event.get('ESTIMATED_POLITICAL_LEANING', '') or alignment_map.get(event_ticker, '')
+        event_lean = alignment_lean_map.get(event_ticker, '')
         ev_meta = ticker_meta.get(event_ticker, {})
         event_ind = ev_meta.get('INDUSTRY', 'Unknown')
         event_naics = ev_meta.get('NAICS', '999999')
@@ -1587,21 +1876,21 @@ def build_car_panel(
     regime_dates = regime_result.regime_assignments[['DATE', 'REGIME_LABEL']].copy()
     regime_dates['DATE'] = pd.to_datetime(regime_dates['DATE'])
 
-    # Political lean scores (optional)
-    lean_map = {}
-    lean_df = store.read_table('POLITICAL_LEAN')
-    if not lean_df.empty and 'LEAN_SCORE' in lean_df.columns:
-        lean_map = dict(zip(lean_df['TICKER'], lean_df['LEAN_SCORE']))
+    # Canonical lean source: ALIGNMENT_SCORE (continuous) from NLP pipeline.
+    # Used as numeric covariate in DiD Spec 2 lean interaction.
+    # Categorical lean for grouping derived via classify_alignment().
+    from .essay2 import classify_alignment
+    lean_map = {}       # ticker -> numeric ALIGNMENT_SCORE
+    lean_cat_map = {}   # ticker -> categorical lean label
+    alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
+    if not alignment_df.empty and 'ALIGNMENT_SCORE' in alignment_df.columns:
+        lean_map = dict(zip(alignment_df['TICKER'], alignment_df['ALIGNMENT_SCORE']))
+        lean_cat_map = {t: classify_alignment(s) for t, s in lean_map.items()}
     else:
-        # Fall back to computed alignment score from essay2.py pipeline
-        alignment_df = store.read_table('ESSAY2_POLITICAL_ALIGNMENT')
-        if not alignment_df.empty:
-            if 'ALIGNMENT_SCORE' in alignment_df.columns:
-                lean_map = dict(zip(alignment_df['TICKER'], alignment_df['ALIGNMENT_SCORE']))
-            elif 'COMPUTED_LEANING' in alignment_df.columns:
-                lean_map = dict(zip(alignment_df['TICKER'], alignment_df['COMPUTED_LEANING']))
-                logger.warning("ALIGNMENT_SCORE not found — using COMPUTED_LEANING (categorical). "
-                               "Lean interaction will be skipped unless converted to numeric.")
+        # Fall back to POLITICAL_LEAN table if alignment pipeline not run
+        lean_df = store.read_table('POLITICAL_LEAN')
+        if not lean_df.empty and 'LEAN_SCORE' in lean_df.columns:
+            lean_map = dict(zip(lean_df['TICKER'], lean_df['LEAN_SCORE']))
 
     # FOMO z-scores (optional, from Essay 1 sentiment analysis)
     fomo_map = {}
@@ -1676,6 +1965,7 @@ def build_car_panel(
             'CAR_POST': treat_car.car_post,
             'CAR_FULL': treat_car.car_full,
             'LEAN': lean_map.get(event_ticker, np.nan),
+            'LEAN_CAT': lean_cat_map.get(event_ticker, ''),
             'FOMO_Z': fomo_z,
             'TREATMENT_TICKER': event_ticker,
             'CONTROL_TICKER': ctrl_ticker or '',
@@ -1696,6 +1986,7 @@ def build_car_panel(
                 'CAR_POST': ctrl_car.car_post,
                 'CAR_FULL': ctrl_car.car_full,
                 'LEAN': lean_map.get(ctrl_ticker, np.nan),
+                'LEAN_CAT': lean_cat_map.get(ctrl_ticker, ''),
                 'FOMO_Z': ctrl_fomo_z,
                 'TREATMENT_TICKER': event_ticker,
                 'CONTROL_TICKER': ctrl_ticker,
@@ -2925,6 +3216,103 @@ def run_autocorrelation_test(
         return pd.DataFrame()
 
 
+def run_cross_sectional_regression(
+    store: DataStore,
+    car_panel: pd.DataFrame = None,
+    regime_result: RegimeResult = None,
+) -> Optional[pd.DataFrame]:
+    """
+    Cross-sectional regression for safe-haven / ambiguity analysis (Item 3).
+
+    Regresses treatment CAR_POST on:
+        ALIGNMENT_SCORE, VIX_LEVEL, FOMO_Z
+
+    Returns coefficient table or None if insufficient data.
+    """
+    if car_panel is None:
+        return None
+
+    treat = car_panel[car_panel['IS_TREATMENT']].copy()
+    if len(treat) < 10:
+        return None
+
+    # Get VIX level at each event date
+    vix_df = store.read_table('VIX_DATA')
+    vix_map = {}
+    if not vix_df.empty:
+        vix_df['DATE'] = pd.to_datetime(vix_df['DATE'], errors='coerce')
+        vix_df = vix_df.dropna(subset=['DATE']).sort_values('DATE')
+        vix_col = 'VIX' if 'VIX' in vix_df.columns else 'CLOSE'
+        for _, row in treat[['EVENT_DATE']].drop_duplicates().iterrows():
+            edate = pd.to_datetime(row['EVENT_DATE'])
+            mask = vix_df['DATE'] <= edate
+            if mask.any():
+                vix_map[edate] = vix_df.loc[mask, vix_col].iloc[-1]
+
+    treat['VIX_LEVEL'] = treat['EVENT_DATE'].map(vix_map)
+
+    # Rename LEAN to ALIGNMENT_SCORE for clarity if numeric
+    if 'LEAN' in treat.columns and pd.api.types.is_numeric_dtype(treat['LEAN']):
+        treat['ALIGNMENT_SCORE'] = treat['LEAN']
+    else:
+        treat['ALIGNMENT_SCORE'] = np.nan
+
+    # Build regression specifications
+    specs = {}
+    dep = 'CAR_POST'
+
+    # Spec 1: CAR ~ ALIGNMENT_SCORE
+    base_vars = ['ALIGNMENT_SCORE']
+    valid = treat.dropna(subset=[dep] + base_vars)
+    if len(valid) >= 10:
+        X = sm.add_constant(valid[base_vars])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            specs['alignment_only'] = sm.OLS(valid[dep], X).fit(cov_type='HC1')
+
+    # Spec 2: + VIX_LEVEL
+    vix_vars = ['ALIGNMENT_SCORE', 'VIX_LEVEL']
+    valid = treat.dropna(subset=[dep] + vix_vars)
+    if len(valid) >= 10:
+        X = sm.add_constant(valid[vix_vars])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            specs['with_vix'] = sm.OLS(valid[dep], X).fit(cov_type='HC1')
+
+    # Spec 3: + FOMO_Z
+    full_vars = ['ALIGNMENT_SCORE', 'VIX_LEVEL', 'FOMO_Z']
+    valid = treat.dropna(subset=[dep] + full_vars)
+    if len(valid) >= 10:
+        X = sm.add_constant(valid[full_vars])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            specs['full'] = sm.OLS(valid[dep], X).fit(cov_type='HC1')
+
+    if not specs:
+        logger.warning("Cross-sectional regression: no specifications had sufficient data")
+        return None
+
+    # Build coefficient table
+    rows = []
+    for spec_name, fit in specs.items():
+        for var in fit.params.index:
+            rows.append({
+                'SPECIFICATION': spec_name,
+                'VARIABLE': var,
+                'COEFFICIENT': fit.params[var],
+                'STD_ERROR': fit.bse[var],
+                'T_STAT': fit.tvalues[var],
+                'P_VALUE': fit.pvalues[var],
+                'R_SQUARED': fit.rsquared,
+                'N_OBS': int(fit.nobs),
+            })
+
+    coeff_df = pd.DataFrame(rows)
+    logger.info("Cross-sectional regression: %d specs, %d coefficients",
+                len(specs), len(coeff_df))
+    return coeff_df
+
+
 def run_diagnostics(
     store: DataStore,
     did_result: DiDResult,
@@ -3285,6 +3673,37 @@ if __name__ == '__main__':
     else:
         print("  Skipped — no DiD results")
 
+    # Step 4c: Cross-sectional regression (Item 3: safe-haven / ambiguity)
+    print()
+    print("=" * 60)
+    print("  Step 4c: Cross-sectional regression (VIX / alignment / FOMO)")
+    print("=" * 60)
+    xsect_df = None
+    if car_panel is not None:
+        xsect_df = run_cross_sectional_regression(
+            store, car_panel=car_panel, regime_result=regime_result)
+        if xsect_df is not None:
+            ts = pd.Timestamp.now().isoformat()
+            store.write_table(
+                xsect_df.assign(RUN_TIMESTAMP=ts),
+                'ESSAY2_CROSS_SECTIONAL_REG', replace=True,
+            )
+            for spec_name in xsect_df['SPECIFICATION'].unique():
+                spec_rows = xsect_df[xsect_df['SPECIFICATION'] == spec_name]
+                print(f"\n  --- {spec_name} (N={int(spec_rows['N_OBS'].iloc[0])}, "
+                      f"R2={spec_rows['R_SQUARED'].iloc[0]:.4f}) ---")
+                for _, row in spec_rows.iterrows():
+                    sig = ""
+                    if row['P_VALUE'] < 0.01: sig = "***"
+                    elif row['P_VALUE'] < 0.05: sig = "**"
+                    elif row['P_VALUE'] < 0.10: sig = "*"
+                    print(f"    {row['VARIABLE']:25s} {row['COEFFICIENT']:+.6f} "
+                          f"(t={row['T_STAT']:+.2f}, p={row['P_VALUE']:.4f}){sig}")
+        else:
+            print("  SKIPPED — insufficient data for cross-sectional regression")
+    else:
+        print("  SKIPPED — no CAR panel")
+
     # Step 5: Multi-window event study [-1, +5/10/15/20/30/60/90]
     print()
     print("=" * 60)
@@ -3361,6 +3780,58 @@ if __name__ == '__main__':
                     print(f"  {window_label:<14} {r.get('Conservative', np.nan):>+14.4f} "
                           f"{r.get('Liberal', np.nan):>+14.4f} "
                           f"{r.get('Mixed', np.nan):>+14.4f}")
+
+        # Headline descriptive stats (Item 1)
+        if not mw_result.descriptive_stats.empty:
+            print()
+            print("  --- Headline Descriptive Statistics (All Windows) ---")
+            print(f"    {'WINDOW':<12s} {'N':>5s} {'EW Mean':>10s} {'VW Mean':>10s} "
+                  f"{'EW Median':>10s} {'BHAR':>10s} {'%Sig':>7s} {'t-stat':>8s} {'p-val':>10s}")
+            print(f"    {'─'*12:<12s} {'─'*5:>5s} {'─'*10:>10s} {'─'*10:>10s} "
+                  f"{'─'*10:>10s} {'─'*10:>10s} {'─'*7:>7s} {'─'*8:>8s} {'─'*10:>10s}")
+            for _, row in mw_result.descriptive_stats.iterrows():
+                vw = f"{row['VW_MEAN_CAR']:>+10.4f}" if pd.notna(row.get('VW_MEAN_CAR')) else f"{'N/A':>10s}"
+                pct = f"{row['PCT_SIGNIFICANT']:>6.1%}" if pd.notna(row.get('PCT_SIGNIFICANT')) else f"{'N/A':>6s}"
+                print(f"    {row['WINDOW']:<12s} {row['N_EVENTS']:>5.0f} {row['EW_MEAN_CAR']:>+10.4f} {vw} "
+                      f"{row['EW_MEDIAN_CAR']:>+10.4f} {row['MEAN_BHAR']:>+10.4f} {pct:>7s} "
+                      f"{row['T_STAT']:>8.2f} {row['P_VALUE']:>10.4g}")
+
+        # Per-lean significance tests (Item 2)
+        if not mw_result.by_lean_tests.empty:
+            print()
+            print("  --- Per-Lean One-Sample t-Tests (CARs != 0) ---")
+            print(f"  {'Window':<14} {'Lean':<14} {'N':>5} {'Mean CAR':>10} "
+                  f"{'t-stat':>8} {'p-value':>8} {'Sig':>4}")
+            print("  " + "-" * 70)
+            for _, row in mw_result.by_lean_tests.iterrows():
+                sig = ""
+                p = row['P_VALUE']
+                if pd.notna(p):
+                    if p < 0.01: sig = "***"
+                    elif p < 0.05: sig = "**"
+                    elif p < 0.10: sig = "*"
+                print(f"  {row['WINDOW']:<14} {row['LEAN']:<14} {row['N']:>5.0f} "
+                      f"{row['MEAN_CAR']:>+10.4f} "
+                      f"{row['T_STAT']:>+8.2f} {row['P_VALUE']:>8.4f} {sig:>4}")
+
+        # Pairwise lean comparisons (Item 2)
+        if not mw_result.lean_pairwise.empty:
+            print()
+            print("  --- Pairwise Lean Comparisons ---")
+            print(f"  {'Window':<14} {'Comparison':<24} {'Diff':>10} "
+                  f"{'t-stat':>8} {'p-value':>8} {'d':>7} {'Sig':>4}")
+            print("  " + "-" * 83)
+            for _, row in mw_result.lean_pairwise.iterrows():
+                sig = ""
+                p = row['P_VALUE']
+                if pd.notna(p):
+                    if p < 0.01: sig = "***"
+                    elif p < 0.05: sig = "**"
+                    elif p < 0.10: sig = "*"
+                print(f"  {row['WINDOW']:<14} {row['COMPARISON']:<24} "
+                      f"{row['DIFF']:>+10.4f} "
+                      f"{row['T_STAT']:>+8.2f} {row['P_VALUE']:>8.4f} "
+                      f"{row['COHENS_D']:>+7.3f} {sig:>4}")
 
         # Save
         print()
@@ -3666,8 +4137,11 @@ if __name__ == '__main__':
     # Collect all ESSAY2_ tables written during this run
     _essay2_tables = [
         'ESSAY2_CAR_PANEL', 'ESSAY2_DID_COEFFICIENTS', 'ESSAY2_PARALLEL_TRENDS',
+        'ESSAY2_CROSS_SECTIONAL_REG',
         'ESSAY2_MULTI_WINDOW_PANEL', 'ESSAY2_MULTI_WINDOW_SUMMARY',
         'ESSAY2_MULTI_WINDOW_TREAT_VS_CTRL', 'ESSAY2_MULTI_WINDOW_BY_LEAN',
+        'ESSAY2_MULTI_WINDOW_LEAN_TESTS', 'ESSAY2_MULTI_WINDOW_LEAN_PAIRWISE',
+        'ESSAY2_DESCRIPTIVE_STATS',
         'ESSAY2_CONTAGION_PANEL', 'ESSAY2_CONTAGION_SUMMARY',
         'ESSAY2_CONTAGION_PEER_VS_NONPEER', 'ESSAY2_CONTAGION_BY_LEAN',
         'ESSAY2_CONTAGION_TIGHT_DIFF', 'ESSAY2_CONTAGION_BY_FACING',

@@ -70,6 +70,7 @@ from .essay2 import (
     compute_stance_scores,
     compute_political_alignment,
     save_alignment_results,
+    threshold_sensitivity_table,
 )
 
 # ── Essay 2 — Culture War Event DiD ──────────────────────────────────

@@ -259,6 +259,11 @@ TABLE_MAP = {
         'extract_mode': 'dataframe',
         'description': 'SEC Form 4 insider trading filings for culture war companies',
     },
+    'sec_fundamentals': {
+        'table': 'SEC_FUNDAMENTALS',
+        'extract_mode': 'dataframe',
+        'description': 'SEC 10-K/10-Q financial metrics (revenue, shares outstanding, etc.)',
+    },
     'controlcompanies': {
         'table': 'CONTROL_COMPANIES',
         'extract_mode': 'dataframe',
