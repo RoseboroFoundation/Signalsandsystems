@@ -84,6 +84,15 @@ from .party_platforms import PartyPlatformDownloader
 from .political_events import load_political_events
 from .political_exposure import load_political_exposure
 
+# STOCK Act congressional trading (Essay 3 — legislator insider trading)
+from .stock_act import (
+    load_stock_act_trades,
+    SenateDisclosureScraper,
+    download_house_index,
+    download_kadoa_data,
+    load_legislators_crosswalk,
+)
+
 # Orchestration
 from .orchestration import (
     load_culture_war_companies,

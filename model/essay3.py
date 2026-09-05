@@ -48,7 +48,7 @@ Methodology:
    13. Quantile/median regression, trimmed robustness, bootstrap
    14. Insider fixed-effects panel
 
-Output tables (27, orphaned tables from prior runs are auto-dropped):
+Output tables (36, orphaned tables from prior runs are auto-dropped):
   ESSAY3_PANEL                  Event-level panel (carried forward)
   ESSAY3_STRATIFICATION         Year x activity-tercile strata
   ESSAY3_MEAN_VS_DISTRIBUTIONAL Side-by-side t-test vs Wilcoxon across all cuts
@@ -101,7 +101,7 @@ from scipy import stats
 import statsmodels.api as sm
 
 from .datastore import DataStore
-from .essay2_did import compute_car
+from .essay2_did import compute_car, compute_car_decomposed
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ WINDOWS = {
     'PRE_NEAR':   (-30, -1),
     'PRE_FULL':   (-180, -1),
     'POST':       (0, 60),
+    'POST_EARLY': (0, 10),    # §14 Test B: post-announcement trade window
 }
 
 SELL_CODES = {'S', 'D', 'F'}   # Sale, Disposition, Tax withholding via share surrender
@@ -491,7 +492,10 @@ def _compute_fundamental_cars(car_df, political_events, form4, store):
     new_rows = []
     done = 0
     for ticker, event_date in new_pairs:
-        result = compute_car(
+        # Use compute_car_decomposed (§14): fits FF5 model once, returns all
+        # sub-windows. 'CAR' = car_post_10 preserves the existing [0,+10]
+        # blended window so downstream logic is unchanged.
+        result = compute_car_decomposed(
             ticker=ticker, store=store,
             event_id=f"POL_{ticker}_{event_date.strftime('%Y%m%d')}",
             event_date=event_date, is_treatment=True, regime='Unknown',
@@ -499,9 +503,19 @@ def _compute_fundamental_cars(car_df, political_events, form4, store):
         if result is not None:
             new_rows.append({
                 'TICKER': ticker, 'EVENT_DATE': event_date,
-                'CAR': result.car_post, 'CAR_PRE': result.car_pre,
-                'CAR_FULL': result.car_full, 'N_OBS': result.n_event_obs,
-                'R_SQUARED': result.r_squared, 'STATUS': 'OK',
+                # 'CAR' (car_post_10) is read by build_insider_panel via car_lookup.
+                # 'CAR_PRE' is stored for reference.
+                # 'CAR_ANNOUNCE', 'CAR_DRIFT', 'CAR_REMAINING' are §14 additions
+                # carried into the panel via separate lookups in build_insider_panel.
+                'CAR':            result['car_post_10'],
+                'CAR_PRE':        result['car_pre'],
+                'CAR_ANNOUNCE':   result['car_announce'],
+                'CAR_DRIFT':      result['car_drift'],
+                'CAR_REMAINING':  result['car_remaining'],
+                'CAR_REM_5':      result['car_remaining_5'],
+                'CAR_REM_20':     result['car_remaining_20'],
+                'N_OBS': result['n_event_obs'],
+                'R_SQUARED': result['r_squared'], 'STATUS': 'OK',
             })
         done += 1
         if done % 500 == 0:
@@ -633,25 +647,30 @@ def build_insider_panel(form4, culture_events, political_events,
     quarter_cache = _build_routine_cache(form4)
     logger.info("  Cache built: %d (ticker, owner) pairs", len(quarter_cache))
 
-    routine_cache = {}
-    unique_events = event_list[['TICKER', 'EVENT_DATE']].drop_duplicates()
-    for _, ev_row in unique_events.iterrows():
-        ticker = ev_row['TICKER']
-        event_date = ev_row['EVENT_DATE']
-        ticker_owners = form4.loc[form4['ticker'] == ticker, 'owner_name'].unique()
-        for owner in ticker_owners:
-            key = (ticker, owner, event_date)
-            if key not in routine_cache:
-                routine_cache[key] = _is_routine_from_cache(
-                    quarter_cache, ticker, owner, event_date
-                )
+    # No precomputed event-date routine_cache — routine classification is
+    # applied per transaction using the trade's own date (see line below).
 
     # Build lookups
     car_lookup = {}
+    car_announce_lookup = {}
+    car_drift_lookup = {}
+    car_remaining_lookup = {}
+    car_rem5_lookup = {}
+    car_rem20_lookup = {}
     if car_df is not None and not car_df.empty:
         for _, row in car_df.iterrows():
             key = (row['TICKER'], pd.Timestamp(row['EVENT_DATE']).strftime('%Y%m%d'))
             car_lookup[key] = row.get('CAR', None)
+            # §14 decomposed CARs — only present for fundamental events computed
+            # with compute_car_decomposed; missing for cultural events.
+            for lkup, col in [(car_announce_lookup, 'CAR_ANNOUNCE'),
+                              (car_drift_lookup,    'CAR_DRIFT'),
+                              (car_remaining_lookup,'CAR_REMAINING'),
+                              (car_rem5_lookup,     'CAR_REM_5'),
+                              (car_rem20_lookup,    'CAR_REM_20')]:
+                v = row.get(col, None)
+                if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                    lkup[key] = v
 
     exposure_lookup = {}
     if political_exposure is not None and not political_exposure.empty:
@@ -670,8 +689,15 @@ def build_insider_panel(form4, culture_events, political_events,
         ticker = ev['TICKER']
         event_date = ev['EVENT_DATE']
         ticker_txns = form4[form4['ticker'] == ticker].copy()
-        ticker_txns['_is_routine'] = ticker_txns['owner_name'].apply(
-            lambda owner: routine_cache.get((ticker, owner, event_date), None)
+        # Use each transaction's own date for CMP routine classification so that
+        # trades in the far window (days 61–180, different calendar month) are
+        # classified against the month in which they actually occurred.
+        ticker_txns['_is_routine'] = ticker_txns.apply(
+            lambda row: _is_routine_from_cache(
+                quarter_cache, ticker, row['owner_name'],
+                pd.Timestamp(row['transaction_date'])
+            ),
+            axis=1
         )
 
         row = {
@@ -689,6 +715,12 @@ def build_insider_panel(form4, culture_events, political_events,
         # CAR + exposure lookups
         car_key = (ticker, event_date.strftime('%Y%m%d'))
         row['CAR_POST'] = car_lookup.get(car_key)
+        # §14 decomposed CARs (None for cultural events)
+        row['CAR_ANNOUNCE']  = car_announce_lookup.get(car_key)
+        row['CAR_DRIFT']     = car_drift_lookup.get(car_key)
+        row['CAR_REMAINING'] = car_remaining_lookup.get(car_key)
+        row['CAR_REM_5']     = car_rem5_lookup.get(car_key)
+        row['CAR_REM_20']    = car_rem20_lookup.get(car_key)
         exp = exposure_lookup.get((ticker, event_date.year), {})
         row['LOBBYING_TOTAL'] = exp.get('LOBBYING_TOTAL', 0)
         row['PAC_TOTAL'] = exp.get('PAC_TOTAL', 0)
@@ -1452,9 +1484,12 @@ def compute_trimmed_robustness(panel):
     results = []
 
     for trim_pct in [1, 5]:
-        vals_all = df[dv].dropna()
-        lo = vals_all.quantile(trim_pct / 100)
-        hi = vals_all.quantile(1 - trim_pct / 100)
+        # Compute thresholds from the FUNDAMENTAL-only distribution so that
+        # CULTURAL extreme values do not shift the boundaries used to test
+        # FUNDAMENTAL outcomes.
+        vals_fund = df.loc[df['EVENT_CATEGORY'] == 'FUNDAMENTAL', dv].dropna()
+        lo = vals_fund.quantile(trim_pct / 100)
+        hi = vals_fund.quantile(1 - trim_pct / 100)
         trimmed = df[(df[dv] >= lo) & (df[dv] <= hi)].copy()
 
         # Overall fundamental
@@ -1702,9 +1737,14 @@ def compute_insider_panel(panel, form4, insider_profits=None):
         event_dt = pd.to_datetime(valid_fe['EVENT_DATE'])
         valid_fe['_time'] = event_dt.dt.year * 100 + event_dt.dt.month
         valid_fe = valid_fe.drop(columns=['EVENT_DATE'])
-        # Average duplicate (OWNER, month) pairs — PanelOLS needs unique index
+        # Collapse duplicate (OWNER, month) pairs — PanelOLS needs unique index.
+        # Use first() for binary indicators (IS_FUNDAMENTAL, IS_COURT) so they
+        # stay 0/1 rather than becoming fractional when an insider appears in
+        # both FUNDAMENTAL and CULTURAL events in the same month (mean() would
+        # produce 0.5, making the regressor continuous and the coefficient
+        # uninterpretable as a treatment effect).
         if valid_fe.duplicated(subset=['OWNER', '_time']).any():
-            valid_fe = valid_fe.groupby(['OWNER', '_time'], as_index=False).mean()
+            valid_fe = valid_fe.groupby(['OWNER', '_time'], as_index=False).first()
         valid_fe = valid_fe.set_index(['OWNER', '_time'])
 
         y = valid_fe['ABNORMAL_NET_SELLING']
@@ -1732,7 +1772,8 @@ def compute_insider_panel(panel, form4, insider_profits=None):
             ip_repeat[f'{col}_DM'] = ip_repeat[col] - owner_means
         valid_dm = ip_repeat[['ABNORMAL_NET_SELLING_DM'] + [f'{c}_DM' for c in X_cols_fe]].dropna()
         if len(valid_dm) >= 20:
-            X = sm.add_constant(valid_dm[[f'{c}_DM' for c in X_cols_fe]].astype(float))
+            # No constant: demeaned data has zero mean by construction.
+            X = valid_dm[[f'{c}_DM' for c in X_cols_fe]].astype(float)
             y_dm = valid_dm['ABNORMAL_NET_SELLING_DM'].astype(float)
             model_dm = sm.OLS(y_dm, X).fit(
                 cov_type='cluster',
@@ -2030,9 +2071,13 @@ def compute_crsp_profits(panel, form4, store, insider_profits=None):
             if pd.isna(trade_value) or trade_value == 0:
                 continue
 
-            # Insider-level routine classification (10b5-1 proxy)
+            # Insider-level routine classification (10b5-1 proxy).
+            # Use the trade's own date (not the event date) so CMP month-matching
+            # checks the calendar month of the actual trade — trades 60–180 days
+            # before the event may be in a different month than the event.
+            trade_date_for_routine = pd.Timestamp(txn['transaction_date'])
             is_routine = _is_routine_from_cache(
-                quarter_cache, ticker, owner, event_date
+                quarter_cache, ticker, owner, trade_date_for_routine
             )
 
             # Section 16(b) short-swing flag: did this insider buy the
@@ -2837,13 +2882,17 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
         yr_fe_cols = [c for c in year_dummy_cols
                       if c in valid.columns and valid[c].nunique() > 1]
         all_fe_x = fe_x_cols + yr_fe_cols
-        pooled_fe = valid[['TICKER', 'TRADE_DATE', 'PROFITABLE_30'] + all_fe_x].dropna().copy()
+        # Use _ACCURATE (EVENT_PROFITABLE for political, PROFITABLE_30 for control)
+        # to match every other pooled spec. Using PROFITABLE_30 here would
+        # impose a different DV on political trades and drop near-event trades
+        # that have EVENT_PROFITABLE but no PROFITABLE_30.
+        pooled_fe = valid[['TICKER', 'TRADE_DATE', '_ACCURATE'] + all_fe_x].dropna().copy()
         pooled_fe = pooled_fe.reset_index(drop=True)
         pooled_fe['_row_id'] = range(len(pooled_fe))
         try:
             from linearmodels.panel import PanelOLS as _PanelOLS
             pooled_fe_idx = pooled_fe.set_index(['TICKER', '_row_id'])
-            y_fe = pooled_fe_idx['PROFITABLE_30']
+            y_fe = pooled_fe_idx['_ACCURATE']
             X_fe = pooled_fe_idx[all_fe_x].astype(float)
             model = _PanelOLS(y_fe, X_fe, entity_effects=True).fit(
                 cov_type='clustered', cluster_entity=True
@@ -2877,14 +2926,17 @@ def compute_directional_accuracy_reversal(panel, form4, store, crsp_profits=None
         yr_fe_cols = [c for c in year_dummy_cols
                       if c in pol.columns and pol[c].nunique() > 1]
         all_fe_x = fe_x_cols + yr_fe_cols
-        pol_fe = pol[['TICKER', 'TRADE_DATE', 'PROFITABLE_30'] + all_fe_x].dropna().copy()
+        # Use _ACCURATE (EVENT_PROFITABLE for political) so the DV matches
+        # all other LPM specs. PROFITABLE_30 would use 30-day forward CAR,
+        # testing a different hypothesis and dropping near-event trades.
+        pol_fe = pol[['TICKER', 'TRADE_DATE', '_ACCURATE'] + all_fe_x].dropna().copy()
         # Need unique (entity, time) index — use trade-level row ID as time
         pol_fe = pol_fe.reset_index(drop=True)
         pol_fe['_row_id'] = range(len(pol_fe))
         try:
             from linearmodels.panel import PanelOLS as _PanelOLS
             pol_fe_idx = pol_fe.set_index(['TICKER', '_row_id'])
-            y_fe = pol_fe_idx['PROFITABLE_30']
+            y_fe = pol_fe_idx['_ACCURATE']
             X_fe = pol_fe_idx[all_fe_x].astype(float)
             model = _PanelOLS(y_fe, X_fe, entity_effects=True).fit(
                 cov_type='clustered', cluster_entity=True
@@ -3187,7 +3239,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
       (buys + sells against independence null).
     """
     empty = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
-             pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+             pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+             pd.DataFrame())
     if crsp_profits is None or crsp_profits.empty:
         logger.warning("  No CRSP profits for informed trading test")
         return empty
@@ -3627,8 +3680,6 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
         informed_proximity.loc[mask, 'METRIC_PVAL_BONF'] = (
             informed_proximity.loc[mask, 'METRIC_PVAL'] * n_windows
         ).clip(upper=1.0)
-        informed_proximity['METRIC_PVAL_BONF'] = informed_proximity.get(
-            'METRIC_PVAL_BONF', np.nan)
 
     # ── Table 3: INFORMED_DOLLARS — by severity and proximity ────────
     dollar_rows = []
@@ -3647,8 +3698,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 'N_SELLS': len(sub_sells),
                 'MEAN_EVENT_CAR': sub_sells['EVENT_CAR'].mean(),
                 'MEAN_TRADE_VALUE': sub_sells['TRADE_VALUE'].mean(),
-                'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
-                'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+                'MEAN_IMPLIED_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+                'TOTAL_IMPLIED_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
                 'METRIC_VALUE': sub_sells['EVENT_PROFITABLE'].mean(),
             })
 
@@ -3668,8 +3719,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     'N_SELLS': len(sub),
                     'MEAN_EVENT_CAR': sub['EVENT_CAR'].mean(),
                     'MEAN_TRADE_VALUE': sub['TRADE_VALUE'].mean(),
-                    'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
-                    'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+                    'MEAN_IMPLIED_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+                    'TOTAL_IMPLIED_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
                     # PCT_EVENT_PROFITABLE omitted: mechanically 1.0
                     # (sells with CAR ≤ threshold < 0 are always event-profitable)
                     'METRIC_VALUE': np.nan,
@@ -3687,8 +3738,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             'N_SELLS': len(all_sells),
             'MEAN_EVENT_CAR': all_sells['EVENT_CAR'].mean(),
             'MEAN_TRADE_VALUE': all_sells['TRADE_VALUE'].mean(),
-            'MEAN_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
-            'TOTAL_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
+            'MEAN_IMPLIED_PROFIT': sp.mean() if len(sp) > 0 else np.nan,
+            'TOTAL_IMPLIED_PROFIT': sp.sum() if len(sp) > 0 else np.nan,
             'METRIC_VALUE': all_sells['EVENT_PROFITABLE'].mean(),
         })
         if len(correct_sells) >= 5:
@@ -3697,8 +3748,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 'N_SELLS': len(correct_sells),
                 'MEAN_EVENT_CAR': correct_sells['EVENT_CAR'].mean(),
                 'MEAN_TRADE_VALUE': correct_sells['TRADE_VALUE'].mean(),
-                'MEAN_PROFIT': correct_sp.mean() if len(correct_sp) > 0 else np.nan,
-                'TOTAL_PROFIT': correct_sp.sum() if len(correct_sp) > 0 else np.nan,
+                'MEAN_IMPLIED_PROFIT': correct_sp.mean() if len(correct_sp) > 0 else np.nan,
+                'TOTAL_IMPLIED_PROFIT': correct_sp.sum() if len(correct_sp) > 0 else np.nan,
                 'METRIC_VALUE': np.nan,  # mechanically 1.0 by definition
             })
 
@@ -3909,7 +3960,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 if boot_result is None:
                     continue
                 # Convert two-tailed bootstrap p to one-tailed for directional H1.
-                # sells: H1 = accuracy > p0; buys: H1 = accuracy < p0.
+                # sells: H1 = accuracy > p0; buys: H1 = accuracy > p0 (informed
+                # buys have EVENT_PROFITABLE=(CAR>0), same direction as sells).
                 # Two-tailed bootstrap already uses abs() so p_two = 2*p_one when
                 # the observed effect is in the right direction.
                 p_two = boot_result['p_value_vs_p0']
@@ -4000,8 +4052,6 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
     # not its covariance with what insiders did.
     car_net_slope = pd.DataFrame()
     try:
-        from statsmodels.api import OLS, add_constant
-        from statsmodels.stats.sandwich_covariance import cov_hc3
         if not valid_pol.empty and 'EVENT_CAR' in valid_pol.columns:
             ev_grp = valid_pol.copy()
             _dollar_col = 'TRADE_VALUE' if 'TRADE_VALUE' in ev_grp.columns else 'SHARES'
@@ -4023,20 +4073,16 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
             ev_fit = ev_agg.dropna(subset=['EVENT_CAR', 'NET_DIRECTION'])
             ev_fit = ev_fit[ev_fit['NET_DIRECTION'] != 0]
             if len(ev_fit) >= 10:
-                X = add_constant(ev_fit['NET_DIRECTION'].values)
-                y = ev_fit['EVENT_CAR'].values
-                model = OLS(y, X).fit()
-                hc3 = cov_hc3(model)
-                se_hc3 = np.sqrt(np.diag(hc3))
-                t_stat = model.params[1] / se_hc3[1]
-                p_two = 2 * (1 - stats.t.cdf(abs(t_stat), df=len(y) - 2))
+                X = sm.add_constant(ev_fit[['NET_DIRECTION']].astype(float))
+                y = ev_fit['EVENT_CAR'].astype(float)
+                model = sm.OLS(y, X).fit(cov_type='HC3')
                 car_net_slope = pd.DataFrame([{
                     'N_EVENTS': len(ev_fit),
-                    'COEF_NET_DIRECTION': model.params[1],
-                    'SE_HC3': se_hc3[1],
-                    'T_STAT': t_stat,
-                    'P_VALUE_TWO': p_two,
-                    'INTERCEPT': model.params[0],
+                    'COEF_NET_DIRECTION': model.params['NET_DIRECTION'],
+                    'SE_HC3': model.bse['NET_DIRECTION'],
+                    'T_STAT': model.tvalues['NET_DIRECTION'],
+                    'P_VALUE_TWO': model.pvalues['NET_DIRECTION'],
+                    'INTERCEPT': model.params['const'],
                     'R_SQUARED': model.rsquared,
                     'INTERPRETATION': (
                         'Negative coef = events where insiders net-sold had '
@@ -4045,7 +4091,8 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                 }])
                 logger.info(
                     "  CAR-on-net-direction: coef=%.4f SE=%.4f p=%.4f (n=%d events)",
-                    model.params[1], se_hc3[1], p_two, len(ev_fit))
+                    model.params['NET_DIRECTION'], model.bse['NET_DIRECTION'],
+                    model.pvalues['NET_DIRECTION'], len(ev_fit))
     except Exception as _e:
         logger.warning("  CAR net slope failed: %s", _e)
 
@@ -4097,7 +4144,10 @@ def compute_informed_trading_test(panel, crsp_profits, control_trades):
                     (2 * p_sell - 1) ** 2 * p_neg_car * (1 - p_neg_car) / n_tot +
                     4 * p_sell * p_neg_car * (1 - p_sell) * (1 - p_neg_car) / n_tot ** 2
                 )
-                var_obs = obs_acc * (1 - obs_acc) / n_tot
+                # PT (1992): under H0, Var(P_hat) = P*(1-P*)/T — use P* (null mean),
+                # not obs_acc. Using obs_acc would be anti-conservative when
+                # obs_acc > p_star (the informed-trading case), inflating z.
+                var_obs = p_star * (1 - p_star) / n_tot
                 # PT (1992) eq. 7: Cov(P_hat, P*) = Var(P*), so
                 # Var(P_hat - P*) = Var(P_hat) + Var(P*) - 2*Cov = Var(P_hat) - Var(P*)
                 var_diff = var_obs - var_p_star
@@ -4319,7 +4369,13 @@ def compute_trading_intensity_did(valid_pol, panel):
             "far_pos=%.4f DiD=%.4f",
             near_neg, far_neg, near_pos, far_pos, did_est)
 
-    # OLS: NET_SELL_INTENSITY ~ NEAR_WINDOW × NEGATIVE_EVENT + FE (HC3)
+    # OLS: NET_SELL_INTENSITY ~ NEAR_WINDOW × NEGATIVE_EVENT + FE
+    # SE clustered by EVENT_ID (two rows per event: NEAR and FAR; within-event
+    # residuals are correlated — HC3 would treat them as independent).
+    # SPEC label: VALID_POL_SELECTED — valid_pol contains only events where
+    # at least one trade has a valid EVENT_CAR (~30% of all panel events).
+    # Events with zero pre-event activity are excluded, creating a selection
+    # artifact. See PANEL_FULL_POPULATION spec below for the unselected result.
     did_reg = pd.DataFrame()
     try:
         reg_df = agg[agg['NET_SELL_INTENSITY'].notna()].copy()
@@ -4333,11 +4389,14 @@ def compute_trading_intensity_did(valid_pol, panel):
         X = sm.add_constant(X)
         y = reg_df['NET_SELL_INTENSITY']
         mask = y.notna() & X.notna().all(axis=1)
-        model = sm.OLS(y[mask], X[mask]).fit(cov_type='HC3')
+        groups = reg_df.loc[mask, 'EVENT_ID']
+        model = sm.OLS(y[mask], X[mask]).fit(
+            cov_type='cluster', cov_kwds={'groups': groups})
         ci = model.conf_int()
         reg_rows = []
         for var in model.params.index:
             reg_rows.append({
+                'SPEC': 'VALID_POL_SELECTED',
                 'VARIABLE': var,
                 'COEF': model.params[var],
                 'SE': model.bse[var],
@@ -4348,20 +4407,106 @@ def compute_trading_intensity_did(valid_pol, panel):
                 'N': int(model.nobs),
                 'R_SQUARED': model.rsquared,
                 'INTERPRETATION': (
-                    'Key DiD coefficient: escalation of net selling in near window '
-                    'before negative events. EVENT_CAR is realized AFTER all trades '
-                    '— no reverse causality. Omitted-variable risk addressed by '
-                    'event-type and regulatory-period FE.'
+                    'SELECTED SUBSAMPLE: events with ≥1 trade having valid EVENT_CAR '
+                    '(~30% of panel). SE clustered by EVENT_ID. Selection may bias '
+                    'DiD — see PANEL_FULL_POPULATION spec for unselected result.'
                 ) if var == 'INTERACTION' else '',
             })
         did_reg = pd.DataFrame(reg_rows)
         logger.info(
-            "  DiD intensity reg: n=%d INTERACTION coef=%.4f p=%.4f",
+            "  DiD intensity reg (selected): n=%d INTERACTION coef=%.4f p=%.4f",
             int(model.nobs),
             model.params.get('INTERACTION', np.nan),
             model.pvalues.get('INTERACTION', np.nan))
     except Exception as e:
-        logger.warning("  DiD intensity regression failed: %s", e)
+        logger.warning("  DiD intensity regression (selected) failed: %s", e)
+
+    # Panel-based DiD (full population — all events, including zero-activity)
+    # Uses the panel's own PRE_NEAR_NET_SELL_RATIO for NEAR and a composite
+    # FAR measure covering days 31–180 (PRE_MID + PRE_FAR), matching the
+    # VALID_POL_SELECTED spec which classifies any trade >30 days before the
+    # event as FAR.  Using only PRE_FAR (days 61–180) would create a window
+    # mismatch between the two specs, confounding the selection comparison.
+    try:
+        if panel is not None and not panel.empty:
+            pan = panel[panel['EVENT_CATEGORY'] == 'FUNDAMENTAL'].copy()
+            if not pan.empty and 'CAR_POST' in pan.columns:
+                pan['NEGATIVE_EVENT'] = (
+                    pd.to_numeric(pan['CAR_POST'], errors='coerce') < 0).astype(float)
+                near_col = 'PRE_NEAR_NET_SELL_RATIO'
+                # Composite FAR = PRE_MID (days 31–60) + PRE_FAR (days 61–180)
+                # computed from dollar columns so the ratio is value-weighted.
+                pan['_FAR_NET'] = (
+                    pan.get('PRE_MID_NET_SELLING', pd.Series(0, index=pan.index)).fillna(0) +
+                    pan.get('PRE_FAR_NET_SELLING', pd.Series(0, index=pan.index)).fillna(0))
+                pan['_FAR_TOTAL'] = (
+                    pan.get('PRE_MID_DOLLAR_SOLD',   pd.Series(0, index=pan.index)).fillna(0) +
+                    pan.get('PRE_MID_DOLLAR_BOUGHT',  pd.Series(0, index=pan.index)).fillna(0) +
+                    pan.get('PRE_FAR_DOLLAR_SOLD',    pd.Series(0, index=pan.index)).fillna(0) +
+                    pan.get('PRE_FAR_DOLLAR_BOUGHT',  pd.Series(0, index=pan.index)).fillna(0))
+                pan['FAR_NET_SELL_RATIO'] = np.where(
+                    pan['_FAR_TOTAL'] > 0,
+                    pan['_FAR_NET'] / pan['_FAR_TOTAL'], 0.0)
+                far_col = 'FAR_NET_SELL_RATIO'   # days 31–180
+                if near_col in pan.columns and far_col in pan.columns:
+                    near_rows = pan[[near_col, 'NEGATIVE_EVENT',
+                                     'REGULATORY_PERIOD', 'EVENT_ID']].copy()
+                    near_rows.columns = ['NET_SELL_RATIO', 'NEGATIVE_EVENT',
+                                         'REGULATORY_PERIOD', 'EVENT_ID']
+                    near_rows['NEAR_WINDOW'] = 1.0
+                    far_rows = pan[[far_col, 'NEGATIVE_EVENT',
+                                    'REGULATORY_PERIOD', 'EVENT_ID']].copy()
+                    far_rows.columns = ['NET_SELL_RATIO', 'NEGATIVE_EVENT',
+                                        'REGULATORY_PERIOD', 'EVENT_ID']
+                    far_rows['NEAR_WINDOW'] = 0.0
+                    long_pan = pd.concat([near_rows, far_rows], ignore_index=True)
+                    long_pan['NET_SELL_RATIO'] = pd.to_numeric(
+                        long_pan['NET_SELL_RATIO'], errors='coerce')
+                    long_pan['INTERACTION'] = (
+                        long_pan['NEAR_WINDOW'] * long_pan['NEGATIVE_EVENT'])
+                    per_d2 = pd.get_dummies(
+                        long_pan['REGULATORY_PERIOD'], prefix='period',
+                        drop_first=True).astype(float)
+                    X2 = pd.concat(
+                        [long_pan[['NEAR_WINDOW', 'NEGATIVE_EVENT',
+                                   'INTERACTION']].astype(float), per_d2], axis=1)
+                    X2 = sm.add_constant(X2)
+                    y2 = long_pan['NET_SELL_RATIO']
+                    mask2 = y2.notna() & X2.notna().all(axis=1)
+                    groups2 = long_pan.loc[mask2, 'EVENT_ID']
+                    model2 = sm.OLS(y2[mask2], X2[mask2]).fit(
+                        cov_type='cluster', cov_kwds={'groups': groups2})
+                    ci2 = model2.conf_int()
+                    panel_rows = []
+                    for var in model2.params.index:
+                        panel_rows.append({
+                            'SPEC': 'PANEL_FULL_POPULATION',
+                            'VARIABLE': var,
+                            'COEF': model2.params[var],
+                            'SE': model2.bse[var],
+                            'T_STAT': model2.tvalues[var],
+                            'P_VALUE': model2.pvalues[var],
+                            'CI_025': ci2.loc[var, 0],
+                            'CI_975': ci2.loc[var, 1],
+                            'N': int(model2.nobs),
+                            'R_SQUARED': model2.rsquared,
+                            'INTERPRETATION': (
+                                'FULL POPULATION: all FUNDAMENTAL events, including '
+                                'zero-activity windows (NET_SELL_RATIO=0). FAR = '
+                                'composite of PRE_MID+PRE_FAR (days 31–180), matching '
+                                'VALID_POL_SELECTED definition. SE clustered by EVENT_ID.'
+                            ) if var == 'INTERACTION' else '',
+                        })
+                    did_reg = pd.concat(
+                        [did_reg, pd.DataFrame(panel_rows)], ignore_index=True)
+                    logger.info(
+                        "  DiD intensity reg (panel full pop): n=%d "
+                        "INTERACTION coef=%.4f p=%.4f",
+                        int(model2.nobs),
+                        model2.params.get('INTERACTION', np.nan),
+                        model2.pvalues.get('INTERACTION', np.nan))
+    except Exception as e:
+        logger.warning("  DiD intensity regression (panel full pop) failed: %s", e)
 
     return did_summary, did_reg
 
@@ -4588,9 +4733,10 @@ def compute_within_insider_accuracy(crsp_profits, control_trades):
         panel_data['Y_DM'] = panel_data['PROFITABLE_30'] - panel_data['Y_MEAN']
         panel_data['X_DM'] = panel_data['POLITICAL'] - panel_data['X_MEAN']
         mask = panel_data['Y_DM'].notna() & panel_data['X_DM'].notna()
+        # No constant: demeaned data has zero mean by construction.
         model = sm.OLS(
             panel_data.loc[mask, 'Y_DM'],
-            sm.add_constant(panel_data.loc[mask, 'X_DM'])
+            panel_data.loc[mask, ['X_DM']].astype(float)
         ).fit(cov_type='HC3')
         summary_rows.append({
             'TEST': 'LPM_INSIDER_FE',
@@ -4681,25 +4827,50 @@ def compute_connection_timing(valid_pol, panel):
     if timing_summary.empty:
         return timing_summary, pd.DataFrame()
 
-    # OLS with triple interaction (HC3)
+    # Triple DiD regression: NET_SELL_INTENSITY ~ HIGH_CONN × NEAR_WINDOW × NEGATIVE_EVENT
+    # DV is NET_SELL_INTENSITY (signed trade value ratio), not EVENT_PROFITABLE.
+    # EVENT_PROFITABLE is constant within an event (determined by event-day CAR),
+    # so using it as DV at trade level gives within-event correlation = 1 on the
+    # DV — HC3 would severely understate variance. NET_SELL_INTENSITY is computed
+    # at the (EVENT_ID, HIGH_CONN, WINDOW) level, so each row is genuinely distinct.
+    # SE clustered by EVENT_ID (multiple conn × window cells per event).
     timing_reg = pd.DataFrame()
     try:
-        reg_df = vp.copy()
-        reg_df['NEAR_X_NEG'] = reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT']
-        reg_df['CONN_X_NEAR'] = reg_df['HIGH_CONN'] * reg_df['NEAR_WINDOW']
-        reg_df['CONN_X_NEG'] = reg_df['HIGH_CONN'] * reg_df['NEGATIVE_EVENT']
-        reg_df['TRIPLE'] = (
+        vp['SIGNED_VALUE'] = np.where(
+            vp['TRADE_TYPE'] == 'sell', vp['TRADE_VALUE'], -vp['TRADE_VALUE'])
+        ev_agg = vp.groupby(['EVENT_ID', 'TICKER', 'HIGH_CONN', 'NEAR_WINDOW']).agg(
+            NET_SELL_VALUE=('SIGNED_VALUE', 'sum'),
+            TOTAL_VALUE=('TRADE_VALUE', 'sum'),
+            NEGATIVE_EVENT=('NEGATIVE_EVENT', 'first'),
+            EVENT_CATEGORY=('EVENT_CATEGORY', 'first'),
+            REGULATORY_PERIOD=('REGULATORY_PERIOD', 'first'),
+        ).reset_index()
+        ev_agg['NET_SELL_INTENSITY'] = np.where(
+            ev_agg['TOTAL_VALUE'] > 0,
+            ev_agg['NET_SELL_VALUE'] / ev_agg['TOTAL_VALUE'],
+            np.nan)
+        reg_df = ev_agg[ev_agg['NET_SELL_INTENSITY'].notna()].copy()
+        reg_df['HIGH_CONN']     = reg_df['HIGH_CONN'].astype(float)
+        reg_df['NEAR_WINDOW']   = reg_df['NEAR_WINDOW'].astype(float)
+        reg_df['NEGATIVE_EVENT']= reg_df['NEGATIVE_EVENT'].astype(float)
+        reg_df['NEAR_X_NEG']   = reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT']
+        reg_df['CONN_X_NEAR']  = reg_df['HIGH_CONN'] * reg_df['NEAR_WINDOW']
+        reg_df['CONN_X_NEG']   = reg_df['HIGH_CONN'] * reg_df['NEGATIVE_EVENT']
+        reg_df['TRIPLE']       = (
             reg_df['HIGH_CONN'] * reg_df['NEAR_WINDOW'] * reg_df['NEGATIVE_EVENT'])
-        cat_d = pd.get_dummies(reg_df['EVENT_CATEGORY'], prefix='cat', drop_first=True).astype(float)
+        cat_d = pd.get_dummies(
+            reg_df['EVENT_CATEGORY'], prefix='cat', drop_first=True).astype(float)
         per_d = pd.get_dummies(
             reg_df['REGULATORY_PERIOD'], prefix='period', drop_first=True).astype(float)
         X_cols = ['HIGH_CONN', 'NEAR_WINDOW', 'NEGATIVE_EVENT',
                   'NEAR_X_NEG', 'CONN_X_NEAR', 'CONN_X_NEG', 'TRIPLE']
         X = pd.concat([reg_df[X_cols].astype(float), cat_d, per_d], axis=1)
         X = sm.add_constant(X)
-        y = reg_df['EVENT_PROFITABLE']
+        y = reg_df['NET_SELL_INTENSITY']
         mask = y.notna() & X.notna().all(axis=1)
-        model = sm.OLS(y[mask], X[mask]).fit(cov_type='HC3')
+        groups = reg_df.loc[mask, 'EVENT_ID']
+        model = sm.OLS(y[mask], X[mask]).fit(
+            cov_type='cluster', cov_kwds={'groups': groups})
         ci = model.conf_int()
         reg_rows = []
         for var in model.params.index:
@@ -4714,10 +4885,11 @@ def compute_connection_timing(valid_pol, panel):
                 'N': int(model.nobs),
                 'R_SQUARED': model.rsquared,
                 'INTERPRETATION': (
-                    'Triple DiD: high-connection insiders show larger near-window '
-                    'accuracy premium before negative events vs low-connection '
-                    'insiders. HIGH_POLITICAL_CONNECTION is predetermined '
-                    '(slow-moving), reducing simultaneity risk.'
+                    'Triple DiD: DV = NET_SELL_INTENSITY at (event, conn, window) '
+                    'level. TRIPLE > 0 means high-connection insiders escalate net '
+                    'selling in the near window more before negative events. '
+                    'SE clustered by EVENT_ID. HIGH_POLITICAL_CONNECTION is '
+                    'predetermined (slow-moving), reducing simultaneity risk.'
                 ) if var == 'TRIPLE' else '',
             })
         timing_reg = pd.DataFrame(reg_rows)
@@ -4730,6 +4902,464 @@ def compute_connection_timing(valid_pol, panel):
         logger.warning("  Connection timing regression failed: %s", e)
 
     return timing_summary, timing_reg
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §14 DELAYED-REACTION TESTS
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_delayed_reaction_tests(panel, crsp_profits, valid_pol):
+    """§14 Delayed-reaction tests: CAR decomposition + post-event trading.
+
+    Test A: Decompose event CAR into announcement [0,+1] and drift [+2,+60].
+      A1-A2: Accuracy against each sub-window with its own conditional base rate.
+      A4: Sign-disagreement diagnostic — how often do the two components disagree?
+           If >25% of events disagree, blended CAR_POST mislabels trades.
+
+    Test B: Post-event trading [0,+10] predicting CAR_REMAINING [+11,+60].
+      Primary: β on NET_SELL_INTENSITY_[0,+10] → CAR_REMAINING.
+      Controls: CAR_ANNOUNCE (to isolate incremental drift beyond visible price move),
+                PRE_FULL_NET_SELL_RATIO (pre-event baseline).
+      H1: β < 0 (net selling predicts further decline).
+      Robustness: [0,+5]→[+6,+60], [0,+20]→[+21,+60], excl |CAR_ANNOUNCE|>10%,
+                  discretionary codes only.
+
+    Guardrails enforced:
+      - Every accuracy figure reported with its own base rate (never pooled).
+      - Cluster on EVENT_ID throughout.
+      - Empty POST_EARLY windows coded NaN, not zero (complete-case primary spec,
+        imputed=0 robustness spec reported side-by-side).
+      - Merge on (EVENT_ID, TICKER, EVENT_DATE) with drop_duplicates.
+      - BH applied across §14 family conditional p-values only.
+      - Degeneracy check on event-aggregated accuracy.
+      - All specifications reported regardless of sign.
+
+    Returns: car_decomp, decomp_accuracy, post_event_trading, post_event_reg
+    """
+    empty = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+
+    if 'CAR_ANNOUNCE' not in panel.columns:
+        logger.warning(
+            "§14: CAR_ANNOUNCE not in panel — fundamental CARs need recomputation "
+            "with compute_car_decomposed. Re-run after clearing EVENT_STUDY_RESULTS "
+            "fundamental rows or running on fresh data.")
+        return empty
+
+    # ── A4: Event-level decomposition table ──────────────────────────────
+    decomp_cols = ['EVENT_ID', 'TICKER', 'EVENT_DATE', 'EVENT_CATEGORY',
+                   'REGULATORY_PERIOD', 'CAR_POST', 'CAR_ANNOUNCE', 'CAR_DRIFT',
+                   'CAR_REMAINING', 'CAR_REM_5', 'CAR_REM_20']
+    avail = [c for c in decomp_cols if c in panel.columns]
+    decomp = panel[avail].copy()
+    decomp = decomp[decomp['CAR_ANNOUNCE'].notna()].copy()
+
+    if len(decomp) < 10:
+        logger.warning("§14: Only %d events with CAR_ANNOUNCE; skipping.", len(decomp))
+        return empty
+
+    decomp['SIGN_AGREE'] = (
+        decomp['CAR_ANNOUNCE'].notna() & decomp['CAR_DRIFT'].notna() &
+        (np.sign(decomp['CAR_ANNOUNCE']) == np.sign(decomp['CAR_DRIFT']))
+    ).astype(float)
+
+    if 'CAR_POST' in decomp.columns:
+        decomp['SIGN_DISAGREE_POST_VS_ANNOUNCE'] = (
+            decomp['CAR_ANNOUNCE'].notna() & decomp['CAR_POST'].notna() &
+            (np.sign(decomp['CAR_ANNOUNCE']) != np.sign(decomp['CAR_POST']))
+        ).astype(float)
+    else:
+        decomp['SIGN_DISAGREE_POST_VS_ANNOUNCE'] = np.nan
+
+    decomp['ABS_CAR_ANNOUNCE'] = decomp['CAR_ANNOUNCE'].abs()
+    decomp['ABS_CAR_DRIFT']    = decomp['CAR_DRIFT'].abs()
+    if 'CAR_POST' in decomp.columns:
+        decomp['ABS_CAR_POST'] = decomp['CAR_POST'].abs()
+
+    pct_agree       = decomp['SIGN_AGREE'].mean()
+    pct_disagree    = decomp['SIGN_DISAGREE_POST_VS_ANNOUNCE'].mean()
+    n_decomp        = len(decomp)
+    logger.info(
+        "§14a CAR decomp: N=%d, sign-agree(ann vs drift)=%.1f%%, "
+        "sign-disagree(post vs ann)=%.1f%%",
+        n_decomp, pct_agree * 100, pct_disagree * 100)
+    if pct_disagree > 0.25:
+        logger.info(
+            "  NOTE: %.1f%% of events have sign(CAR_POST) != sign(CAR_ANNOUNCE). "
+            "Blended window mislabels a material share of trades.",
+            pct_disagree * 100)
+
+    car_decomp = decomp.drop(columns=['ABS_CAR_ANNOUNCE', 'ABS_CAR_DRIFT',
+                                       'ABS_CAR_POST'], errors='ignore').copy()
+
+    # ── A2/A3: Accuracy against each construct ────────────────────────────
+    # Merge CAR_ANNOUNCE and CAR_DRIFT onto valid_pol via (EVENT_ID, TICKER, EVENT_DATE)
+    car_info = (
+        panel[['EVENT_ID', 'TICKER', 'EVENT_DATE', 'CAR_ANNOUNCE', 'CAR_DRIFT']]
+        .drop_duplicates(subset=['EVENT_ID', 'TICKER', 'EVENT_DATE'])
+        .copy()
+    )
+
+    if valid_pol is None or valid_pol.empty:
+        logger.warning("§14: valid_pol is empty; skipping accuracy tests.")
+        decomp_accuracy = pd.DataFrame()
+    else:
+        vp = valid_pol.copy()
+        vp = vp.merge(car_info, on=['EVENT_ID', 'TICKER', 'EVENT_DATE'], how='left',
+                      suffixes=('', '_DECOMP'))
+
+        # Define accuracy against each construct
+        for car_col, profitable_col in [('CAR_ANNOUNCE', 'EP_ANNOUNCE'),
+                                         ('CAR_DRIFT',    'EP_DRIFT')]:
+            vp[car_col] = pd.to_numeric(vp[car_col], errors='coerce')
+            has_car = vp[car_col].notna()
+            vp[profitable_col] = np.nan
+            vp.loc[has_car & (vp['TRADE_TYPE'] == 'sell'), profitable_col] = (
+                vp.loc[has_car & (vp['TRADE_TYPE'] == 'sell'), car_col] < 0).astype(float)
+            vp.loc[has_car & (vp['TRADE_TYPE'] == 'buy'), profitable_col] = (
+                vp.loc[has_car & (vp['TRADE_TYPE'] == 'buy'), car_col] > 0).astype(float)
+
+        decomp_rows = []
+        bh_pvals = []
+
+        for profitable_col, car_col, construct_label in [
+            ('EP_ANNOUNCE', 'CAR_ANNOUNCE', 'ANNOUNCE'),
+            ('EP_DRIFT',    'CAR_DRIFT',    'DRIFT'),
+        ]:
+            sub = vp[vp[profitable_col].notna() & (vp['TRADE_TYPE'] == 'sell')].copy()
+            if len(sub) < 10:
+                continue
+
+            # Construct-specific conditional base rate
+            ev_cars_construct = sub.groupby('EVENT_ID')[car_col].first().dropna()
+            p_cond = _conditional_sign_base_rate(ev_cars_construct)
+            n_ev_cond = len(ev_cars_construct)
+
+            # Degeneracy check: event-aggregated accuracy vs base rate
+            ev_acc = sub.groupby('EVENT_ID')[profitable_col].mean().dropna()
+            ev_mean = ev_acc.mean()
+            is_degenerate = abs(ev_mean - p_cond) < 1e-6
+            if is_degenerate:
+                logger.warning(
+                    "§14 %s: event-aggregated accuracy %.4f == p_cond %.4f — degenerate",
+                    construct_label, ev_mean, p_cond)
+
+            n = len(sub)
+            n_prof = int(sub[profitable_col].sum())
+            pct = sub[profitable_col].mean()
+            binom_p50   = stats.binomtest(n_prof, n, 0.5).pvalue
+            binom_pcond = stats.binomtest(n_prof, n, p_cond).pvalue
+
+            # Wild cluster bootstrap (EVENT_ID), one-tailed H1: accuracy > p_cond
+            boot = _wild_cluster_bootstrap_proportion(
+                sub[profitable_col].values, sub['EVENT_ID'].values,
+                p0=p_cond, n_boot=1000, seed=42)
+            p_clust = np.nan
+            if boot is not None:
+                p_two = boot['p_value_vs_p0']
+                p_clust = p_two / 2 if pct > p_cond else 1.0 - p_two / 2
+
+            bh_pvals.append(binom_pcond)
+            decomp_rows.append({
+                'CONSTRUCT':       construct_label,
+                'CAR_WINDOW':      '[0,+1]' if construct_label == 'ANNOUNCE' else '[+2,+60]',
+                'CUT':             f'SELLS_{construct_label}',
+                'N_TRADES':        n,
+                'N_EVENTS_COND':   n_ev_cond,
+                'ACCURACY':        pct,
+                'COND_NULL':       p_cond,
+                'BINOM_P50':       binom_p50,
+                'METRIC_PVAL_COND': binom_pcond,
+                'P_CLUSTERED_EVENT': p_clust,
+                'CI_LO_95':        boot['ci_lo_95'] if boot else np.nan,
+                'CI_HI_95':        boot['ci_hi_95'] if boot else np.nan,
+                'DEGENERATE':      int(is_degenerate),
+                'INTERPRETATION': (
+                    f'Sell accuracy against {construct_label} window CAR. '
+                    f'COND_NULL = {p_cond:.4f} = fraction of events with '
+                    f'{car_col} < 0 (construct-specific, not pooled). '
+                    f'P_CLUSTERED_EVENT is one-tailed H1: accuracy > COND_NULL.'
+                ),
+            })
+            logger.info(
+                "  §14 SELLS_%s: accuracy=%.1f%%, cond_null=%.1f%%, "
+                "binom_p_cond=%.4f, cluster_p=%.4f",
+                construct_label, pct * 100, p_cond * 100, binom_pcond,
+                p_clust if not np.isnan(p_clust) else -1)
+
+        # BH across §14 family (on conditional p-values, guardrail #6)
+        if bh_pvals:
+            bh_sig = _benjamini_hochberg(np.array(bh_pvals), alpha=0.05)
+            for i, row in enumerate(decomp_rows):
+                row['BH_SIGNIFICANT'] = int(bh_sig[i]) if i < len(bh_sig) else 0
+
+        decomp_accuracy = pd.DataFrame(decomp_rows) if decomp_rows else pd.DataFrame()
+
+    # ── B: Post-event trading regression ────────────────────────────────
+    # One obs per event; primary spec: [0,+10] trade window → [+11,+60] outcome.
+    # Requires CAR_REMAINING, CAR_ANNOUNCE, POST_EARLY_NET_SELL_RATIO (NaN when
+    # POST_EARLY_N_TRANSACTIONS == 0 per guardrail #3).
+
+    reg_cols_needed = ['EVENT_ID', 'TICKER', 'EVENT_DATE', 'EVENT_CATEGORY',
+                       'REGULATORY_PERIOD', 'CAR_REMAINING', 'CAR_ANNOUNCE',
+                       'PRE_FULL_NET_SELL_RATIO']
+    post_early_cols = ['POST_EARLY_NET_SELL_RATIO', 'POST_EARLY_N_TRANSACTIONS']
+    rem5_col  = 'CAR_REM_5'
+    rem20_col = 'CAR_REM_20'
+
+    b_avail = all(c in panel.columns for c in reg_cols_needed)
+    post_early_avail = all(c in panel.columns for c in post_early_cols)
+
+    if not b_avail:
+        logger.warning("§14 Test B: Missing columns %s — skipping regression.",
+                       [c for c in reg_cols_needed if c not in panel.columns])
+        post_event_trading = pd.DataFrame()
+        post_event_reg     = pd.DataFrame()
+    else:
+        # Build event-level regression dataset
+        ev = panel[
+            [c for c in (reg_cols_needed + post_early_cols +
+                          [rem5_col, rem20_col]) if c in panel.columns]
+        ].drop_duplicates(subset=['EVENT_ID', 'TICKER', 'EVENT_DATE']).copy()
+
+        # Convert to numeric
+        for col in ['CAR_REMAINING', 'CAR_ANNOUNCE', 'PRE_FULL_NET_SELL_RATIO',
+                    rem5_col, rem20_col]:
+            if col in ev.columns:
+                ev[col] = pd.to_numeric(ev[col], errors='coerce')
+
+        # Guardrail #3: recode NET_SELL_RATIO as NaN when no trades in window
+        if post_early_avail:
+            ev['POST_EARLY_N_TRANSACTIONS'] = pd.to_numeric(
+                ev['POST_EARLY_N_TRANSACTIONS'], errors='coerce').fillna(0)
+            ev['POST_EARLY_NET_SELL_RATIO'] = pd.to_numeric(
+                ev['POST_EARLY_NET_SELL_RATIO'], errors='coerce')
+            # Zero-fill from _compute_window_metrics when no trades — fix to NaN
+            ev.loc[ev['POST_EARLY_N_TRANSACTIONS'] == 0, 'POST_EARLY_NET_SELL_RATIO'] = np.nan
+
+        # Restrict to FUNDAMENTAL events (only they have CAR_REMAINING)
+        ev_fund = ev[ev['EVENT_CATEGORY'] == 'FUNDAMENTAL'].copy() \
+            if 'EVENT_CATEGORY' in ev.columns else ev.copy()
+
+        # Descriptive means (2×2: negative vs positive × post-early trading vs not)
+        desc_rows = []
+        ev_fund['HAS_POST_EARLY'] = (
+            ev_fund.get('POST_EARLY_N_TRANSACTIONS', pd.Series(0)) > 0).astype(int) \
+            if post_early_avail else 0
+        ev_fund['NEGATIVE_CAR'] = (ev_fund['CAR_ANNOUNCE'] < 0).astype(float) \
+            if 'CAR_ANNOUNCE' in ev_fund.columns else np.nan
+
+        for has_pe in [0, 1]:
+            for neg_car in [0, 1]:
+                sub = ev_fund[
+                    (ev_fund.get('HAS_POST_EARLY', 0) == has_pe) &
+                    (ev_fund.get('NEGATIVE_CAR', np.nan) == neg_car) &
+                    ev_fund['CAR_REMAINING'].notna()
+                ]
+                desc_rows.append({
+                    'HAS_POST_EARLY_TRADING': has_pe,
+                    'NEGATIVE_ANNOUNCE_CAR':  neg_car,
+                    'N_EVENTS':               len(sub),
+                    'MEAN_POST_EARLY_NSI':    ev_fund.loc[
+                        sub.index, 'POST_EARLY_NET_SELL_RATIO'].mean()
+                        if post_early_avail else np.nan,
+                    'MEAN_CAR_REMAINING':     sub['CAR_REMAINING'].mean(),
+                    'MEDIAN_CAR_REMAINING':   sub['CAR_REMAINING'].median(),
+                })
+
+        post_event_trading = pd.DataFrame(desc_rows)
+
+        # ── Regression specs ──────────────────────────────────────────────
+        # Primary + 3 robustness + 2 complete-case vs imputed comparisons
+        # (guardrail #8: report every spec run, including nulls)
+        reg_rows = []
+
+        def _run_reg(spec_label, df_spec, outcome_col, trade_intensity_col,
+                     interpretation_suffix=''):
+            """OLS with event-clustered SE; returns coeff rows."""
+            df_r = df_spec.copy()
+            # Drop rows missing outcome or main predictor
+            df_r = df_r[df_r[outcome_col].notna() & df_r[trade_intensity_col].notna() &
+                        df_r['CAR_ANNOUNCE'].notna() & df_r['PRE_FULL_NET_SELL_RATIO'].notna()]
+            if len(df_r) < 20:
+                logger.warning("  §14 %s: insufficient obs (%d) — skipping",
+                               spec_label, len(df_r))
+                return
+            # Fixed effects via dummies (cast to float — pd.get_dummies returns bool in pandas ≥2)
+            cat_dummies = pd.get_dummies(df_r['EVENT_CATEGORY'], prefix='cat',
+                                          drop_first=True).astype(float) \
+                if 'EVENT_CATEGORY' in df_r.columns else pd.DataFrame(index=df_r.index)
+            per_dummies = pd.get_dummies(df_r['REGULATORY_PERIOD'], prefix='period',
+                                          drop_first=True).astype(float) \
+                if 'REGULATORY_PERIOD' in df_r.columns else pd.DataFrame(index=df_r.index)
+            X = pd.concat([
+                pd.Series(1.0, index=df_r.index, name='const'),
+                df_r[[trade_intensity_col, 'CAR_ANNOUNCE', 'PRE_FULL_NET_SELL_RATIO']]
+                  .rename(columns={trade_intensity_col: 'NET_SELL_INTENSITY'})
+                  .astype(float),
+                cat_dummies, per_dummies,
+            ], axis=1)
+            y = df_r[outcome_col].astype(float)
+            mask = y.notna() & X.notna().all(axis=1)
+            n_fit = mask.sum()
+            if n_fit < 20:
+                return
+            try:
+                model = sm.OLS(y[mask], X[mask]).fit(
+                    cov_type='cluster',
+                    cov_kwds={'groups': df_r.loc[mask, 'EVENT_ID']})
+                ci = model.conf_int()
+                for var in model.params.index:
+                    is_primary = (var == 'NET_SELL_INTENSITY')
+                    reg_rows.append({
+                        'SPEC':      spec_label,
+                        'VARIABLE':  var,
+                        'COEF':      model.params[var],
+                        'SE':        model.bse[var],
+                        'T_STAT':    model.tvalues[var],
+                        'P_VALUE':   model.pvalues[var],
+                        'CI_025':    ci.loc[var, 0],
+                        'CI_975':    ci.loc[var, 1],
+                        'N':         int(n_fit),
+                        'R_SQUARED': model.rsquared,
+                        'INTERPRETATION': (
+                            f'PRIMARY TEST B: H1 β<0 — net selling in '
+                            f'{trade_intensity_col} window predicts '
+                            f'{outcome_col} decline beyond visible price move '
+                            f'(CAR_ANNOUNCE control). SE clustered by EVENT_ID. '
+                            + interpretation_suffix
+                        ) if is_primary else '',
+                    })
+                logger.info(
+                    "  §14 %s: N=%d, β(NSI)=%.4f (p=%.4f), R²=%.3f",
+                    spec_label, n_fit,
+                    model.params.get('NET_SELL_INTENSITY', np.nan),
+                    model.pvalues.get('NET_SELL_INTENSITY', np.nan),
+                    model.rsquared)
+            except Exception as e:
+                logger.warning("  §14 %s regression failed: %s", spec_label, e)
+
+        # Primary spec: [0,+10] → [+11,+60], complete-case (NaN=no trades excluded)
+        if post_early_avail and 'CAR_REMAINING' in ev_fund.columns:
+            _run_reg(
+                'PRIMARY_[0+10]->[+11+60]_COMPLETE_CASE',
+                ev_fund, 'CAR_REMAINING', 'POST_EARLY_NET_SELL_RATIO',
+                'Complete-case: events with zero post-early trades excluded (NaN NSI).')
+
+            # Same spec with zero-imputed NSI (guardrail #3: report both)
+            ev_imp = ev_fund.copy()
+            ev_imp['POST_EARLY_NSI_IMPUTED'] = ev_imp['POST_EARLY_NET_SELL_RATIO'].fillna(0)
+            _run_reg(
+                'ROBUSTNESS_[0+10]->[+11+60]_ZERO_IMPUTED',
+                ev_imp, 'CAR_REMAINING', 'POST_EARLY_NSI_IMPUTED',
+                'Robustness: zero NSI imputed for events with no post-early trades.')
+
+        # Robustness: [0,+5] → [+6,+60]
+        if post_early_avail and rem5_col in ev_fund.columns:
+            ev5 = ev_fund.copy()
+            # Use trades in [0,+5]; we only have the [0,+10] ratio in the panel,
+            # so compute [0,+5] NSI on the fly from valid_pol if available.
+            if valid_pol is not None and not valid_pol.empty:
+                ve = valid_pol.copy()
+                ve['DAYS_AFTER'] = (
+                    pd.to_datetime(ve.get('TRADE_DATE')) -
+                    pd.to_datetime(ve.get('EVENT_DATE_PANEL',
+                                          ve.get('EVENT_DATE')))
+                ).dt.days
+                ve5 = ve[(ve['DAYS_AFTER'] >= 0) & (ve['DAYS_AFTER'] <= 5)].copy()
+                if len(ve5) > 0:
+                    ve5['_sell_val'] = np.where(ve5['TRADE_TYPE'] == 'sell',
+                                                 ve5['TRADE_VALUE'], 0)
+                    ve5['_buy_val']  = np.where(ve5['TRADE_TYPE'] == 'buy',
+                                                 ve5['TRADE_VALUE'], 0)
+                    agg5 = ve5.groupby(['EVENT_ID', 'TICKER', 'EVENT_DATE']).agg(
+                        _sv=('_sell_val', 'sum'), _bv=('_buy_val', 'sum'),
+                        _n=('TRADE_VALUE', 'count')).reset_index()
+                    agg5['NSI_5'] = np.where(
+                        (agg5['_sv'] + agg5['_bv']) > 0,
+                        (agg5['_sv'] - agg5['_bv']) / (agg5['_sv'] + agg5['_bv']),
+                        np.nan)
+                    ev5 = ev5.merge(
+                        agg5[['EVENT_ID', 'TICKER', 'EVENT_DATE', 'NSI_5']],
+                        on=['EVENT_ID', 'TICKER', 'EVENT_DATE'], how='left')
+                    _run_reg('ROBUSTNESS_[0+5]->[+6+60]', ev5, rem5_col, 'NSI_5',
+                             'Trade window [0,+5] with outcome [+6,+60].')
+
+        # Robustness: [0,+20] → [+21,+60]
+        if post_early_avail and rem20_col in ev_fund.columns:
+            if valid_pol is not None and not valid_pol.empty:
+                ve20 = ve[(ve['DAYS_AFTER'] >= 0) & (ve['DAYS_AFTER'] <= 20)].copy() \
+                    if 've' in dir() else pd.DataFrame()
+                if len(ve20) > 0:
+                    ve20['_sell_val'] = np.where(ve20['TRADE_TYPE'] == 'sell',
+                                                  ve20['TRADE_VALUE'], 0)
+                    ve20['_buy_val']  = np.where(ve20['TRADE_TYPE'] == 'buy',
+                                                  ve20['TRADE_VALUE'], 0)
+                    agg20 = ve20.groupby(['EVENT_ID', 'TICKER', 'EVENT_DATE']).agg(
+                        _sv=('_sell_val', 'sum'), _bv=('_buy_val', 'sum')).reset_index()
+                    agg20['NSI_20'] = np.where(
+                        (agg20['_sv'] + agg20['_bv']) > 0,
+                        (agg20['_sv'] - agg20['_bv']) / (agg20['_sv'] + agg20['_bv']),
+                        np.nan)
+                    ev20 = ev_fund.merge(
+                        agg20[['EVENT_ID', 'TICKER', 'EVENT_DATE', 'NSI_20']],
+                        on=['EVENT_ID', 'TICKER', 'EVENT_DATE'], how='left')
+                    _run_reg('ROBUSTNESS_[0+20]->[+21+60]', ev20, rem20_col, 'NSI_20',
+                             'Trade window [0,+20] with outcome [+21,+60].')
+
+        # Robustness: exclude events where |CAR_ANNOUNCE| > 10%
+        if post_early_avail and 'CAR_REMAINING' in ev_fund.columns:
+            ev_noext = ev_fund[ev_fund['CAR_ANNOUNCE'].abs() <= 0.10].copy()
+            ev_noext['POST_EARLY_NSI_IMPUTED'] = ev_noext['POST_EARLY_NET_SELL_RATIO'].fillna(0)
+            _run_reg('ROBUSTNESS_EXCL_BIG_ANNOUNCE', ev_noext, 'CAR_REMAINING',
+                     'POST_EARLY_NET_SELL_RATIO',
+                     'Excludes events with |CAR_ANNOUNCE| > 10% to reduce '
+                     'stop-loss mechanical selling.')
+
+        # Robustness: discretionary transaction codes only (P and S)
+        if (valid_pol is not None and not valid_pol.empty and
+                post_early_avail and 'CAR_REMAINING' in ev_fund.columns):
+            disc_codes = {'P', 'S'}
+            if 'TRANSACTION_CODE' in valid_pol.columns:
+                ve_disc = valid_pol[
+                    valid_pol['TRANSACTION_CODE'].isin(disc_codes)
+                ].copy()
+                if len(ve_disc) > 10:
+                    ve_disc['DAYS_AFTER'] = (
+                        pd.to_datetime(ve_disc.get('TRADE_DATE')) -
+                        pd.to_datetime(ve_disc.get('EVENT_DATE_PANEL',
+                                                    ve_disc.get('EVENT_DATE')))
+                    ).dt.days
+                    ve_disc_pe = ve_disc[
+                        (ve_disc['DAYS_AFTER'] >= 0) & (ve_disc['DAYS_AFTER'] <= 10)
+                    ].copy()
+                    if len(ve_disc_pe) > 0:
+                        ve_disc_pe['_sv'] = np.where(
+                            ve_disc_pe['TRADE_TYPE'] == 'sell', ve_disc_pe['TRADE_VALUE'], 0)
+                        ve_disc_pe['_bv'] = np.where(
+                            ve_disc_pe['TRADE_TYPE'] == 'buy', ve_disc_pe['TRADE_VALUE'], 0)
+                        agg_d = ve_disc_pe.groupby(
+                            ['EVENT_ID', 'TICKER', 'EVENT_DATE']).agg(
+                            _sv=('_sv', 'sum'), _bv=('_bv', 'sum')).reset_index()
+                        agg_d['NSI_DISC'] = np.where(
+                            (agg_d['_sv'] + agg_d['_bv']) > 0,
+                            (agg_d['_sv'] - agg_d['_bv']) / (agg_d['_sv'] + agg_d['_bv']),
+                            np.nan)
+                        ev_disc = ev_fund.merge(
+                            agg_d[['EVENT_ID', 'TICKER', 'EVENT_DATE', 'NSI_DISC']],
+                            on=['EVENT_ID', 'TICKER', 'EVENT_DATE'], how='left')
+                        _run_reg('ROBUSTNESS_DISCRETIONARY_PS_ONLY', ev_disc,
+                                 'CAR_REMAINING', 'NSI_DISC',
+                                 'Discretionary codes P/S only (excl F/M/A/D).')
+
+        post_event_reg = pd.DataFrame(reg_rows) if reg_rows else pd.DataFrame()
+
+    logger.info("§14 complete: car_decomp=%d events, decomp_accuracy=%d rows, "
+                "post_event_reg=%d rows",
+                len(car_decomp) if not car_decomp.empty else 0,
+                len(decomp_accuracy) if not decomp_accuracy.empty else 0,
+                len(post_event_reg) if not post_event_reg.empty else 0)
+
+    return car_decomp, decomp_accuracy, post_event_trading, post_event_reg
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -4775,6 +5405,10 @@ def save_essay3_results(store, results_dict):
         'within_insider': 'ESSAY3_WITHIN_INSIDER',
         'conn_timing': 'ESSAY3_CONN_TIMING',
         'conn_timing_reg': 'ESSAY3_CONN_TIMING_REG',
+        'car_decomp':          'ESSAY3_CAR_DECOMP',
+        'decomp_accuracy':     'ESSAY3_DECOMP_ACCURACY',
+        'post_event_trading':  'ESSAY3_POST_EVENT_TRADING',
+        'post_event_reg':      'ESSAY3_POST_EVENT_REG',
     }
     current_tables = set(table_map.values())
 
@@ -4990,6 +5624,12 @@ def run_essay3(store=None):
     logger.info("§13d Political connection × window timing interaction...")
     conn_timing, conn_timing_reg = compute_connection_timing(valid_pol, panel)
 
+    # ── §14 Delayed-reaction tests ─────────────────────────────────
+    logger.info("§14 Delayed-reaction tests (CAR decomposition + post-event trading)...")
+    car_decomp, decomp_accuracy, post_event_trading, post_event_reg = (
+        compute_delayed_reaction_tests(panel, crsp_profits, valid_pol)
+    )
+
     # ── Carried-forward robustness ──────────────────────────────────
     logger.info("Carried-forward robustness (TOST, placebo, bootstrap CI)...")
     tost = compute_tost_equivalence(panel)
@@ -5034,6 +5674,10 @@ def run_essay3(store=None):
         'within_insider': within_insider,
         'conn_timing': conn_timing,
         'conn_timing_reg': conn_timing_reg,
+        'car_decomp':         car_decomp,
+        'decomp_accuracy':    decomp_accuracy,
+        'post_event_trading': post_event_trading,
+        'post_event_reg':     post_event_reg,
     }
 
     logger.info("Saving results...")
@@ -5204,25 +5848,54 @@ def _print_summary(panel, results):
         logger.info("  ── DOLLAR MAGNITUDES ──")
         for _, row in id_.iterrows():
             if row['CUT'].startswith('SELLS_') and 'CAR' not in row['CUT']:
-                logger.info("    %s: N=%d, mean_profit=$%.0f, total=$%.0fM",
+                logger.info("    %s: N=%d, mean_implied_profit=$%.0f, total=$%.0fM",
                             row['CUT'], row['N_SELLS'],
-                            row['MEAN_PROFIT'],
-                            row['TOTAL_PROFIT'] / 1e6)
+                            row['MEAN_IMPLIED_PROFIT'],
+                            row['TOTAL_IMPLIED_PROFIT'] / 1e6)
         # Severity cuts (sells near large-CAR events)
         for _, row in id_.iterrows():
             if 'CAR<=' in row['CUT'] and '0-30d' in row['CUT']:
-                logger.info("    %s: N=%d, mean_CAR=%.1f%%, mean_profit=$%.0f, "
+                logger.info("    %s: N=%d, mean_CAR=%.1f%%, mean_implied_profit=$%.0f, "
                             "total=$%.0fM",
                             row['CUT'], row['N_SELLS'],
                             row['MEAN_EVENT_CAR'] * 100,
-                            row['MEAN_PROFIT'],
-                            row['TOTAL_PROFIT'] / 1e6)
+                            row['MEAN_IMPLIED_PROFIT'],
+                            row['TOTAL_IMPLIED_PROFIT'] / 1e6)
         # Totals
         for _, row in id_.iterrows():
             if row['CUT'] in ('ALL_SELLS_TOTAL', 'CORRECT_SELLS_TOTAL'):
                 logger.info("    %s: N=%d, total=$%.0fM",
                             row['CUT'], row['N_SELLS'],
-                            row['TOTAL_PROFIT'] / 1e6)
+                            row['TOTAL_IMPLIED_PROFIT'] / 1e6)
+
+    # ── §14 Delayed-reaction tests ──────────────────────────────────
+    da = results.get('decomp_accuracy')
+    if da is not None and not da.empty:
+        logger.info("  ── §14 DELAYED-REACTION ACCURACY ──")
+        for _, row in da.iterrows():
+            bh_sig = row.get('BH_SIGNIFICANT', np.nan)
+            logger.info(
+                "    [%s] %s: %.1f%% accurate (base=%.1f%%, "
+                "binom_p_cond=%.4f, cluster_p=%.4f, BH_sig=%s, N_trades=%d)",
+                row.get('CAR_WINDOW', '?'), row.get('CONSTRUCT', '?'),
+                row.get('ACCURACY', np.nan) * 100,
+                row.get('COND_NULL', np.nan) * 100,
+                row.get('METRIC_PVAL_COND', np.nan),
+                row.get('P_CLUSTERED_EVENT', np.nan),
+                int(bh_sig) if not (isinstance(bh_sig, float) and np.isnan(bh_sig)) else '?',
+                row.get('N_TRADES', 0),
+            )
+
+    pr = results.get('post_event_reg')
+    if pr is not None and not pr.empty:
+        logger.info("  ── §14 POST-EVENT TRADING REGRESSION ──")
+        primary = pr[pr['SPEC'] == 'PRIMARY_[0+10]->[+11+60]_COMPLETE_CASE']
+        for _, row in primary.iterrows():
+            if row['VARIABLE'] == 'NET_SELL_INTENSITY':
+                logger.info(
+                    "    PRIMARY β(NSI[0+10]→[+11+60]): %.4f (t=%.2f, p=%.4f, N=%d)",
+                    row['COEF'], row['T_STAT'], row['P_VALUE'], row['N'],
+                )
 
     # ── CG SIZE-ACCURACY ATTENUATION (supporting) ─────────────────────
     sa = results.get('size_accuracy')
