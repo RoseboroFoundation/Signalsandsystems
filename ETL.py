@@ -35,6 +35,8 @@ from clean import (
     Form4Downloader,
     SECFilingDownloader,
     PartyPlatformDownloader,
+    load_political_events,
+    load_political_exposure,
     load_inflation_data,
     load_inflation_expectations_data,
     load_comprehensive_inflation_data,
@@ -133,12 +135,31 @@ def _load_party_platforms(**_kw):
     return PartyPlatformDownloader().download_all_platforms(save_csv=True)
 
 
+def _load_political_events(start_date=START_DATE, end_date=END_DATE, **_kw):
+    """Load political fundamental events (congressional votes, EOs, court decisions)."""
+    return load_political_events(
+        start_date=start_date, end_date=end_date,
+        cache_dir='./data/political_events',
+    )
+
+
+def _load_political_exposure(data_dict, start_date=START_DATE, end_date=END_DATE, **_kw):
+    """Load political exposure data (lobbying, PAC contributions)."""
+    cw = data_dict.get('culturewardata')
+    tickers = load_culture_war_companies(cw) if cw is not None else None
+    return load_political_exposure(
+        tickers=tickers, start_date=start_date, end_date=end_date,
+        cache_dir='./data/political_exposure',
+    )
+
+
 # Loaders that receive data_dict as first arg (dependency-injected)
 _DATA_DICT_LOADERS = {_load_stockdata, _load_controlcompanies,
-                      _load_form4, _load_sec_fundamentals}
+                      _load_form4, _load_sec_fundamentals,
+                      _load_political_exposure}
 
 # Loaders that take only kwargs (no data_dict, no positional args)
-_KWARGS_ONLY_LOADERS = {_load_party_platforms}
+_KWARGS_ONLY_LOADERS = {_load_party_platforms, _load_political_events}
 
 
 DATA_DICTIONARY = {
@@ -240,6 +261,22 @@ DATA_DICTIONARY = {
         'category': 'political',
         'description': 'Republican & Democratic party platforms (2000-2024)',
         'depends_on': [],
+    },
+    'political_events': {
+        'loader': _load_political_events,
+        'args': (),
+        'kwargs': {'start_date': START_DATE, 'end_date': END_DATE},
+        'category': 'political',
+        'description': 'Political fundamental events (congressional votes, executive orders, court decisions)',
+        'depends_on': [],
+    },
+    'political_exposure': {
+        'loader': _load_political_exposure,
+        'args': (),
+        'kwargs': {'start_date': START_DATE, 'end_date': END_DATE},
+        'category': 'political',
+        'description': 'Firm-level political exposure (lobbying, PAC contributions)',
+        'depends_on': ['culturewardata'],
     },
 
     # --- Inflation ---
@@ -453,7 +490,7 @@ DATA_DICTIONARY = {
 CATEGORIES = {
     'market': 'Market Data (stocks, VIX, Fama-French, industry portfolios, news)',
     'sec': 'SEC Filings (Form 4 insider trading, 10-K/10-Q fundamentals)',
-    'political': 'Political (party platforms 2000-2024)',
+    'political': 'Political (party platforms, events, lobbying exposure)',
     'inflation': 'Inflation (CPI, PCE, PPI, expectations, components)',
     'rates': 'Interest Rates (Treasury curve, policy rates, credit spreads)',
     'production': 'Industrial Production (IP indices, capacity utilization)',

@@ -118,7 +118,6 @@ class Form4Downloader:
         cik: str,
         start_date: str = '2000-01-01',
         end_date: str = '2025-12-31',
-        max_filings: int = 500
     ) -> List[Dict]:
         """
         Download all Form 4 filings for a company within date range.
@@ -135,8 +134,6 @@ class Form4Downloader:
             Start date (YYYY-MM-DD)
         end_date : str
             End date (YYYY-MM-DD)
-        max_filings : int
-            Maximum number of filings to retrieve
 
         Returns:
         --------
@@ -197,15 +194,9 @@ class Form4Downloader:
                         }
                         filings.append(filing_info)
 
-                        if len(filings) >= max_filings:
-                            break
-
             # Also check older filings if available
             older_files = data.get('filings', {}).get('files', [])
-            for file_info in older_files[:3]:  # Check up to 3 older filing batches
-                if len(filings) >= max_filings:
-                    break
-
+            for file_info in older_files:
                 file_url = f"https://data.sec.gov/submissions/{file_info.get('name', '')}"
                 try:
                     file_response = requests.get(file_url, headers=self._get_headers(file_url))
@@ -243,9 +234,6 @@ class Form4Downloader:
                                         'form_type': form
                                     }
                                     filings.append(filing_info)
-
-                                    if len(filings) >= max_filings:
-                                        break
                 except Exception as e:
                     logger.warning("Failed to fetch older filing batch: %s", e)
                     continue
@@ -352,6 +340,20 @@ class Form4Downloader:
                 acq_disp_tag = trans.find('transactionAcquiredDisposedCode')
                 shares_owned_tag = trans.find('sharesOwnedFollowingTransaction')
 
+                # 10b5-1 plan flag: SEC Amendment (effective Feb 27, 2023) added
+                # <transactionPlanAdoption> inside each transaction element.
+                # If present, the trade was made pursuant to a Rule 10b5-1(c) plan.
+                # Returns None (not False) for pre-2023 filings where the field
+                # didn't exist in the schema — None = unknown, False = confirmed no plan.
+                plan_tag = trans.find('transactionPlanAdoption')
+                if plan_tag is not None:
+                    plan_val = plan_tag.find('value')
+                    plan_date = plan_val.text.strip() if plan_val and plan_val.text else None
+                    is_10b5_1_plan = True if plan_date else False
+                else:
+                    plan_date = None
+                    is_10b5_1_plan = None   # unknown (pre-2023 schema)
+
                 transaction = {
                     'owner_name': owner_name,
                     'transaction_date': (
@@ -381,7 +383,9 @@ class Form4Downloader:
                         float(shares_owned_tag.find('value').text)
                         if shares_owned_tag and shares_owned_tag.find('value')
                         else None
-                    )
+                    ),
+                    'is_10b5_1_plan': is_10b5_1_plan,
+                    'plan_adoption_date': plan_date,
                 }
                 transactions.append(transaction)
             except Exception as e:
@@ -415,17 +419,31 @@ class Form4Downloader:
         --------
         pd.DataFrame : Complete Form 4 transaction dataset
         """
-        all_transactions = []
+        all_dfs = []
 
         for ticker in culture_war_companies:
+            # Check for cached per-ticker CSV
+            ticker_file = os.path.join(self.output_dir, f'form4_{ticker}.csv')
+            if os.path.exists(ticker_file):
+                cached = pd.read_csv(ticker_file)
+                if len(cached) > 0:
+                    logger.info("Using cached %d transactions for %s", len(cached), ticker)
+                    all_dfs.append(cached)
+                else:
+                    logger.info("Skipping %s (cached, no data)", ticker)
+                continue
+
             logger.info("Processing %s...", ticker)
 
             cik = self.get_company_cik(ticker)
             if not cik:
+                # Write empty file so we don't retry
+                pd.DataFrame().to_csv(ticker_file, index=False)
                 continue
 
             filings = self.download_form4_filings(ticker, cik, start_date, end_date)
 
+            ticker_transactions = []
             for filing in filings:
                 transactions = self.parse_form4_xml(filing['filing_url'])
 
@@ -436,14 +454,23 @@ class Form4Downloader:
                     trans['accession_number'] = filing['accession_number']
                     trans['filing_url'] = filing['filing_url']
 
-                all_transactions.extend(transactions)
+                ticker_transactions.extend(transactions)
                 time.sleep(0.15)
 
-        df = pd.DataFrame(all_transactions)
+            # Save per-ticker CSV immediately
+            ticker_df = pd.DataFrame(ticker_transactions)
+            ticker_df.to_csv(ticker_file, index=False)
+            logger.info("Cached %d transactions for %s", len(ticker_df), ticker)
+
+            if len(ticker_df) > 0:
+                all_dfs.append(ticker_df)
+
+        df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
         if len(df) > 0:
-            df['transaction_date'] = pd.to_datetime(df['transaction_date'])
-            df['filing_date'] = pd.to_datetime(df['filing_date'])
+            df['transaction_date'] = pd.to_datetime(df['transaction_date'], errors='coerce')
+            df['filing_date'] = pd.to_datetime(df['filing_date'], errors='coerce')
+            df = df.dropna(subset=['transaction_date'])
             df['transaction_value'] = df['shares'] * df['price_per_share']
             df = df.sort_values('transaction_date')
 

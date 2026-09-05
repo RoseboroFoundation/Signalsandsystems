@@ -1550,6 +1550,81 @@ def classify_alignment(
         return 'Mixed'
 
 
+def threshold_sensitivity_table(
+    company_scores: pd.DataFrame,
+    thresholds: list = None,
+) -> pd.DataFrame:
+    """
+    Build a threshold-sensitivity table for political-alignment classification.
+
+    For each symmetric threshold tau in *thresholds*, classifies firms as
+    Conservative (ALIGNMENT_SCORE > tau), Liberal (< -tau), or Mixed, and
+    reports group counts, mean scores, and Cohen's d between the
+    Conservative and Liberal groups as a separation metric.
+
+    Parameters
+    ----------
+    company_scores : pd.DataFrame
+        Must contain ALIGNMENT_SCORE (continuous).
+    thresholds : list of float, optional
+        Symmetric threshold grid.  Default [0.05, 0.10, 0.15, 0.20, 0.25].
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per threshold with columns:
+        TAU, N_CONSERVATIVE, N_LIBERAL, N_MIXED, PCT_CONSERVATIVE,
+        PCT_LIBERAL, PCT_MIXED, MEAN_SCORE_C, MEAN_SCORE_L, MEAN_SCORE_M,
+        COHENS_D.
+    """
+    if thresholds is None:
+        thresholds = [0.05, 0.10, 0.15, 0.20, 0.25]
+
+    scores = company_scores['ALIGNMENT_SCORE']
+    n_total = len(scores)
+
+    rows = []
+    for tau in thresholds:
+        classified = company_scores['ALIGNMENT_SCORE'].apply(
+            lambda s, _t=tau: classify_alignment(s, _t, -_t))
+
+        n_c = (classified == 'Conservative').sum()
+        n_l = (classified == 'Liberal').sum()
+        n_m = (classified == 'Mixed').sum()
+
+        mask_c = classified == 'Conservative'
+        mask_l = classified == 'Liberal'
+        mask_m = classified == 'Mixed'
+
+        # Cohen's d: separation between Conservative and Liberal groups
+        s_c = scores[mask_c]
+        s_l = scores[mask_l]
+        if len(s_c) >= 2 and len(s_l) >= 2:
+            pooled_std = np.sqrt(
+                ((len(s_c) - 1) * s_c.std()**2 + (len(s_l) - 1) * s_l.std()**2)
+                / (len(s_c) + len(s_l) - 2)
+            )
+            cohens_d = (s_c.mean() - s_l.mean()) / pooled_std if pooled_std > 0 else np.nan
+        else:
+            cohens_d = np.nan
+
+        rows.append({
+            'TAU': tau,
+            'N_CONSERVATIVE': n_c,
+            'N_LIBERAL': n_l,
+            'N_MIXED': n_m,
+            'PCT_CONSERVATIVE': 100 * n_c / n_total if n_total else np.nan,
+            'PCT_LIBERAL': 100 * n_l / n_total if n_total else np.nan,
+            'PCT_MIXED': 100 * n_m / n_total if n_total else np.nan,
+            'MEAN_SCORE_C': scores[mask_c].mean() if mask_c.any() else np.nan,
+            'MEAN_SCORE_L': scores[mask_l].mean() if mask_l.any() else np.nan,
+            'MEAN_SCORE_M': scores[mask_m].mean() if mask_m.any() else np.nan,
+            'COHENS_D': cohens_d,
+        })
+
+    return pd.DataFrame(rows)
+
+
 # ── Composite Alignment ──────────────────────────────────────────────
 
 def compute_political_alignment(
@@ -2346,17 +2421,30 @@ if __name__ == '__main__':
 
         # Threshold sensitivity analysis
         if 'ALIGNMENT_SCORE' in cs.columns:
-            print(f"\n  --- Threshold Sensitivity ---")
-            for t in [0.05, 0.10, 0.15, 0.20, 0.25]:
-                n_c = (cs['ALIGNMENT_SCORE'] > t).sum()
-                n_l = (cs['ALIGNMENT_SCORE'] < -t).sum()
-                n_m = len(cs) - n_c - n_l
-                print(f"    ±{t:.2f}: C={n_c:>3}, L={n_l:>3}, M={n_m:>3}")
+            sens_df = threshold_sensitivity_table(cs)
+
+            print(f"\n  --- Threshold Sensitivity (Table) ---")
+            header = (f"  {'tau':>5}  {'N_C':>4}  {'N_L':>4}  {'N_M':>4}  "
+                      f"{'%C':>5}  {'%L':>5}  {'%M':>5}  "
+                      f"{'MeanC':>7}  {'MeanL':>7}  {'MeanM':>7}  "
+                      f"{'d':>5}")
+            print(header)
+            print("  " + "-" * (len(header) - 2))
+            for _, r in sens_df.iterrows():
+                print(f"  {r['TAU']:>5.2f}  {int(r['N_CONSERVATIVE']):>4}  "
+                      f"{int(r['N_LIBERAL']):>4}  {int(r['N_MIXED']):>4}  "
+                      f"{r['PCT_CONSERVATIVE']:>5.1f}  {r['PCT_LIBERAL']:>5.1f}  "
+                      f"{r['PCT_MIXED']:>5.1f}  "
+                      f"{r['MEAN_SCORE_C']:>+7.3f}  {r['MEAN_SCORE_L']:>+7.3f}  "
+                      f"{r['MEAN_SCORE_M']:>+7.3f}  "
+                      f"{r['COHENS_D']:>5.2f}")
+
+            # Save sensitivity table
+            saved_sens = store.write_table(
+                sens_df, 'ESSAY2_THRESHOLD_SENSITIVITY', replace=True)
+            print(f"\n  Saved ESSAY2_THRESHOLD_SENSITIVITY: {saved_sens}")
 
             # Skew detection: suggest asymmetric thresholds if needed.
-            # NOTE: The confusion matrix and agreement rate above were computed
-            # with the thresholds passed to this run.  If the distribution is
-            # skewed, rerun with the suggested asymmetric thresholds.
             median_score = cs['ALIGNMENT_SCORE'].median()
             logger.info("Alignment distribution median: %+.4f (n=%d)",
                         median_score, len(cs))
@@ -2371,9 +2459,9 @@ if __name__ == '__main__':
                     cs['ALIGNMENT_SCORE'].quantile(0.05),
                     cs['ALIGNMENT_SCORE'].quantile(0.95),
                     suggested_c, suggested_l)
-                print(f"\n  ⚠ Distribution skewed (median={median_score:+.4f}). "
+                print(f"\n  Distribution skewed (median={median_score:+.4f}). "
                       f"Confusion matrix above used symmetric thresholds "
-                      f"(±{args.conservative_threshold}).")
+                      f"(+/-{args.conservative_threshold}).")
                 print(f"  Re-run with: --conservative-threshold {suggested_c:+.3f} "
                       f"--liberal-threshold {suggested_l:+.3f}")
 

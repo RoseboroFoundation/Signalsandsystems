@@ -436,40 +436,26 @@ E2_CHARTS = [
     ('e2_33_summary_dashboard', 'Essay 2 summary dashboard'),
 ]
 E3_CHARTS = [
-    ('e3_01_window_net_dollar', 'Net dollar sold by window'),
-    ('e3_02_window_sell_ratio', 'Net sell ratio by window'),
-    ('e3_03_window_transactions', 'Transaction volume by window'),
-    ('e3_04_window_opportunistic', 'Opportunistic trades by window'),
-    ('e3_05_abnormal_selling', 'Abnormal selling pre vs benchmark'),
-    ('e3_06_abnormal_diff', 'Abnormal selling effect size'),
-    ('e3_07_treat_vs_ctrl', 'Treatment vs control histogram'),
-    ('e3_08_treat_ctrl_box', 'Treatment vs control box plot'),
-    ('e3_09_leaning_net_dollar', 'Net dollar sold by leaning'),
-    ('e3_10_leaning_median', 'Median selling by leaning'),
-    ('e3_11_leaning_variability', 'Selling variability by leaning'),
-    ('e3_12_regime_net_sell', 'Net sell daily by regime'),
-    ('e3_13_regime_significance', 'Regime significance heatmap'),
-    ('e3_14_regime_sample_size', 'Sample size by regime'),
-    ('e3_15_rvo_comparison', 'Routine vs opportunistic paired'),
-    ('e3_16_rvo_effect_size', 'RVO effect size'),
-    ('e3_17_placebo_dist', 'Placebo distribution'),
-    ('e3_18_placebo_percentile', 'Placebo percentile gauge'),
-    ('e3_19_accel_jt_stats', 'Acceleration JT statistics'),
-    ('e3_20_accel_monotonic', 'Acceleration monotonic check'),
-    ('e3_21_accel_window_gradient', 'Acceleration window gradient'),
-    ('e3_22_panel_distribution', 'Insider selling distribution'),
-    ('e3_23_panel_abnormal_flag', 'Abnormal selling classification'),
-    ('e3_24_panel_coverage', 'Data sufficiency coverage'),
-    ('e3_25_car_vs_selling', 'CAR vs insider selling scatter'),
-    ('e3_26_panel_lean_box', 'Selling by leaning box plot'),
-    ('e3_27_panel_windows', 'Pre-event sub-window comparison'),
-    ('e3_28_panel_opp_routine', 'Opportunistic vs routine stacked'),
-    ('e3_29_panel_insiders', 'Unique insiders by window'),
-    ('e3_30_abnormal_pvalues', 'Abnormal t vs Wilcoxon p-values'),
-    ('e3_31_sell_ratio_by_treatment', 'Sell ratio by treatment'),
-    ('e3_32_regime_t_stats', 'Regime t-statistics'),
-    ('e3_33_post_event_selling', 'Post-event selling distribution'),
-    ('e3_34_summary_dashboard', 'Essay 3 summary dashboard'),
+    ('e3_01_directional_accuracy', 'Directional accuracy by sample'),
+    ('e3_02_sells_premium', 'Sells premium: political − control'),
+    ('e3_03_proximity_accuracy', 'Accuracy by proximity to event'),
+    ('e3_04_regulatory_period', 'Accuracy by regulatory period'),
+    ('e3_05_dollar_magnitudes', 'Dollar magnitudes by proximity and severity'),
+    ('e3_06_size_accuracy', 'Trade-size decile accuracy'),
+    ('e3_07_size_accuracy_slopes', 'LPM accuracy slopes by sample'),
+    ('e3_08_reversal_regression', 'Reversal regression coefficients'),
+    ('e3_09_crsp_summary', 'CRSP abnormal returns by cut'),
+    ('e3_10_wilcoxon_family', 'Wilcoxon family correction'),
+    ('e3_11_insider_concentration', 'Insider concentration metrics'),
+    ('e3_12_tost_equivalence', 'TOST equivalence tests'),
+    ('e3_13_placebo_test', 'Placebo permutation test'),
+    ('e3_14_mean_vs_distributional', 'Mean vs distributional tests'),
+    ('e3_15_concentration_cuts', 'Concentration by cut'),
+    ('e3_16_repeat_traders', 'Repeat trader accuracy'),
+    ('e3_17_quantile_regression', 'Quantile regression'),
+    ('e3_18_bootstrap_ci', 'Bootstrap confidence intervals'),
+    ('e3_19_stratification', 'Year × activity stratification'),
+    ('e3_20_summary_dashboard', 'Essay 3 summary dashboard'),
 ]
 
 
@@ -737,7 +723,7 @@ with st.sidebar:
             ("Essay 1: Matched Controls", [sys.executable, "-m", "model.essay1_matched"]),
             ("Essay 2: NLP & Alignment", [sys.executable, "-m", "model.essay2"]),
             ("Essay 2: DiD Analysis", [sys.executable, "-m", "model.essay2_did"]),
-            ("Essay 3: Insider Trading", [sys.executable, "-m", "model.essay3"]),
+            ("Essay 3: Informed Insider Trading", [sys.executable, "-m", "model.essay3"]),
             ("Generating charts", [sys.executable, "visual.py"]),
         ]
         with st.status("Running pipeline (ETL → charts)...", expanded=True) as _status:
@@ -833,9 +819,9 @@ with tab_overview:
         "five-factor model. **Essay 2**, *\"Culture Wars and Capital Markets: The Political "
         "Economy of Abnormal Returns,\"* investigates the impact of culture war events on "
         "stock returns using event study methodology and difference-in-differences analysis. "
-        "**Essay 3**, *\"Insider Trading and Political Controversies: Evidence from Culture "
-        "War Events,\"* explores whether corporate insiders trade on advance knowledge of "
-        "upcoming political controversies."
+        "**Essay 3**, *\"Informed Insider Trading Around Political Decisions: Foreknowledge, "
+        "Profits, and the Limits of Regulatory Architecture,\"* tests whether insiders trade "
+        "on advance knowledge of political decisions that move firm equity values."
     )
     st.markdown(
         "The study utilizes a comprehensive dataset of 160 culture war events spanning "
@@ -898,8 +884,8 @@ with tab_overview:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:10rem;'>"
             f"<strong style='color:{GOLD};'>Essay 3</strong><br>"
-            f"Do corporate <strong>insiders trade</strong> on advance knowledge of "
-            f"upcoming political controversies?</div>",
+            f"Do insiders trade on <strong>advance knowledge</strong> of political "
+            f"decisions that move firm equity values?</div>",
             unsafe_allow_html=True,
         )
 
@@ -963,10 +949,11 @@ with tab_overview:
     st.markdown(
         "The insider trading literature provides the theoretical foundation for Essay 3. "
         "Corporate insiders possess material nonpublic information that may include advance "
-        "knowledge of planned political statements or responses to emerging controversies. "
+        "knowledge of political decisions affecting firm value. "
         "Cohen, Malloy, and Pomorski (2012) distinguish between \"routine\" and "
         "\"opportunistic\" insider trades, finding that opportunistic trades predict future "
-        "returns and firm news."
+        "returns and firm news. Essay 3 applies event-CAR-based directional profitability "
+        "to test whether insiders trade on political foreknowledge."
     )
 
     st.divider()
@@ -1734,53 +1721,55 @@ with tab_a2:
     )
     st.divider()
 
-    # Load all data
-    event_df = load_table("EVENT_STUDY_RESULTS")
-    xs_df = load_table("CROSS_SECTIONAL_CAR")
-    did_df = load_table("DID_RESULTS")
+    # Load all data (new pipeline tables only)
     cw_df_a2 = load_table("CULTURE_WAR_COMPANIES")
-    # Essay 2 DiD tables (from essay2_did.py)
     e2_car_panel = load_table("ESSAY2_CAR_PANEL")
     e2_did_coeff = load_table("ESSAY2_DID_COEFFICIENTS")
     e2_pt = load_table("ESSAY2_PARALLEL_TRENDS")
-    ok_a2 = event_df[event_df["STATUS"] == "OK"].copy() if not event_df.empty else pd.DataFrame()
 
-    if ok_a2.empty:
-        st.info("No event study results available. Run Model.py first.")
+    if e2_car_panel.empty:
+        st.info("No event study results available. Run the Essay 2 pipeline first.")
     else:
-        for col in ["CAR", "CAR_T", "CAR_P", "BHAR", "R_SQUARED"]:
-            if col in ok_a2.columns:
-                ok_a2[col] = pd.to_numeric(ok_a2[col], errors="coerce")
+        from scipy.stats import ttest_1samp
 
-        # Merge industry + year
-        if not cw_df_a2.empty and "TICKER" in cw_df_a2.columns:
-            ok_a2 = ok_a2.merge(
-                cw_df_a2[["TICKER", "INDUSTRY", "YEAR"]].drop_duplicates(subset=["TICKER"]),
-                on="TICKER", how="left",
-            )
+        # Coerce numeric columns
+        for col in ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2", "LEAN", "FOMO_Z"]:
+            if col in e2_car_panel.columns:
+                e2_car_panel[col] = pd.to_numeric(e2_car_panel[col], errors="coerce")
+
+        # Split treatment / control
+        _treat_all = e2_car_panel[e2_car_panel["TREAT"] == 1].copy()
+        _ctrl_all = e2_car_panel[e2_car_panel["TREAT"] == 0].copy()
+
+        # Merge political leaning from culture war companies
+        if not cw_df_a2.empty and "ESTIMATED_POLITICAL_LEANING" in cw_df_a2.columns:
+            _lean_map = cw_df_a2[["TICKER", "ESTIMATED_POLITICAL_LEANING", "COMPANY",
+                                   "CULTURE_WAR_EVENT", "INDUSTRY", "YEAR"]].drop_duplicates(subset=["TICKER"])
+            _treat_all = _treat_all.merge(_lean_map, on="TICKER", how="left")
 
         # --- Key finding callout ---
-        n_sig = (ok_a2["CAR_P"] < 0.05).sum()
+        _mean_car = _treat_all["CAR_POST"].mean()
+        _n_treat = len(_treat_all)
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
             f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
-            f"Culture war events generate a mean CAR of <strong>{ok_a2['CAR'].mean():.2%}</strong> "
-            f"across the [-30, +30] event window. <strong>{n_sig} of {len(ok_a2)}</strong> events "
-            f"({n_sig/len(ok_a2):.0%}) produce statistically significant abnormal returns at the "
-            f"5% level. All three political leaning groups show significant negative CARs "
-            f"(p &lt; 0.01), confirming that culture wars destroy shareholder value regardless "
-            f"of partisan alignment.</div>",
+            f"Culture war events generate a mean post-event CAR of "
+            f"<strong>{_mean_car:.2%}</strong> across {_n_treat} treatment-firm events. "
+            f"Treatment firms underperform matched controls by "
+            f"<strong>{_treat_all['CAR_POST'].mean() - _ctrl_all['CAR_POST'].mean():.2%}</strong> "
+            f"in the post-event window, consistent with culture wars destroying shareholder "
+            f"value.</div>",
             unsafe_allow_html=True,
         )
 
         # Summary metrics
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Completed Studies", fmt_num(len(ok_a2)))
-        c2.metric("Significant (p<.05)", fmt_num(n_sig))
-        c3.metric("Mean CAR", f"{ok_a2['CAR'].mean():.2%}")
-        c4.metric("Median CAR", f"{ok_a2['CAR'].median():.2%}")
-        c5.metric("Mean BHAR", f"{ok_a2['BHAR'].mean():.2%}" if "BHAR" in ok_a2.columns else "--")
+        c1.metric("Treatment Firms", fmt_num(_n_treat))
+        c2.metric("Control Firms", fmt_num(len(_ctrl_all)))
+        c3.metric("Mean CAR (Treat)", f"{_mean_car:.4f}")
+        c4.metric("Mean CAR (Control)", f"{_ctrl_all['CAR_POST'].mean():.4f}")
+        c5.metric("DiD Gap", f"{_treat_all['CAR_POST'].mean() - _ctrl_all['CAR_POST'].mean():.4f}")
 
         st.divider()
 
@@ -1791,7 +1780,6 @@ with tab_a2:
             "political leaning with 95% confidence interval error bars."
         )
 
-        # Show the figure from the database
         fig_data = load_figure_blob("car_by_political_leaning")
         if fig_data:
             render_figure(fig_data, caption="Mean CAR by Political Leaning (95% CI)",
@@ -1811,29 +1799,29 @@ with tab_a2:
             "within each political leaning group."
         )
 
-        if not xs_df.empty:
-            xs_display = xs_df.copy()
-            for col in ["MEAN_CAR", "STD_CAR", "T_STAT", "P_VALUE"]:
-                if col in xs_display.columns:
-                    xs_display[col] = pd.to_numeric(xs_display[col], errors="coerce")
-            if "P_VALUE" in xs_display.columns:
-                xs_display["Sig."] = xs_display["P_VALUE"].apply(fmt_sig)
-
-            xs_renamed = xs_display.rename(columns={
-                "POLITICAL_LEANING": "Group", "MEAN_CAR": "Mean CAR",
-                "STD_CAR": "Std Dev", "N": "N", "T_STAT": "t-stat",
-                "P_VALUE": "p-value",
-            })
-            num_cols = xs_renamed.select_dtypes(include=[np.number]).columns
-            xs_renamed[num_cols] = xs_renamed[num_cols].round(4)
-            render_df(xs_renamed, "Cross-Sectional CAR", "a2_xs_car")
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            _xs_rows = []
+            for _grp, _gdf in _treat_all.dropna(subset=["ESTIMATED_POLITICAL_LEANING", "CAR_POST"]).groupby("ESTIMATED_POLITICAL_LEANING"):
+                _vals = _gdf["CAR_POST"].values
+                _t, _p = ttest_1samp(_vals, 0)
+                _xs_rows.append({
+                    "Group": _grp, "Mean CAR": np.mean(_vals),
+                    "Std Dev": np.std(_vals, ddof=1), "N": len(_vals),
+                    "t-stat": _t, "p-value": _p,
+                })
+            if _xs_rows:
+                _xs_df = pd.DataFrame(_xs_rows)
+                _xs_df["Sig."] = _xs_df["p-value"].apply(fmt_sig)
+                _xs_num = _xs_df.select_dtypes(include=[np.number]).columns
+                _xs_df[_xs_num] = _xs_df[_xs_num].round(4)
+                render_df(_xs_df, "Cross-Sectional CAR", "a2_xs_car")
 
         st.divider()
 
         # ===== SECTION 3: CAR Distribution =====
         st.subheader("CAR Distribution by Political Leaning")
-        if "POLITICAL_LEANING" in ok_a2.columns:
-            car_dist = ok_a2.groupby("POLITICAL_LEANING")["CAR"].agg(
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            car_dist = _treat_all.groupby("ESTIMATED_POLITICAL_LEANING")["CAR_POST"].agg(
                 ["mean", "median", "std", "min", "max", "count"]
             ).reset_index()
             car_dist.columns = ["Political Leaning", "Mean", "Median", "Std Dev", "Min", "Max", "N"]
@@ -1846,35 +1834,41 @@ with tab_a2:
         st.subheader("Significance Breakdown")
         st.markdown(
             "How many events produce statistically significant abnormal returns at "
-            "various conventional thresholds?"
+            "various conventional thresholds? Significance is assessed via one-sample "
+            "t-tests on post-event CARs within each leaning group."
         )
 
-        if "POLITICAL_LEANING" in ok_a2.columns:
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
             sig_data = []
-            for leaning in sorted(ok_a2["POLITICAL_LEANING"].unique()):
-                subset = ok_a2[ok_a2["POLITICAL_LEANING"] == leaning]
+            _treat_valid = _treat_all.dropna(subset=["CAR_POST"])
+            for leaning in sorted(_treat_valid["ESTIMATED_POLITICAL_LEANING"].dropna().unique()):
+                subset = _treat_valid[_treat_valid["ESTIMATED_POLITICAL_LEANING"] == leaning]
                 n = len(subset)
-                sig_01 = (subset["CAR_P"] < 0.01).sum()
-                sig_05 = (subset["CAR_P"] < 0.05).sum()
-                sig_10 = (subset["CAR_P"] < 0.10).sum()
-                neg_car = (subset["CAR"] < 0).sum()
+                neg_car = (subset["CAR_POST"] < 0).sum()
+                # Per-group t-test
+                _t, _p = ttest_1samp(subset["CAR_POST"].values, 0)
                 sig_data.append({
                     "Political Leaning": leaning,
                     "N": n,
-                    "Sig. at 1%": f"{sig_01} ({sig_01/n:.0%})",
-                    "Sig. at 5%": f"{sig_05} ({sig_05/n:.0%})",
-                    "Sig. at 10%": f"{sig_10} ({sig_10/n:.0%})",
+                    "Mean CAR": f"{subset['CAR_POST'].mean():.4f}",
+                    "t-stat": f"{_t:.3f}",
+                    "p-value": f"{_p:.4f}",
+                    "Sig.": fmt_sig(_p),
                     "Negative CAR": f"{neg_car} ({neg_car/n:.0%})",
                 })
             # Add "All" row
-            n_all = len(ok_a2)
+            _all_vals = _treat_valid["CAR_POST"].values
+            _t_all, _p_all = ttest_1samp(_all_vals, 0)
+            n_all = len(_all_vals)
+            neg_all = (_all_vals < 0).sum()
             sig_data.append({
                 "Political Leaning": "All",
                 "N": n_all,
-                "Sig. at 1%": f"{(ok_a2['CAR_P'] < 0.01).sum()} ({(ok_a2['CAR_P'] < 0.01).mean():.0%})",
-                "Sig. at 5%": f"{(ok_a2['CAR_P'] < 0.05).sum()} ({(ok_a2['CAR_P'] < 0.05).mean():.0%})",
-                "Sig. at 10%": f"{(ok_a2['CAR_P'] < 0.10).sum()} ({(ok_a2['CAR_P'] < 0.10).mean():.0%})",
-                "Negative CAR": f"{(ok_a2['CAR'] < 0).sum()} ({(ok_a2['CAR'] < 0).mean():.0%})",
+                "Mean CAR": f"{np.mean(_all_vals):.4f}",
+                "t-stat": f"{_t_all:.3f}",
+                "p-value": f"{_p_all:.4f}",
+                "Sig.": fmt_sig(_p_all),
+                "Negative CAR": f"{neg_all} ({neg_all/n_all:.0%})",
             })
             render_df(pd.DataFrame(sig_data), "Significance", "a2_significance")
 
@@ -1883,69 +1877,66 @@ with tab_a2:
         # ===== SECTION 5: Most Impactful Events =====
         st.subheader("Most Impactful Culture War Events")
 
+        _display_cols = ["TICKER"]
+        if "COMPANY" in _treat_all.columns:
+            _display_cols.append("COMPANY")
+        _display_cols += ["EVENT_DATE"]
+        if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+            _display_cols.append("ESTIMATED_POLITICAL_LEANING")
+        _display_cols.append("CAR_POST")
+
         impact_col1, impact_col2 = st.columns(2)
         with impact_col1:
             st.markdown("**Largest Negative CARs (Shareholder Destruction)**")
-            worst_car = ok_a2.nsmallest(10, "CAR")[
-                ["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "CAR", "CAR_P"]
-            ].copy().round(4)
-            worst_car["Sig."] = worst_car["CAR_P"].apply(fmt_sig)
+            worst_car = _treat_all.nsmallest(10, "CAR_POST")[_display_cols].copy().round(4)
             render_df(worst_car, "Worst CARs", "a2_worst_car")
 
         with impact_col2:
             st.markdown("**Largest Positive CARs (Shareholder Gain)**")
-            best_car = ok_a2.nlargest(10, "CAR")[
-                ["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "CAR", "CAR_P"]
-            ].copy().round(4)
-            best_car["Sig."] = best_car["CAR_P"].apply(fmt_sig)
+            best_car = _treat_all.nlargest(10, "CAR_POST")[_display_cols].copy().round(4)
             render_df(best_car, "Best CARs", "a2_best_car")
 
         st.divider()
 
         # ===== SECTION 6: Event Timeline =====
-        if "YEAR" in ok_a2.columns:
+        if "YEAR" in _treat_all.columns:
             st.subheader("Events and Returns Over Time")
             st.markdown(
                 "How event frequency and average abnormal returns have evolved "
                 "as corporate culture wars intensified after 2015."
             )
 
-            year_agg = ok_a2.groupby("YEAR").agg(
-                n_events=("CAR", "count"),
-                mean_car=("CAR", "mean"),
-                median_car=("CAR", "median"),
-                pct_sig=("CAR_P", lambda x: (x < 0.05).mean()),
-                pct_negative=("CAR", lambda x: (x < 0).mean()),
+            year_agg = _treat_all.groupby("YEAR").agg(
+                n_events=("CAR_POST", "count"),
+                mean_car=("CAR_POST", "mean"),
+                median_car=("CAR_POST", "median"),
+                pct_negative=("CAR_POST", lambda x: (x < 0).mean()),
             ).reset_index()
-            year_agg.columns = ["Year", "Events", "Mean CAR", "Median CAR",
-                                "% Significant (p<.05)", "% Negative"]
+            year_agg.columns = ["Year", "Events", "Mean CAR", "Median CAR", "% Negative"]
             year_agg["Mean CAR"] = year_agg["Mean CAR"].round(4)
             year_agg["Median CAR"] = year_agg["Median CAR"].round(4)
-            year_agg["% Significant (p<.05)"] = year_agg["% Significant (p<.05)"].apply(lambda x: f"{x:.0%}")
             year_agg["% Negative"] = year_agg["% Negative"].apply(lambda x: f"{x:.0%}")
             render_df(year_agg, "Events by Year", "a2_events_year")
 
             st.divider()
 
         # ===== SECTION 7: Industry Analysis =====
-        if "INDUSTRY" in ok_a2.columns:
+        if "INDUSTRY" in _treat_all.columns:
             st.subheader("CAR by Industry")
             st.markdown(
                 "Cross-industry comparison of culture war impacts. Which sectors "
                 "are most vulnerable to politically-motivated sell-offs?"
             )
 
-            industry_car = ok_a2.groupby("INDUSTRY").agg(
-                mean_car=("CAR", "mean"),
-                median_car=("CAR", "median"),
-                pct_sig=("CAR_P", lambda x: (x < 0.05).mean()),
-                n=("CAR", "count"),
+            industry_car = _treat_all.groupby("INDUSTRY").agg(
+                mean_car=("CAR_POST", "mean"),
+                median_car=("CAR_POST", "median"),
+                n=("CAR_POST", "count"),
             ).reset_index()
-            industry_car.columns = ["Industry", "Mean CAR", "Median CAR", "% Significant", "N"]
+            industry_car.columns = ["Industry", "Mean CAR", "Median CAR", "N"]
             industry_car = industry_car[industry_car["N"] >= 2].sort_values("Mean CAR")
             industry_car["Mean CAR"] = industry_car["Mean CAR"].round(4)
             industry_car["Median CAR"] = industry_car["Median CAR"].round(4)
-            industry_car["% Significant"] = industry_car["% Significant"].apply(lambda x: f"{x:.0%}")
             render_df(industry_car, "CAR by Industry", "a2_car_industry")
 
             st.divider()
@@ -1954,69 +1945,7 @@ with tab_a2:
         st.subheader("Difference-in-Differences Analysis")
         st.markdown(
             "DiD estimation isolates the treatment effect by comparing culture war "
-            "firms to matched controls. A negative DiD coefficient indicates that the "
-            "treatment firm's returns diverged downward relative to its control during "
-            "the event window, beyond what common factors predict."
-        )
-
-        if not did_df.empty:
-            ok_did = did_df[did_df["STATUS"] == "OK"].copy()
-            for col in ["DID_COEF", "DID_T", "DID_P", "CI_LOWER", "CI_UPPER", "R_SQUARED"]:
-                if col in ok_did.columns:
-                    ok_did[col] = pd.to_numeric(ok_did[col], errors="coerce")
-
-            if not ok_did.empty:
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric("DiD Pairs Completed", fmt_num(len(ok_did)))
-                c2.metric("Significant (p<.05)", fmt_num((ok_did["DID_P"] < 0.05).sum()))
-                c3.metric("Mean DiD Coef", f"{ok_did['DID_COEF'].mean():.4f}")
-                c4.metric("Median DiD Coef", f"{ok_did['DID_COEF'].median():.4f}")
-                c5.metric("Negative Coef %", f"{(ok_did['DID_COEF'] < 0).mean():.0%}")
-
-                # DiD by leaning
-                if "POLITICAL_LEANING" in ok_did.columns:
-                    did_by_leaning = ok_did.groupby("POLITICAL_LEANING").agg(
-                        mean_coef=("DID_COEF", "mean"),
-                        median_coef=("DID_COEF", "median"),
-                        std=("DID_COEF", "std"),
-                        pct_negative=("DID_COEF", lambda x: (x < 0).mean()),
-                        pct_sig=("DID_P", lambda x: (x < 0.05).mean()),
-                        n=("DID_COEF", "count"),
-                    ).reset_index()
-                    did_by_leaning.columns = ["Political Leaning", "Mean Coef", "Median Coef",
-                                              "Std Dev", "% Negative", "% Sig. (p<.05)", "N"]
-                    did_by_leaning["% Negative"] = did_by_leaning["% Negative"].apply(lambda x: f"{x:.0%}")
-                    did_by_leaning["% Sig. (p<.05)"] = did_by_leaning["% Sig. (p<.05)"].apply(lambda x: f"{x:.0%}")
-                    did_by_leaning = did_by_leaning.round(4)
-                    render_df(did_by_leaning, "DiD by Leaning", "a2_did_leaning")
-
-                # Most significant DiD pairs
-                st.markdown("**Most Significant DiD Pairs**")
-                top_did = ok_did.nsmallest(10, "DID_P")[
-                    ["TICKER", "CONTROL_TICKER", "COMPANY", "POLITICAL_LEANING",
-                     "DID_COEF", "DID_T", "DID_P", "R_SQUARED"]
-                ].copy().round(4)
-                top_did["Sig."] = top_did["DID_P"].apply(fmt_sig)
-                render_df(top_did, "Top DiD Pairs", "a2_did_top")
-
-                with st.expander("Full DiD Results", expanded=False):
-                    did_display = ok_did[["TICKER", "CONTROL_TICKER", "COMPANY",
-                                          "POLITICAL_LEANING", "DID_COEF", "DID_T",
-                                          "DID_P", "R_SQUARED"]].copy()
-                    did_display = did_display.round(4)
-                    did_display["Sig."] = did_display["DID_P"].apply(fmt_sig)
-                    did_display = did_display.sort_values("DID_P")
-                    render_df(did_display, "DiD Results", "a2_did_full", height=500)
-        else:
-            st.info("No DiD results available.")
-
-        st.divider()
-
-        # ===== SECTION 8b: Essay 2 Cross-Sectional DiD (essay2_did.py) =====
-        st.subheader("Cross-Sectional DiD — Matched Treatment vs Control")
-        st.markdown(
-            "Formal DiD estimation from `essay2_did.py`: treatment (culture war) firms "
-            "vs industry-matched controls. The model stacks pre- and post-event CARs "
+            "firms to matched controls. The model stacks pre- and post-event CARs "
             "into a panel and estimates:"
         )
         st.latex(
@@ -2044,69 +1973,51 @@ with tab_a2:
                     f"padding:1rem; border-radius:0 4px 4px 0;'>"
                     f"<strong>Joint F-test:</strong> F = {joint_f:.2f}, p = {joint_p:.4f} "
                     f"&mdash; <strong style='color:{color};'>{verdict}</strong><br>"
-                    f"<small>H₀: all Treat×Day coefficients = 0 in the pre-event window. "
+                    f"<small>H&#x2080;: all Treat x Day coefficients = 0 in the pre-event window. "
                     f"{'Parallel trends hold — DiD assumptions satisfied.' if passes else 'Parallel trends violated — interpret DiD with caution.'}"
                     f"</small></div>",
                     unsafe_allow_html=True,
                 )
 
-            # Day-by-day coefficients
             pt_display = e2_pt[["DAY", "COEFFICIENT", "STD_ERROR", "T_STAT", "P_VALUE"]].copy()
             pt_display = pt_display.round(4)
             pt_display["Sig."] = pt_display["P_VALUE"].apply(fmt_sig)
-            with st.expander("Daily Treat × Day Coefficients", expanded=False):
+            with st.expander("Daily Treat x Day Coefficients", expanded=False):
                 render_df(pt_display, "Parallel Trends Coefficients", "e2_pt_daily")
 
             st.divider()
 
         # --- CAR Panel Summary ---
-        if not e2_car_panel.empty:
-            st.markdown("**CAR Panel Summary**")
-            for col in ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2", "LEAN", "FOMO_Z"]:
-                if col in e2_car_panel.columns:
-                    e2_car_panel[col] = pd.to_numeric(e2_car_panel[col], errors="coerce")
+        st.markdown("**CAR Panel Summary**")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Panel Rows", fmt_num(len(e2_car_panel)))
+        c2.metric("Events", fmt_num(e2_car_panel["EVENT_ID"].nunique()) if "EVENT_ID" in e2_car_panel.columns else "--")
+        c3.metric("Mean CAR_POST (Treatment)", f"{_treat_all['CAR_POST'].mean():.4f}")
+        c4.metric("Mean CAR_POST (Control)", f"{_ctrl_all['CAR_POST'].mean():.4f}")
 
-            if "IS_TREATMENT" in e2_car_panel.columns:
-                e2_car_panel["IS_TREATMENT"] = e2_car_panel["IS_TREATMENT"].map(
-                    {True: True, False: False, 1: True, 0: False,
-                     "true": True, "false": False, "1": True, "0": False,
-                     "True": True, "False": False}
-                ).fillna(False)
+        # Treatment vs Control comparison
+        if not _treat_all.empty and not _ctrl_all.empty:
+            car_compare = pd.DataFrame({
+                "Group": ["Treatment", "Control", "Difference"],
+                "N Firms": [_treat_all["TICKER"].nunique(), _ctrl_all["TICKER"].nunique(), ""],
+                "Mean CAR_PRE": [_treat_all["CAR_PRE"].mean(), _ctrl_all["CAR_PRE"].mean(),
+                                 _treat_all["CAR_PRE"].mean() - _ctrl_all["CAR_PRE"].mean()],
+                "Mean CAR_POST": [_treat_all["CAR_POST"].mean(), _ctrl_all["CAR_POST"].mean(),
+                                  _treat_all["CAR_POST"].mean() - _ctrl_all["CAR_POST"].mean()],
+                "Mean CAR_FULL": [_treat_all["CAR_FULL"].mean(), _ctrl_all["CAR_FULL"].mean(),
+                                  _treat_all["CAR_FULL"].mean() - _ctrl_all["CAR_FULL"].mean()],
+                "Mean Est R2": [_treat_all["EST_R2"].mean(), _ctrl_all["EST_R2"].mean(),
+                                _treat_all["EST_R2"].mean() - _ctrl_all["EST_R2"].mean()],
+            }).round(4)
+            render_df(car_compare, "Treatment vs Control CARs", "e2_car_compare")
 
-            treat = e2_car_panel[e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
-            ctrl = e2_car_panel[~e2_car_panel["IS_TREATMENT"]] if "IS_TREATMENT" in e2_car_panel.columns else pd.DataFrame()
+        with st.expander("Full CAR Panel", expanded=False):
+            car_cols = [c for c in ["TICKER", "EVENT_ID", "TREAT", "REGIME",
+                                     "CAR_PRE", "CAR_POST", "CAR_FULL", "LEAN",
+                                     "FOMO_Z", "EST_R2"] if c in e2_car_panel.columns]
+            render_df(e2_car_panel[car_cols].round(4), "CAR Panel", "e2_car_panel_full", height=500)
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Panel Rows", fmt_num(len(e2_car_panel)))
-            c2.metric("Events", fmt_num(e2_car_panel["EVENT_ID"].nunique()) if "EVENT_ID" in e2_car_panel.columns else "--")
-            if not treat.empty:
-                c3.metric("Mean CAR_POST (Treatment)", f"{treat['CAR_POST'].mean():.4f}")
-            if not ctrl.empty:
-                c4.metric("Mean CAR_POST (Control)", f"{ctrl['CAR_POST'].mean():.4f}")
-
-            # Treatment vs Control comparison
-            if not treat.empty and not ctrl.empty:
-                car_compare = pd.DataFrame({
-                    "Group": ["Treatment", "Control", "Difference"],
-                    "N Firms": [treat["TICKER"].nunique(), ctrl["TICKER"].nunique(), ""],
-                    "Mean CAR_PRE": [treat["CAR_PRE"].mean(), ctrl["CAR_PRE"].mean(),
-                                     treat["CAR_PRE"].mean() - ctrl["CAR_PRE"].mean()],
-                    "Mean CAR_POST": [treat["CAR_POST"].mean(), ctrl["CAR_POST"].mean(),
-                                      treat["CAR_POST"].mean() - ctrl["CAR_POST"].mean()],
-                    "Mean CAR_FULL": [treat["CAR_FULL"].mean(), ctrl["CAR_FULL"].mean(),
-                                      treat["CAR_FULL"].mean() - ctrl["CAR_FULL"].mean()],
-                    "Mean Est R²": [treat["EST_R2"].mean(), ctrl["EST_R2"].mean(),
-                                    treat["EST_R2"].mean() - ctrl["EST_R2"].mean()],
-                }).round(4)
-                render_df(car_compare, "Treatment vs Control CARs", "e2_car_compare")
-
-            with st.expander("Full CAR Panel", expanded=False):
-                car_cols = [c for c in ["TICKER", "EVENT_ID", "IS_TREATMENT", "REGIME",
-                                         "CAR_PRE", "CAR_POST", "CAR_FULL", "LEAN",
-                                         "FOMO_Z", "EST_R2"] if c in e2_car_panel.columns]
-                render_df(e2_car_panel[car_cols].round(4), "CAR Panel", "e2_car_panel_full", height=500)
-
-            st.divider()
+        st.divider()
 
         # --- DiD Coefficient Table ---
         if not e2_did_coeff.empty:
@@ -2132,57 +2043,50 @@ with tab_a2:
                     spec_display["Sig."] = spec_display["P_VALUE"].apply(fmt_sig)
                 render_df(spec_display, f"DiD {spec}", f"e2_did_{spec}")
 
-                # Highlight the treatment effect (Treat x Post)
                 treat_row = spec_df[spec_df["VARIABLE"] == "TREAT_x_POST"]
                 if not treat_row.empty:
                     coef = treat_row.iloc[0]["COEFFICIENT"]
                     pval = treat_row.iloc[0]["P_VALUE"]
                     sig_marker = fmt_sig(pval) if pval < 0.1 else " (n.s.)"
                     st.caption(
-                        f"Treatment effect (Treat × Post): {coef:+.4f}{sig_marker}, "
+                        f"Treatment effect (Treat x Post): {coef:+.4f}{sig_marker}, "
                         f"p = {pval:.4f}"
                     )
 
             st.divider()
 
-        # ===== SECTION 9: Failed Studies =====
-        failed_a2 = event_df[event_df["STATUS"] != "OK"] if not event_df.empty else pd.DataFrame()
-        if not failed_a2.empty:
-            with st.expander(f"Failed Event Studies ({len(failed_a2)} events)", expanded=False):
-                st.markdown(
-                    "Events that could not be analyzed, typically due to private firms "
-                    "(no stock data), delistings, or insufficient estimation window data."
-                )
-                render_df(
-                    failed_a2[["TICKER", "COMPANY", "EVENT_DATE", "POLITICAL_LEANING", "STATUS"]],
-                    "Failed Events", "a2_failed", height=400,
-                )
-
-        # Full event-level results
-        with st.expander("Full Event Study Results (All Completed)", expanded=False):
-            display = ok_a2[["TICKER", "COMPANY", "EVENT_DATE", "EVENT_DESCRIPTION",
-                             "POLITICAL_LEANING", "CAR", "CAR_T", "CAR_P",
-                             "BHAR"]].copy()
-            display = display.round(4)
-            display["Sig."] = display["CAR_P"].apply(fmt_sig)
-            display = display.sort_values("CAR_P")
-            render_df(display, "Event Study Results", "a2_full_results", height=500)
+        # ===== SECTION 9: Full Event-Level Results =====
+        with st.expander("Full Event Study Results (Treatment Firms)", expanded=False):
+            _full_cols = ["TICKER"]
+            if "COMPANY" in _treat_all.columns:
+                _full_cols.append("COMPANY")
+            _full_cols += ["EVENT_DATE"]
+            if "ESTIMATED_POLITICAL_LEANING" in _treat_all.columns:
+                _full_cols.append("ESTIMATED_POLITICAL_LEANING")
+            if "CULTURE_WAR_EVENT" in _treat_all.columns:
+                _full_cols.append("CULTURE_WAR_EVENT")
+            _full_cols += ["CAR_PRE", "CAR_POST", "CAR_FULL", "EST_R2"]
+            _full_cols = [c for c in _full_cols if c in _treat_all.columns]
+            _full_display = _treat_all[_full_cols].copy().round(4)
+            _full_display = _full_display.sort_values("CAR_POST")
+            render_df(_full_display, "Event Study Results", "a2_full_results", height=500)
 
     # --- Chart Gallery ---
     render_chart_gallery(E2_CHARTS, gallery_id="e2")
 
 
+
 # =============================================================================
-# TAB 3: ARTICLE 3 - Insider Trading and Political Controversies
+# TAB 3: ARTICLE 3 - Informed Insider Trading Around Political Decisions
 # =============================================================================
 
 with tab_a3:
-    st.header("Essay 3: Insider Trading and Political Controversies")
-    st.markdown("*Evidence from Culture War Events*")
+    st.header("Essay 3: Informed Insider Trading Around Political Decisions")
+    st.markdown("*Foreknowledge, Profits, and the Limits of Regulatory Architecture*")
     st.markdown(
         f"<p style='font-size:1rem; color:{NAVY}; margin-top:-0.5rem;'>"
-        f"<strong>Research Question:</strong> Do corporate insiders trade on advance "
-        f"knowledge of upcoming political controversies?</p>",
+        f"<strong>Research Question:</strong> Do insiders trade on advance knowledge of "
+        f"political decisions that move firm equity values?</p>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -2190,20 +2094,17 @@ with tab_a3:
     # --- Motivation ---
     st.subheader("Motivation")
     st.markdown(
-        "Corporate insiders -- executives, directors, and significant shareholders "
-        "-- often have advance knowledge of planned political statements, marketing "
-        "campaigns, and responses to emerging social controversies. Essay 2 establishes "
-        "that culture war events generate significant abnormal returns (mean CAR = "
-        f"{summary.get('avg_car', 0):.2%}). "
-        "This raises a natural question: do insiders exploit this foreknowledge for "
-        "personal gain?"
+        "In the 180 days before political decisions that move firm equity values, "
+        "insiders trade in directions that significantly predict the event-day price "
+        "reaction. This essay tests whether pre-event insider trades are directionally "
+        "accurate at rates exceeding chance, compares political to non-political control "
+        "windows, and measures the aggregate dollar magnitude of informed-trading profits."
     )
     st.markdown(
-        "Cohen, Malloy, and Pomorski (2012) distinguish between *routine* insider trades "
-        "(regular, calendar-driven patterns) and *opportunistic* trades (irregularly timed, "
-        "predictive of future returns). This essay applies their framework to culture war "
-        "events, testing whether insider selling intensifies in the 60 days before a "
-        "politically controversial event becomes public."
+        "Essay 2 establishes that political events generate significant abnormal returns. "
+        "The persistent mispricing documented there reflects, in part, systematic extraction "
+        "of value by informed insiders — a microfoundation linking political-economic risk to "
+        "corporate valuation through an identifiable channel."
     )
 
     st.divider()
@@ -2216,27 +2117,29 @@ with tab_a3:
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
-            f"<strong style='color:{GOLD};'>H1: Pre-Event Selling</strong><br><br>"
-            f"Insider net selling increases in the [-60, -1] window before culture war "
-            f"events relative to a matched benchmark period.</div>",
+            f"<strong style='color:{GOLD};'>H1: Directional Accuracy</strong><br><br>"
+            f"Pre-event insider sells are directionally accurate (event-profitable) at "
+            f"rates significantly above 50%, and at higher rates than matched non-political "
+            f"control windows.</div>",
             unsafe_allow_html=True,
         )
     with hyp_col2:
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
-            f"<strong style='color:{GOLD};'>H2: Opportunistic Timing</strong><br><br>"
-            f"The proportion of *opportunistic* (vs. routine) trades increases before "
-            f"culture war events, consistent with information-motivated trading.</div>",
+            f"<strong style='color:{GOLD};'>H2: Proximity Gradient</strong><br><br>"
+            f"Directional accuracy is highest in the 0-30 day window before events "
+            f"and declines with distance, consistent with increasing information "
+            f"precision as events approach.</div>",
             unsafe_allow_html=True,
         )
     with hyp_col3:
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
-            f"<strong style='color:{GOLD};'>H3: Cross-Sectional Variation</strong><br><br>"
-            f"Pre-event insider selling is more pronounced for events with larger "
-            f"subsequent negative CARs, and among C-suite insiders vs. directors.</div>",
+            f"<strong style='color:{GOLD};'>H3: Dollar Magnitudes</strong><br><br>"
+            f"The aggregate dollar magnitude of informed-trading profits is economically "
+            f"significant, concentrated in sells before large negative-CAR events.</div>",
             unsafe_allow_html=True,
         )
 
@@ -2249,60 +2152,21 @@ with tab_a3:
     with meth_col1:
         st.markdown("**Data**")
         st.markdown(
-            "- **SEC Form 4** filings for all 160 culture war event firms\n"
-            "- **EDGAR XBRL** submissions parsed for transaction date, shares, price, "
-            "ownership type\n"
-            "- **Insider types**: CEO, CFO, COO, Directors, 10%+ Owners\n"
-            "- **Benchmark**: Same-firm trades from [-180, -61] window"
+            "- **SEC Form 4** filings for firms exposed to political decisions\n"
+            "- **Political events** from comprehensive event database (2000-2025)\n"
+            "- **Matched controls**: ticker-matched trades outside political windows\n"
+            "- **FF5-adjusted CARs**: 30/60-day post-trade cumulative abnormal returns"
         )
     with meth_col2:
         st.markdown("**Analysis Plan**")
         st.markdown(
-            "1. Classify trades as routine vs. opportunistic (Cohen et al., 2012)\n"
-            "2. Compute net insider selling ratio in [-60, -1] window\n"
-            "3. Compare to benchmark period using paired t-tests\n"
-            "4. Cross-sectional regression: insider selling ~ f(CAR magnitude, "
-            "firm size, leaning)\n"
-            "5. Placebo tests using random pseudo-event dates"
+            "1. Event-CAR directional profitability (sell + negative CAR = profitable)\n"
+            "2. Two-proportion z-test: political vs control accuracy rates\n"
+            "3. Proximity windows: 0-30, 31-60, 61-90, 91-180 days before event\n"
+            "4. Dollar magnitudes by CAR severity (-5%, -10%, -15%)\n"
+            "5. LPM with ticker FE: accuracy ~ log(size) × political\n"
+            "6. Regulatory period comparison (Pre-SOX through Post-Amendments)"
         )
-
-    st.divider()
-
-    # --- Sample Construction ---
-    st.subheader("Sample Construction")
-
-    event_df_a3 = load_table("EVENT_STUDY_RESULTS")
-    ok_a3 = event_df_a3[event_df_a3["STATUS"] == "OK"].copy() if not event_df_a3.empty else pd.DataFrame()
-
-    if not ok_a3.empty:
-        for col in ["CAR", "CAR_P"]:
-            ok_a3[col] = pd.to_numeric(ok_a3[col], errors="coerce")
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Event Firms (Public)", fmt_num(ok_a3["TICKER"].nunique()))
-        c2.metric("Total Events", fmt_num(len(ok_a3)))
-        c3.metric("Sig. Events (p<.05)", fmt_num((ok_a3["CAR_P"] < 0.05).sum()))
-        c4.metric("Mean Event CAR", f"{ok_a3['CAR'].mean():.2%}")
-
-        st.markdown(
-            "The Essay 3 sample begins with the 141 completed event studies from "
-            "Essay 2. For each event, SEC Form 4 filings are collected for the "
-            "treatment firm over the [-180, +30] window surrounding the event date."
-        )
-
-        # Show the firms that will be in the sample
-        st.markdown("**Event Firms by Political Leaning**")
-        if "POLITICAL_LEANING" in ok_a3.columns:
-            leaning_a3 = ok_a3.groupby("POLITICAL_LEANING").agg(
-                unique_tickers=("TICKER", "nunique"),
-                n_events=("TICKER", "count"),
-                mean_car=("CAR", "mean"),
-                n_significant=("CAR_P", lambda x: (x < 0.05).sum()),
-            ).reset_index()
-            leaning_a3.columns = ["Political Leaning", "Unique Tickers", "Events",
-                                  "Mean CAR", "Sig. Events (p<.05)"]
-            leaning_a3 = leaning_a3.round(4)
-            render_df(leaning_a3, "Essay 3 Sample", "a3_sample_leaning")
 
     st.divider()
 
@@ -2310,217 +2174,318 @@ with tab_a3:
     # ESSAY 3 — MODEL RESULTS
     # =====================================================================
 
-    # Load Essay 3 tables
-    e3_panel = load_table("ESSAY3_INSIDER_PANEL")
-    e3_window = load_table("ESSAY3_WINDOW_SUMMARY")
-    e3_abnormal = load_table("ESSAY3_ABNORMAL_SELLING")
-    e3_regression = load_table("ESSAY3_CAR_INSIDER_REGRESSION")
-    e3_leaning = load_table("ESSAY3_LEANING_ANALYSIS")
-    e3_treat_ctrl = load_table("ESSAY3_TREATMENT_VS_CONTROL")
-    e3_rvo = load_table("ESSAY3_ROUTINE_VS_OPPORTUNISTIC")
-    e3_regime = load_table("ESSAY3_REGIME_INTERACTION")
-    e3_placebo = load_table("ESSAY3_PLACEBO_TEST")
-    e3_accel = load_table("ESSAY3_ACCELERATION_TEST")
-    e3_gradient = load_table("ESSAY3_INFORMATION_GRADIENT")
+    # Load Essay 3 tables (all 24)
+    e3_informed = load_table("ESSAY3_INFORMED_TRADING")
+    e3_proximity = load_table("ESSAY3_INFORMED_PROXIMITY")
+    e3_dollars = load_table("ESSAY3_INFORMED_DOLLARS")
+    e3_size_acc = load_table("ESSAY3_SIZE_ACCURACY")
+    e3_slopes = load_table("ESSAY3_SIZE_ACCURACY_SLOPES")
+    e3_reversal = load_table("ESSAY3_REVERSAL_REGRESSION")
+    e3_panel = load_table("ESSAY3_PANEL")
+    e3_crsp_summary = load_table("ESSAY3_CRSP_SUMMARY")
+    e3_crsp_profits = load_table("ESSAY3_CRSP_PROFITS")
+    e3_wilcoxon = load_table("ESSAY3_WILCOXON_FAMILY")
+    e3_tost = load_table("ESSAY3_TOST")
+    e3_placebo = load_table("ESSAY3_PLACEBO")
+    e3_concentration = load_table("ESSAY3_INSIDER_CONCENTRATION")
+    e3_stratification = load_table("ESSAY3_STRATIFICATION")
+    e3_mean_vs_dist = load_table("ESSAY3_MEAN_VS_DISTRIBUTIONAL")
+    e3_active_subset = load_table("ESSAY3_ACTIVE_SUBSET")
+    e3_quantile_reg = load_table("ESSAY3_QUANTILE_REGRESSION")
+    e3_trimmed = load_table("ESSAY3_TRIMMED_ROBUSTNESS")
+    e3_bootstrap_wilcoxon = load_table("ESSAY3_BOOTSTRAP_WILCOXON")
+    e3_insider_panel = load_table("ESSAY3_INSIDER_PANEL")
+    e3_concentration_cuts = load_table("ESSAY3_CONCENTRATION_CUTS")
+    e3_repeat_traders = load_table("ESSAY3_REPEAT_TRADERS")
+    e3_bootstrap_ci = load_table("ESSAY3_BOOTSTRAP_CI")
+    e3_control_trades = load_table("ESSAY3_CONTROL_TRADES")
 
-    _has_e3 = not e3_panel.empty or not e3_abnormal.empty
+    _has_e3 = not e3_informed.empty
 
     if _has_e3:
         # Coerce numeric columns
-        for _df in [e3_abnormal, e3_leaning, e3_rvo, e3_regime, e3_placebo,
-                     e3_accel, e3_window, e3_regression, e3_gradient]:
+        _e3_all_dfs = [e3_informed, e3_proximity, e3_dollars, e3_size_acc, e3_slopes,
+                       e3_reversal, e3_crsp_summary, e3_crsp_profits, e3_wilcoxon,
+                       e3_tost, e3_placebo, e3_concentration, e3_stratification,
+                       e3_mean_vs_dist, e3_active_subset, e3_quantile_reg, e3_trimmed,
+                       e3_bootstrap_wilcoxon, e3_insider_panel, e3_concentration_cuts,
+                       e3_repeat_traders, e3_bootstrap_ci]
+        _e3_skip_cols = {"CUT", "SAMPLE", "SPEC", "VARIABLE", "METRIC_TYPE",
+                         "TEST", "MARGIN_NAME", "FAMILY", "DECILE", "SIZE_DECILE",
+                         "SUBGROUP", "QUANTILE", "MARGIN", "TERCILE", "STRATUM",
+                         "YEAR", "TICKER", "OWNER", "EVENT_ID", "EVENT_DATE",
+                         "TRADE_TYPE", "RUN_TIMESTAMP"}
+        for _df in _e3_all_dfs:
             for col in _df.columns:
-                if col not in ("WINDOW", "TEST", "REGIME", "LEAN", "TICKER",
-                                "EVENT_ID", "EVENT_DATE", "IS_TREATMENT",
-                                "MONOTONIC_INCREASE", "BH_SIGNIFICANT",
-                                "ABNORMAL_SELLING", "HAS_SUFFICIENT_DATA",
-                                "T_BH_SIGNIFICANT", "WILCOXON_BH_SIGNIFICANT",
-                                "RUN_TIMESTAMP"):
+                if col not in _e3_skip_cols:
                     _df[col] = pd.to_numeric(_df[col], errors="coerce")
 
         # --- Key finding callout ---
-        if not e3_abnormal.empty:
-            _pre = e3_abnormal["MEAN_PRE_DAILY"].mean()
-            _bench = e3_abnormal["MEAN_BENCH_DAILY"].mean()
-            _n_sig = e3_abnormal.get("T_BH_SIGNIFICANT", pd.Series()).sum()
+        _all_sells = e3_informed[e3_informed["CUT"] == "ALL_SELLS"]
+        _ctrl_sells = e3_informed[e3_informed["CUT"] == "CONTROL_SELLS"]
+        if not _all_sells.empty:
+            _acc = float(_all_sells["METRIC_VALUE"].iloc[0])
+            _n = int(_all_sells["N_TRADES"].iloc[0]) if "N_TRADES" in _all_sells.columns else 0
+            _p = float(_all_sells["METRIC_PVAL"].iloc[0])
+            _ctrl_acc = float(_ctrl_sells["METRIC_VALUE"].iloc[0]) if not _ctrl_sells.empty else 0
             st.markdown(
                 f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
                 f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
-                f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
-                f"Insider selling averages <strong>${_pre:,.0f}/day</strong> in the pre-event window "
-                f"vs <strong>${_bench:,.0f}/day</strong> in the benchmark period. "
-                f"<strong>{int(_n_sig)}</strong> of {len(e3_abnormal)} window comparisons show "
-                f"BH-significant abnormal selling.</div>",
+                f"<strong style='color:{GOLD};'>Headline Finding</strong><br>"
+                f"Political insider sells are <strong>{_acc:.1%}</strong> directionally accurate "
+                f"(N={_n:,}, p={_p:.1e}) vs <strong>{_ctrl_acc:.1%}</strong> in matched controls. "
+                f"Premium: <strong>+{(_acc - _ctrl_acc):.1%}pp</strong>.</div>",
                 unsafe_allow_html=True,
             )
 
         # Summary metrics
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Event-Firm Pairs", fmt_num(len(e3_panel)) if not e3_panel.empty else "--")
-        c2.metric("Windows Tested", fmt_num(len(e3_window)) if not e3_window.empty else "--")
-        c3.metric("Abnormal Tests", fmt_num(len(e3_abnormal)) if not e3_abnormal.empty else "--")
-        if not e3_panel.empty and "IS_TREATMENT" in e3_panel.columns:
-            _n_treat = e3_panel["IS_TREATMENT"].astype(str).str.lower().isin(["true", "1"]).sum()
-            c4.metric("Treatment Firms", fmt_num(_n_treat))
-        if not e3_placebo.empty:
-            _emp_p = e3_placebo.iloc[0].get("EMPIRICAL_P", None)
-            c5.metric("Placebo p-value", fmt_pval(_emp_p) if _emp_p is not None else "--")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Political Trades", fmt_num(int(e3_informed[e3_informed["CUT"] == "ALL_TRADES"]["N_TRADES"].iloc[0])) if "ALL_TRADES" in e3_informed["CUT"].values else "--")
+        _ctrl_row = e3_informed[e3_informed["CUT"] == "CONTROL"]
+        c2.metric("Control Trades", fmt_num(int(_ctrl_row["N_TRADES"].iloc[0])) if not _ctrl_row.empty else "--")
+        c3.metric("Event-Firm Pairs", fmt_num(len(e3_panel)) if not e3_panel.empty else "--")
+        _prem_row = e3_informed[e3_informed["CUT"] == "SELLS_PREMIUM_TRADE_CAR"]
+        c4.metric("Sells Premium (trade-CAR)", f"+{float(_prem_row['METRIC_VALUE'].iloc[0]):.1%}pp" if not _prem_row.empty else "--")
 
         st.divider()
 
-        # --- Window Summary ---
-        if not e3_window.empty:
-            st.subheader("Insider Trading by Window")
+        # --- Headline: Informed Trading Table ---
+        st.subheader("§12b: Directional Accuracy — Political vs Control")
+        st.markdown(
+            "Event-CAR-based profitability: a sell is 'event-profitable' if the panel CAR is "
+            "negative on the event date. Two-proportion z-test compares political vs control."
+        )
+        _inf_display = e3_informed.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+        _inf_display["Sig."] = _inf_display.get("METRIC_PVAL", pd.Series()).apply(fmt_sig)
+        render_df(_inf_display, "Informed Trading", "a3_informed_trading")
+        st.divider()
+
+        # --- Proximity Table ---
+        if not e3_proximity.empty:
+            st.subheader("Proximity to Event")
             st.markdown(
-                "Aggregate insider trading metrics across pre-event sub-windows, "
-                "the full pre-event window, and the post-event window."
+                "Accuracy by days-before-event window. Control reference rows provide "
+                "unconditional baseline rates for comparison."
             )
-            _win_display = e3_window.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _win_display = _win_display.round(2)
-            render_df(_win_display, "Window Summary", "a3_window_summary")
+            _prox_display = e3_proximity.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            _prox_display["Sig."] = _prox_display.get("METRIC_PVAL", pd.Series()).apply(fmt_sig)
+            render_df(_prox_display, "Proximity", "a3_proximity")
             st.divider()
 
-        # --- Abnormal Selling Tests ---
-        if not e3_abnormal.empty:
-            st.subheader("Abnormal Selling Tests")
+        # --- Dollar Magnitudes ---
+        if not e3_dollars.empty:
+            st.subheader("Dollar Magnitudes")
             st.markdown(
-                "Paired t-tests and Wilcoxon signed-rank tests comparing pre-event "
-                "insider selling to the benchmark period. Both parametric and "
-                "non-parametric tests are reported with BH-FDR correction."
+                "Aggregate informed-trading profits by proximity window and event-CAR "
+                "severity threshold (-5%, -10%, -15%)."
             )
-            _abn_display = e3_abnormal.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _abn_display["Sig."] = _abn_display.get("T_PVALUE", pd.Series()).apply(fmt_sig)
-            _abn_display = _abn_display.round(4)
-            render_df(_abn_display, "Abnormal Selling", "a3_abnormal")
+            _dol_display = e3_dollars.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
+            for c in _dol_display.select_dtypes(include=[np.number]).columns:
+                _dol_display[c] = _dol_display[c].round(0)
+            render_df(_dol_display, "Dollar Magnitudes", "a3_dollars")
             st.divider()
 
-        # --- Political Leaning Analysis ---
-        if not e3_leaning.empty:
-            st.subheader("Insider Trading by Political Leaning")
+        # --- Size-Accuracy (Supporting) ---
+        if not e3_size_acc.empty:
+            st.subheader("§12a: Size-Accuracy by Decile (Supporting Evidence)")
             st.markdown(
-                "Do insiders at Conservative, Liberal, or Mixed-leaning firms "
-                "sell more aggressively before culture war events? Kruskal-Wallis "
-                "test for group differences."
+                "Trade-size decile accuracy table for political and control samples. "
+                "The CG attenuation pattern (accuracy declining with trade size) provides "
+                "supporting evidence for informed-trading interpretation."
             )
-            _lean_display = e3_leaning.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _lean_display["Sig."] = _lean_display.get("P_VALUE_VS_ZERO", pd.Series()).apply(fmt_sig)
-            _lean_display = _lean_display.round(4)
-            render_df(_lean_display, "Leaning Analysis", "a3_leaning")
+            _sa_display = e3_size_acc.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_sa_display, "Size Accuracy", "a3_size_accuracy")
             st.divider()
 
-        # --- Routine vs Opportunistic ---
-        if not e3_rvo.empty:
-            st.subheader("Routine vs Opportunistic Trades")
+        # --- Reversal Regression ---
+        if not e3_reversal.empty:
+            st.subheader("LPM: Accuracy ~ log(Size) × Political")
             st.markdown(
-                "Cohen, Malloy, and Pomorski (2012) decomposition. Opportunistic "
-                "trades — irregular, information-motivated — should increase more "
-                "before culture war events if insiders are trading on foreknowledge."
+                "Linear probability model with ticker-clustered standard errors. "
+                "Includes within-firm (ticker FE) and pooled interaction specifications."
             )
-            _rvo_display = e3_rvo.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _rvo_display["Sig."] = _rvo_display.get("P_VALUE", pd.Series()).apply(fmt_sig)
-            _rvo_display = _rvo_display.round(4)
-            render_df(_rvo_display, "Routine vs Opportunistic", "a3_rvo")
+            _rev_display = e3_reversal.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_rev_display, "Reversal Regression", "a3_reversal")
             st.divider()
 
-        # --- VIX Regime Interaction ---
-        if not e3_regime.empty:
-            st.subheader("Insider Trading by VIX Regime")
-            st.markdown(
-                "Does insider selling before culture war events intensify during "
-                "high-volatility regimes? Cross-tabulation of regime × test."
-            )
-            _reg_display = e3_regime.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _reg_display["Sig."] = _reg_display.get("P_VALUE", pd.Series()).apply(fmt_sig)
-            _reg_display = _reg_display.round(4)
-            render_df(_reg_display, "Regime Interaction", "a3_regime")
+        # --- CRSP Summary ---
+        if not e3_crsp_summary.empty:
+            st.subheader("CRSP Abnormal Returns")
+            _crsp_display = e3_crsp_summary.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_crsp_display, "CRSP Summary", "a3_crsp")
             st.divider()
 
-        # --- Robustness: Placebo Test ---
+        # --- Wilcoxon Family ---
+        if not e3_wilcoxon.empty:
+            st.subheader("Distributional Tests (Wilcoxon Family Correction)")
+            _wil_display = e3_wilcoxon.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_wil_display, "Wilcoxon Family", "a3_wilcoxon")
+            st.divider()
+
+        # --- TOST ---
+        if not e3_tost.empty:
+            st.subheader("TOST Equivalence Tests")
+            _tost_display = e3_tost.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_tost_display, "TOST", "a3_tost")
+            st.divider()
+
+        # --- Placebo ---
         if not e3_placebo.empty:
             st.subheader("Placebo Test")
-            st.markdown(
-                "Permutation-based placebo test: random pseudo-event dates are assigned "
-                "and the test statistic is recomputed. If the observed statistic exceeds "
-                "95% of placebo values, the effect is unlikely to be spurious."
-            )
             _plac = e3_placebo.iloc[0]
-            _plac_cols = ["TEST", "OBSERVED_STAT", "PLACEBO_MEAN", "PLACEBO_STD",
-                          "PERCENTILE", "EMPIRICAL_P", "N_ITERATIONS", "N_FIRMS"]
-            _plac_data = {c: _plac.get(c, "--") for c in _plac_cols if c in e3_placebo.columns}
-
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Observed Stat", f"{_plac.get('OBSERVED_STAT', 0):.4f}")
             c2.metric("Placebo Mean", f"{_plac.get('PLACEBO_MEAN', 0):.4f}")
             c3.metric("Percentile", f"{_plac.get('PERCENTILE', 0):.1f}")
             c4.metric("Empirical p", fmt_pval(_plac.get("EMPIRICAL_P")))
-
             _plac_display = e3_placebo.drop(columns=["RUN_TIMESTAMP"], errors="ignore").round(4)
             render_df(_plac_display, "Placebo Test", "a3_placebo")
             st.divider()
 
-        # --- Robustness: Acceleration Test ---
-        if not e3_accel.empty:
-            st.subheader("Acceleration Test (Jonckheere-Terpstra)")
-            st.markdown(
-                "Tests for a monotonic increase in insider selling as the event date "
-                "approaches: far window → mid window → near window. The JT test "
-                "detects ordered alternatives without assuming normality."
-            )
-            _acc_display = e3_accel.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _acc_display["Sig."] = _acc_display.get("JT_PVALUE", pd.Series()).apply(fmt_sig)
-            _acc_display = _acc_display.round(4)
-            render_df(_acc_display, "Acceleration Test", "a3_accel")
+        # --- Concentration ---
+        if not e3_concentration.empty:
+            st.subheader("Insider Concentration Metrics")
+            _conc_display = e3_concentration.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_conc_display, "Concentration", "a3_concentration")
             st.divider()
 
-        # --- CAR-Insider Regression ---
-        if not e3_regression.empty:
-            st.subheader("CAR-Insider Selling Regression")
-            st.markdown(
-                "Cross-sectional regression: does pre-event insider selling predict "
-                "post-event abnormal returns (CAR)?"
-            )
-            _reg_display = e3_regression.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _reg_display = _reg_display.round(4)
-            render_df(_reg_display, "CAR Regression", "a3_car_regression")
+        # --- Concentration Cuts ---
+        if not e3_concentration_cuts.empty:
+            st.subheader("Concentration by Event Type / Policy Area")
+            _cc_display = e3_concentration_cuts.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_cc_display, "Concentration Cuts", "a3_concentration_cuts")
             st.divider()
 
-        # --- Treatment vs Control ---
-        if not e3_treat_ctrl.empty:
-            st.subheader("Treatment vs Control Firms")
+        # --- Stratification ---
+        if not e3_stratification.empty:
+            st.subheader("Year × Activity-Tercile Stratification")
             st.markdown(
-                "Comparing insider selling in culture war firms (treatment) vs "
-                "matched control firms."
+                "Event coverage across years and insider-activity terciles, ensuring "
+                "results are not driven by a single time period or activity cluster."
             )
-            _tc_display = e3_treat_ctrl.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _tc_display = _tc_display.round(4)
-            render_df(_tc_display, "Treatment vs Control", "a3_treat_ctrl")
+            _strat_display = e3_stratification.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_strat_display, "Stratification", "a3_stratification", height=400)
             st.divider()
 
-        # --- Information Gradient ---
-        if not e3_gradient.empty:
-            st.subheader("Information Gradient")
+        # --- Mean vs Distributional ---
+        if not e3_mean_vs_dist.empty:
+            st.subheader("Mean vs Distributional Tests")
             st.markdown(
-                "Tests whether insider selling is stronger before events "
-                "that produce larger subsequent CARs."
+                "Side-by-side t-test and Wilcoxon signed-rank across all cuts. "
+                "Distinguishes mean-shift from distributional-shift signals."
             )
-            _grad_display = e3_gradient.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy()
-            _grad_display = _grad_display.round(4)
-            render_df(_grad_display, "Information Gradient", "a3_gradient")
+            _mvd_display = e3_mean_vs_dist.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_mvd_display, "Mean vs Distributional", "a3_mean_vs_dist")
+            st.divider()
+
+        # --- Active Subset ---
+        if not e3_active_subset.empty:
+            st.subheader("Active Subset Characterization")
+            st.markdown(
+                "Observable characteristics of active insiders (those trading in "
+                "multiple event windows), addressing endogeneity concerns."
+            )
+            _as_display = e3_active_subset.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_as_display, "Active Subset", "a3_active_subset")
+            st.divider()
+
+        # --- Quantile Regression ---
+        if not e3_quantile_reg.empty:
+            st.subheader("Quantile / Median Regression")
+            _qr_display = e3_quantile_reg.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_qr_display, "Quantile Regression", "a3_quantile_reg")
+            st.divider()
+
+        # --- Trimmed Robustness ---
+        if not e3_trimmed.empty:
+            st.subheader("Trimmed Robustness (1% Tails Removed)")
+            st.markdown(
+                "Re-test after trimming the top and bottom 1% of the distribution, "
+                "confirming results are not driven by outliers."
+            )
+            _trim_display = e3_trimmed.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_trim_display, "Trimmed Robustness", "a3_trimmed")
+            st.divider()
+
+        # --- Bootstrap Wilcoxon ---
+        if not e3_bootstrap_wilcoxon.empty:
+            st.subheader("Bootstrapped Wilcoxon (Resampled Under H₀)")
+            _bw_display = e3_bootstrap_wilcoxon.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_bw_display, "Bootstrap Wilcoxon", "a3_bootstrap_wilcoxon")
+            st.divider()
+
+        # --- Insider Panel (FE) ---
+        if not e3_insider_panel.empty:
+            st.subheader("Within-Insider Variation (PanelOLS Entity FE)")
+            st.markdown(
+                "Insider fixed-effects regression exploiting within-insider variation "
+                "across events. Controls for time-invariant insider characteristics."
+            )
+            _ip_display = e3_insider_panel.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_ip_display, "Insider Panel FE", "a3_insider_panel")
+            st.divider()
+
+        # --- Repeat Traders ---
+        if not e3_repeat_traders.empty:
+            st.subheader("Repeat Trader Analysis")
+            _rt_display = e3_repeat_traders.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_rt_display, "Repeat Traders", "a3_repeat_traders")
+            st.divider()
+
+        # --- Bootstrap CI ---
+        if not e3_bootstrap_ci.empty:
+            st.subheader("Bootstrap 95% Confidence Intervals")
+            _bci_display = e3_bootstrap_ci.drop(columns=["RUN_TIMESTAMP"], errors="ignore").copy().round(4)
+            render_df(_bci_display, "Bootstrap CI", "a3_bootstrap_ci")
+            st.divider()
+
+        # --- CRSP Profits (trade-level) ---
+        if not e3_crsp_profits.empty:
+            with st.expander(f"CRSP Trade-Level Abnormal Returns ({len(e3_crsp_profits)} trades)", expanded=False):
+                _cp_cols = [c for c in [
+                    "TICKER", "TRADE_TYPE", "TRADE_VALUE", "CAR_30", "CAR_60",
+                    "PROFITABLE_30", "PROFITABLE_60",
+                ] if c in e3_crsp_profits.columns]
+                if _cp_cols:
+                    _cp_display = e3_crsp_profits[_cp_cols].copy()
+                else:
+                    _cp_display = e3_crsp_profits.head(200).copy()
+                for c in _cp_display.select_dtypes(include=[np.number]).columns:
+                    _cp_display[c] = _cp_display[c].round(4)
+                render_df(_cp_display, "CRSP Profits", "a3_crsp_profits", height=400)
+            st.divider()
+
+        # --- Control Trades ---
+        if not e3_control_trades.empty:
+            with st.expander(f"Matched Control Trades ({len(e3_control_trades)} trades)", expanded=False):
+                _ct_cols = [c for c in [
+                    "TICKER", "TRADE_TYPE", "TRADE_VALUE", "CAR_30", "CAR_60",
+                    "PROFITABLE_30", "PROFITABLE_60",
+                ] if c in e3_control_trades.columns]
+                if _ct_cols:
+                    _ct_display = e3_control_trades[_ct_cols].copy()
+                else:
+                    _ct_display = e3_control_trades.head(200).copy()
+                for c in _ct_display.select_dtypes(include=[np.number]).columns:
+                    _ct_display[c] = _ct_display[c].round(4)
+                render_df(_ct_display, "Control Trades", "a3_control_trades", height=400)
             st.divider()
 
         # --- Full Panel (expandable) ---
         if not e3_panel.empty:
-            with st.expander(f"Full Insider Trading Panel ({len(e3_panel)} rows)", expanded=False):
+            with st.expander(f"Full Event-Trade Panel ({len(e3_panel)} rows)", expanded=False):
                 _panel_cols = [c for c in [
-                    "TICKER", "EVENT_ID", "EVENT_DATE", "IS_TREATMENT", "LEAN",
-                    "ABNORMAL_SELLING", "HAS_SUFFICIENT_DATA", "CAR_POST",
-                    "PRE_FULL_NET_DOLLAR_SOLD", "PRE_FULL_NET_SELL_RATIO",
-                    "BENCHMARK_NET_DOLLAR_SOLD", "POST_NET_DOLLAR_SOLD",
+                    "TICKER", "EVENT_ID", "EVENT_DATE", "TRADE_TYPE",
+                    "TRADE_VALUE", "DAYS_BEFORE_EVENT", "EVENT_PROFITABLE",
+                    "PROFITABLE_30", "CAR_30", "CAR_60",
                 ] if c in e3_panel.columns]
-                _panel_display = e3_panel[_panel_cols].copy()
+                if _panel_cols:
+                    _panel_display = e3_panel[_panel_cols].copy()
+                else:
+                    _panel_display = e3_panel.head(100).copy()
                 for c in _panel_display.select_dtypes(include=[np.number]).columns:
                     _panel_display[c] = _panel_display[c].round(4)
-                render_df(_panel_display, "Insider Panel", "a3_full_panel", height=500)
+                render_df(_panel_display, "Panel", "a3_full_panel", height=500)
 
     else:
         st.info(
@@ -2534,19 +2499,22 @@ with tab_a3:
     st.subheader("Contribution to Literature")
     st.markdown(
         "This essay extends the insider trading literature (Seyhun, 1986; Lakonishok "
-        "and Lee, 2001; Cohen et al., 2012) into the political economy domain. If "
-        "insiders systematically sell before culture war events that destroy shareholder "
-        "value, this has implications for:\n\n"
-        "- **SEC enforcement** -- whether politically-motivated corporate actions "
-        "constitute material nonpublic information under Rule 10b-5\n"
-        "- **Corporate governance** -- whether boards adequately manage the intersection "
-        "of political positioning and fiduciary duty\n"
-        "- **Market efficiency** -- whether insider trading transmits political "
-        "information into prices before public disclosure"
+        "and Lee, 2001; Cohen et al., 2012) into the political economy domain. Key "
+        "implications:\n\n"
+        "- **SEC enforcement** — whether political foreknowledge constitutes material "
+        "nonpublic information under Rule 10b-5\n"
+        "- **Regulatory design** — whether post-2023 cooling-off amendments achieve "
+        "their intended effect (our evidence suggests they have not)\n"
+        "- **Market efficiency** — the sell-side accuracy premium and proximity gradient "
+        "provide a microfoundation linking political-economic risk to corporate valuation\n"
+        "- **Dollar magnitudes** — billions in aggregate informed-trading profits challenge "
+        "the view that insider trading around political events is economically trivial"
     )
 
     # --- Chart Gallery ---
     render_chart_gallery(E3_CHARTS, gallery_id="e3")
+
+
 
 
 # =============================================================================
