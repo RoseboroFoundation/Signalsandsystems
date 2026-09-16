@@ -537,6 +537,155 @@ def _compute_fundamental_cars(car_df, political_events, form4, store):
     return car_df
 
 
+def _compute_cultural_cars_decomposed(car_df, culture_events, store):
+    """Compute decomposed CARs for ALL cultural events.
+
+    Uses compute_car_decomposed (same FF5 + windows as fundamental events)
+    to produce CAR_ANNOUNCE [0,+1], CAR_DRIFT [+2,+60], CAR_REMAINING [+11,+60],
+    and CAR_POST_10 [0,+10] for each culture-war event.
+
+    For events that already have a CAR in car_df (from Essay 2), the existing
+    value is preserved.  Both Essay-2 and new decomposed CARs are returned in
+    the cultural_car_decomp table so the caller can compare and report
+    correlation.
+
+    Returns (updated car_df, cultural_car_decomp DataFrame).
+    """
+    pairs = []
+    for _, ev in culture_events.iterrows():
+        # Treatment ticker
+        ticker = ev['TICKER']
+        event_date = pd.Timestamp(ev['EVENT_DATE'])
+        event_id = f"CW_{ticker}_{event_date.strftime('%Y%m%d')}"
+        pairs.append({
+            'TICKER': ticker, 'EVENT_DATE': event_date,
+            'EVENT_ID': event_id, 'IS_TREATMENT': True,
+        })
+        # Control ticker (if present)
+        ctrl = ev.get('CONTROL_TICKER')
+        if ctrl and pd.notna(ctrl) and str(ctrl).strip():
+            ctrl = str(ctrl).strip()
+            ctrl_id = f"CW_CTRL_{ctrl}_{event_date.strftime('%Y%m%d')}"
+            pairs.append({
+                'TICKER': ctrl, 'EVENT_DATE': event_date,
+                'EVENT_ID': ctrl_id, 'IS_TREATMENT': False,
+            })
+
+    if not pairs:
+        return car_df, pd.DataFrame()
+
+    # Build lookup of existing CARs (from Essay 2 EVENT_STUDY_RESULTS)
+    existing_car = {}
+    if car_df is not None and not car_df.empty:
+        for _, row in car_df.iterrows():
+            key = (row['TICKER'], pd.Timestamp(row['EVENT_DATE']).strftime('%Y%m%d'))
+            existing_car[key] = row.get('CAR', None)
+
+    logger.info("Computing decomposed CARs for %d cultural events...", len(pairs))
+    decomp_rows = []
+    new_car_rows = []
+    done = 0
+    for p in pairs:
+        ticker = p['TICKER']
+        event_date = p['EVENT_DATE']
+        key = (ticker, event_date.strftime('%Y%m%d'))
+        e2_car = existing_car.get(key)
+
+        result = compute_car_decomposed(
+            ticker=ticker, store=store,
+            event_id=p['EVENT_ID'], event_date=event_date,
+            is_treatment=p['IS_TREATMENT'], regime='Unknown',
+        )
+        if result is not None:
+            decomp_rows.append({
+                'TICKER': ticker, 'EVENT_DATE': event_date,
+                'EVENT_ID': p['EVENT_ID'],
+                'IS_TREATMENT': p['IS_TREATMENT'],
+                'CAR_POST_10': result['car_post_10'],
+                'CAR_ANNOUNCE': result['car_announce'],
+                'CAR_DRIFT': result['car_drift'],
+                'CAR_REMAINING': result['car_remaining'],
+                'CAR_REMAINING_5': result['car_remaining_5'],
+                'CAR_REMAINING_20': result['car_remaining_20'],
+                'CAR_PRE': result['car_pre'],
+                'CAR_POST_60': result['car_post'],
+                'R_SQUARED': result['r_squared'],
+                'N_OBS': result['n_event_obs'],
+                'E2_CAR': e2_car,
+                'STATUS': 'OK',
+            })
+            # Add to car_df if not already present, or update with decomposed fields
+            if key not in existing_car:
+                new_car_rows.append({
+                    'TICKER': ticker, 'EVENT_DATE': event_date,
+                    'CAR': result['car_post_10'],
+                    'CAR_PRE': result['car_pre'],
+                    'CAR_ANNOUNCE': result['car_announce'],
+                    'CAR_DRIFT': result['car_drift'],
+                    'CAR_REMAINING': result['car_remaining'],
+                    'CAR_REM_5': result['car_remaining_5'],
+                    'CAR_REM_20': result['car_remaining_20'],
+                    'N_OBS': result['n_event_obs'],
+                    'R_SQUARED': result['r_squared'],
+                    'STATUS': 'OK',
+                })
+            else:
+                # Already has E2 CAR — add decomposed fields to existing row
+                new_car_rows.append({
+                    'TICKER': ticker, 'EVENT_DATE': event_date,
+                    'CAR': e2_car,  # preserve Essay 2 CAR
+                    'CAR_PRE': result['car_pre'],
+                    'CAR_ANNOUNCE': result['car_announce'],
+                    'CAR_DRIFT': result['car_drift'],
+                    'CAR_REMAINING': result['car_remaining'],
+                    'CAR_REM_5': result['car_remaining_5'],
+                    'CAR_REM_20': result['car_remaining_20'],
+                    'N_OBS': result['n_event_obs'],
+                    'R_SQUARED': result['r_squared'],
+                    'STATUS': 'OK',
+                })
+        done += 1
+        if done % 50 == 0:
+            logger.info("  Cultural CARs: %d/%d (%d successful)",
+                        done, len(pairs), len(decomp_rows))
+
+    cultural_car_decomp = pd.DataFrame(decomp_rows)
+    logger.info("  Cultural CARs computed: %d/%d (%.0f%% coverage)",
+                len(decomp_rows), len(pairs),
+                100 * len(decomp_rows) / len(pairs) if pairs else 0)
+
+    # Report E2 vs new CAR correlation for events that have both
+    if not cultural_car_decomp.empty:
+        has_both = cultural_car_decomp[
+            cultural_car_decomp['E2_CAR'].notna() &
+            cultural_car_decomp['CAR_POST_10'].notna()
+        ]
+        if len(has_both) >= 5:
+            corr = np.corrcoef(
+                has_both['E2_CAR'].astype(float),
+                has_both['CAR_POST_10'].astype(float)
+            )[0, 1]
+            logger.info("  E2↔decomposed CAR correlation: %.4f (N=%d)", corr, len(has_both))
+
+    # Merge new CARs into car_df
+    # For events that already exist in car_df, we need to update the decomposed fields
+    if new_car_rows:
+        new_df = pd.DataFrame(new_car_rows)
+        if car_df is not None and not car_df.empty:
+            # Remove old rows for tickers we're updating, then append
+            car_df['_key'] = (car_df['TICKER'].astype(str) + '_' +
+                              pd.to_datetime(car_df['EVENT_DATE']).dt.strftime('%Y%m%d'))
+            new_df['_key'] = (new_df['TICKER'].astype(str) + '_' +
+                              pd.to_datetime(new_df['EVENT_DATE']).dt.strftime('%Y%m%d'))
+            car_df = car_df[~car_df['_key'].isin(new_df['_key'])].drop(columns=['_key'])
+            new_df = new_df.drop(columns=['_key'])
+            car_df = pd.concat([car_df, new_df], ignore_index=True)
+        else:
+            car_df = new_df
+
+    return car_df, cultural_car_decomp
+
+
 # ═════════════════════════════════════════════════════════════════════
 # PANEL BUILDER
 # ═════════════════════════════════════════════════════════════════════
@@ -795,11 +944,25 @@ def build_insider_panel(form4, culture_events, political_events,
     # Stratify
     panel = _stratify_panel(panel)
 
-    logger.info("  Panel built: %d rows (%d cultural, %d fundamental), %d with data",
+    # Derive ACTION_ID: the underlying political action, stripped of ticker.
+    # For fundamental events: EVENT_ID = "{action}_{date}_{TICKER}" → ACTION_ID
+    # drops the ticker suffix.  Cultural events: ACTION_ID = EVENT_ID (each
+    # event is firm-specific).
+    def _extract_action_id(row):
+        eid = str(row['EVENT_ID'])
+        ticker = str(row['TICKER'])
+        if row['EVENT_CATEGORY'] == 'FUNDAMENTAL' and eid.endswith('_' + ticker):
+            return eid[:-(len(ticker) + 1)]
+        return eid
+    panel['ACTION_ID'] = panel.apply(_extract_action_id, axis=1)
+
+    logger.info("  Panel built: %d rows (%d cultural, %d fundamental), %d with data, "
+                "%d unique actions",
                 len(panel),
                 (panel['EVENT_CATEGORY'] == 'CULTURAL').sum(),
                 (panel['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum(),
-                panel['HAS_SUFFICIENT_DATA'].sum())
+                panel['HAS_SUFFICIENT_DATA'].sum(),
+                panel['ACTION_ID'].nunique())
     return panel
 
 
@@ -5363,6 +5526,816 @@ def compute_delayed_reaction_tests(panel, crsp_profits, valid_pol):
 
 
 # ═════════════════════════════════════════════════════════════════════
+# §15 — INITIATION-ARM SPLIT TESTS (firm_initiated vs external)
+# ═════════════════════════════════════════════════════════════════════
+
+def compute_initiation_split_tests(panel, crsp_profits, control_trades, valid_pol):
+    """§15 Initiation-arm split tests.
+
+    Loads event_initiation_coding.csv, merges reconciled_initiation onto the
+    panel, and reruns headline tests separately by initiation arm:
+      - firm_initiated: firm chose the action (e.g. DEI pledge, CEO statement)
+      - external: done to the firm (legislative votes, executive orders, lawsuits)
+      - reactive: firm response to external trigger (e.g. post-Dobbs benefits)
+
+    Arms tested:
+      1. firm_initiated vs external (primary split)
+      2. firm_initiated + reactive pooled vs external (sensitivity)
+      3. reactive alone (descriptive only)
+
+    Tests per arm:
+      (a) TOST equivalence on ABNORMAL_NET_TRADING (SESOI d=0.2),
+          plus trimmed/winsorized variants, breakeven SESOI, and required N
+      (b) Joint Pesaran-Timmermann sign test on pre-event sells
+      (c) Size-decile accuracy slope with political × firm_initiated interaction
+      (d) Political-vs-control accuracy premium with per-arm conditional base rate
+      (e) §14 post-event trading regression (reports N even when insufficient)
+
+    Returns dict of DataFrames keyed by T15_* names.
+    """
+    import os
+
+    empty = {
+        'initiation_summary': pd.DataFrame(),
+        'initiation_tost': pd.DataFrame(),
+        'initiation_pt': pd.DataFrame(),
+        'initiation_slopes': pd.DataFrame(),
+        'initiation_premium': pd.DataFrame(),
+        'initiation_post_reg': pd.DataFrame(),
+    }
+
+    # ── Load initiation coding ────────────────────────────────────────
+    coding_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                               'event_initiation_coding.csv')
+    if not os.path.exists(coding_path):
+        logger.warning("§15: event_initiation_coding.csv not found at %s", coding_path)
+        return empty
+
+    coding = pd.read_csv(coding_path)
+    # Use reconciled_initiation if filled, otherwise fall back to initiation
+    n_reconciled = coding['reconciled_initiation'].notna().sum()
+    coding['INITIATION'] = coding['reconciled_initiation'].fillna(coding['initiation'])
+    coding['EVENT_ID'] = coding['event_id'].astype(str)
+    logger.info("§15 Coding: %d rows, reconciled_initiation populated=%d (coder1 only=%s)",
+                len(coding), n_reconciled, 'yes' if n_reconciled == 0 else 'no')
+
+    # Report confidence counts
+    if 'confidence' in coding.columns:
+        conf_counts = coding['confidence'].value_counts().to_dict()
+        logger.info("§15 Confidence: %s", conf_counts)
+
+    # ── Merge onto panel ──────────────────────────────────────────────
+    panel = panel.copy()
+    panel['EVENT_ID'] = panel['EVENT_ID'].astype(str)
+    # Deduplicate coding to one row per EVENT_ID (panel EVENT_IDs are unique per row)
+    coding_dedup = coding[['EVENT_ID', 'INITIATION']].drop_duplicates(subset='EVENT_ID')
+    panel = panel.merge(coding_dedup, on='EVENT_ID', how='left')
+
+    unmatched = panel['INITIATION'].isna().sum()
+    if unmatched > 0:
+        logger.warning("§15: %d panel rows unmatched to initiation coding", unmatched)
+        panel['INITIATION'] = panel['INITIATION'].fillna('external')
+
+    logger.info("§15 Initiation distribution: %s",
+                panel['INITIATION'].value_counts().to_dict())
+
+    # ── Summary table (extended) ──────────────────────────────────────
+    summary_rows = []
+    for arm in ['firm_initiated', 'external', 'reactive']:
+        sub = panel[panel['INITIATION'] == arm]
+        with_data = sub[sub['HAS_SUFFICIENT_DATA'] == 1]
+        has_car_post = sub['CAR_POST'].notna().sum() if 'CAR_POST' in sub.columns else 0
+        has_car_remaining = sub['CAR_REMAINING'].notna().sum() if 'CAR_REMAINING' in sub.columns else 0
+        summary_rows.append({
+            'ARM': arm,
+            'N_EVENTS': len(sub),
+            'N_WITH_DATA': len(with_data),
+            'N_CULTURAL': int((sub['EVENT_CATEGORY'] == 'CULTURAL').sum()),
+            'N_FUNDAMENTAL': int((sub['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum()),
+            'N_WITH_CAR_POST': int(has_car_post),
+            'N_WITH_CAR_REMAINING': int(has_car_remaining),
+            'MEAN_ABNORMAL_NET': with_data['ABNORMAL_NET_TRADING'].mean()
+                if 'ABNORMAL_NET_TRADING' in with_data.columns and len(with_data) > 0
+                else np.nan,
+            'NOTE': '',
+        })
+    # Add pooled sensitivity arm
+    pooled = panel[panel['INITIATION'].isin(['firm_initiated', 'reactive'])]
+    pooled_data = pooled[pooled['HAS_SUFFICIENT_DATA'] == 1]
+    summary_rows.append({
+        'ARM': 'firm_initiated+reactive',
+        'N_EVENTS': len(pooled),
+        'N_WITH_DATA': len(pooled_data),
+        'N_CULTURAL': int((pooled['EVENT_CATEGORY'] == 'CULTURAL').sum()),
+        'N_FUNDAMENTAL': int((pooled['EVENT_CATEGORY'] == 'FUNDAMENTAL').sum()),
+        'N_WITH_CAR_POST': int(pooled['CAR_POST'].notna().sum()) if 'CAR_POST' in pooled.columns else 0,
+        'N_WITH_CAR_REMAINING': int(pooled['CAR_REMAINING'].notna().sum()) if 'CAR_REMAINING' in pooled.columns else 0,
+        'MEAN_ABNORMAL_NET': pooled_data['ABNORMAL_NET_TRADING'].mean()
+            if 'ABNORMAL_NET_TRADING' in pooled_data.columns and len(pooled_data) > 0
+            else np.nan,
+        'NOTE': '',
+    })
+    initiation_summary = pd.DataFrame(summary_rows)
+
+    # ── Define arm subsets ────────────────────────────────────────────
+    arms = {
+        'firm_initiated': panel[panel['INITIATION'] == 'firm_initiated'],
+        'external': panel[panel['INITIATION'] == 'external'],
+        'reactive': panel[panel['INITIATION'] == 'reactive'],
+        'firm_initiated+reactive': panel[panel['INITIATION'].isin(
+            ['firm_initiated', 'reactive'])],
+    }
+
+    # ── (a) TOST equivalence on ABNORMAL_NET_TRADING ──────────────────
+    # Includes: standard TOST, trimmed (1%/5%), winsorized (1%/5%),
+    # breakeven SESOI, and required N for 80% power at d=0.2
+    tost_rows = []
+    dv = 'ABNORMAL_NET_TRADING'
+    for arm_label, arm_panel in arms.items():
+        arm_data = arm_panel[arm_panel['HAS_SUFFICIENT_DATA'] == 1]
+        vals = arm_data[dv].dropna() if dv in arm_data.columns else pd.Series(dtype=float)
+        if len(vals) < 10:
+            continue
+
+        # Standard TOST
+        t = _compute_tost(vals, SESOI_D)
+        t['ARM'] = arm_label
+        t['TEST'] = 'TOST'
+
+        # Breakeven SESOI: smallest d at which TOST passes at α=.05
+        # Binary search between 0.01 and 5.0
+        lo_d, hi_d = 0.01, 5.0
+        for _ in range(50):
+            mid_d = (lo_d + hi_d) / 2
+            mid_t = _compute_tost(vals, mid_d)
+            if mid_t['P_TOST'] < 0.05:
+                hi_d = mid_d
+            else:
+                lo_d = mid_d
+        t['BREAKEVEN_SESOI_D'] = hi_d
+
+        # Required N for 80% power at d=0.2, given observed SD
+        # N = ((z_alpha + z_beta) / (delta/sigma))^2
+        # delta = SESOI_D * sigma, so N = ((z_alpha + z_beta) / SESOI_D)^2
+        z_alpha = stats.norm.ppf(0.975)
+        z_beta = stats.norm.ppf(0.80)
+        required_n = int(np.ceil(((z_alpha + z_beta) / SESOI_D) ** 2))
+        t['REQUIRED_N_80PCT_POWER'] = required_n
+
+        tost_rows.append(t)
+        logger.info("  §15a TOST %s: N=%d mean=%.2f p_tost=%.4f equiv=%s breakeven_d=%.3f req_N=%d",
+                    arm_label, t['N'], t['MEAN'], t['P_TOST'], t['EQUIVALENT'],
+                    hi_d, required_n)
+
+        # Trimmed TOST (1% and 5%)
+        for trim_pct in [1, 5]:
+            lo_q = np.percentile(vals, trim_pct)
+            hi_q = np.percentile(vals, 100 - trim_pct)
+            trimmed = vals[(vals >= lo_q) & (vals <= hi_q)]
+            if len(trimmed) >= 10:
+                tt = _compute_tost(trimmed, SESOI_D)
+                tt['ARM'] = arm_label
+                tt['TEST'] = f'TOST_TRIMMED_{trim_pct}PCT'
+                tt['BREAKEVEN_SESOI_D'] = np.nan
+                tt['REQUIRED_N_80PCT_POWER'] = np.nan
+                tost_rows.append(tt)
+                logger.info("    trimmed %d%%: N=%d mean=%.2f p_tost=%.4f equiv=%s",
+                            trim_pct, tt['N'], tt['MEAN'], tt['P_TOST'], tt['EQUIVALENT'])
+
+        # Winsorized TOST (1% and 5%)
+        for wins_pct in [1, 5]:
+            lo_q = np.percentile(vals, wins_pct)
+            hi_q = np.percentile(vals, 100 - wins_pct)
+            winsorized = vals.clip(lo_q, hi_q)
+            if len(winsorized) >= 10:
+                wt = _compute_tost(winsorized, SESOI_D)
+                wt['ARM'] = arm_label
+                wt['TEST'] = f'TOST_WINSORIZED_{wins_pct}PCT'
+                wt['BREAKEVEN_SESOI_D'] = np.nan
+                wt['REQUIRED_N_80PCT_POWER'] = np.nan
+                tost_rows.append(wt)
+                logger.info("    winsorized %d%%: N=%d mean=%.2f p_tost=%.4f equiv=%s",
+                            wins_pct, wt['N'], wt['MEAN'], wt['P_TOST'], wt['EQUIVALENT'])
+
+    # Action-level TOST for external arm (collapses multi-ticker political
+    # actions to one observation per action via mean ABNORMAL_NET_TRADING)
+    if 'ACTION_ID' in panel.columns:
+        ext_panel = panel[(panel['INITIATION'] == 'external') &
+                          (panel['HAS_SUFFICIENT_DATA'] == 1)]
+        if dv in ext_panel.columns:
+            action_means = ext_panel.groupby('ACTION_ID')[dv].mean().dropna()
+            if len(action_means) >= 10:
+                at = _compute_tost(action_means, SESOI_D)
+                at['ARM'] = 'external'
+                at['TEST'] = 'TOST_ACTION_LEVEL'
+                lo_d, hi_d = 0.01, 5.0
+                for _ in range(50):
+                    mid_d = (lo_d + hi_d) / 2
+                    if _compute_tost(action_means, mid_d)['P_TOST'] < 0.05:
+                        hi_d = mid_d
+                    else:
+                        lo_d = mid_d
+                at['BREAKEVEN_SESOI_D'] = hi_d
+                at['REQUIRED_N_80PCT_POWER'] = np.nan
+                tost_rows.append(at)
+                logger.info("  §15a TOST external ACTION_LEVEL: N=%d (actions) "
+                            "mean=%.2f p_tost=%.4f equiv=%s",
+                            at['N'], at['MEAN'], at['P_TOST'], at['EQUIVALENT'])
+
+    initiation_tost = pd.DataFrame(tost_rows)
+
+    # ── Merge initiation onto valid_pol for tests (b)-(e) ─────────────
+    if valid_pol is not None and not valid_pol.empty:
+        vp = valid_pol.copy()
+        vp['EVENT_ID'] = vp['EVENT_ID'].astype(str)
+        if 'INITIATION' not in vp.columns:
+            vp = vp.merge(coding_dedup, on='EVENT_ID', how='left')
+            vp['INITIATION'] = vp['INITIATION'].fillna('external')
+    else:
+        vp = pd.DataFrame()
+
+    # ── (b) Joint PT sign test per arm ────────────────────────────────
+    # Reports N_ARM_PANEL (total panel events in arm) and N_WITH_EVENT_CAR
+    # (events with valid EVENT_CAR) to explain the filter drop.
+    pt_rows = []
+    if not vp.empty and 'EVENT_CAR' in vp.columns and 'TRADE_TYPE' in vp.columns:
+        for arm_label in ['firm_initiated', 'external', 'reactive', 'firm_initiated+reactive']:
+            if arm_label == 'firm_initiated+reactive':
+                arm_vp = vp[vp['INITIATION'].isin(['firm_initiated', 'reactive'])]
+                n_arm_panel = len(panel[panel['INITIATION'].isin(['firm_initiated', 'reactive'])])
+            else:
+                arm_vp = vp[vp['INITIATION'] == arm_label]
+                n_arm_panel = len(panel[panel['INITIATION'] == arm_label])
+
+            # How many arm events appear in valid_pol at all?
+            n_with_event_car = arm_vp['EVENT_ID'].nunique()
+
+            jp_raw = arm_vp[['TRADE_TYPE', 'EVENT_CAR', 'EVENT_ID']].dropna()
+            if len(jp_raw) < 10:
+                # Report the arm even if insufficient — item #7 fix
+                pt_rows.append({
+                    'ARM': arm_label,
+                    'N_EVENTS': 0,
+                    'N_ARM_PANEL': n_arm_panel,
+                    'N_WITH_EVENT_CAR': n_with_event_car,
+                    'N_TRADES_RAW': len(jp_raw),
+                    'P_SELL': np.nan, 'P_NEG_CAR': np.nan,
+                    'NULL_ACCURACY': np.nan, 'OBS_ACCURACY': np.nan,
+                    'EXCESS_ACCURACY': np.nan, 'PT_Z_STAT': np.nan,
+                    'PT_P_VALUE': np.nan,
+                    'FILTER_NOTE': (
+                        f'Only {len(jp_raw)} trades with EVENT_CAR; '
+                        f'{n_arm_panel} panel events, {n_with_event_car} with EVENT_CAR. '
+                        f'Filter: valid_pol requires CAR_POST on panel event '
+                        f'(cultural controls and many cultural treatments lack '
+                        f'event-study CARs). Same filter as full-sample PT (854/1712).'),
+                })
+                continue
+
+            jp_ev = (
+                jp_raw.groupby('EVENT_ID')
+                .agg(
+                    EVENT_CAR=('EVENT_CAR', 'first'),
+                    N_SELLS=('TRADE_TYPE', lambda x: (x == 'sell').sum()),
+                    N_BUYS=('TRADE_TYPE', lambda x: (x == 'buy').sum()),
+                )
+                .reset_index()
+            )
+            n_before_tie_filter = len(jp_ev)
+            jp_ev['NET_DIR'] = np.sign(jp_ev['N_SELLS'] - jp_ev['N_BUYS'])
+            n_ties = (jp_ev['NET_DIR'] == 0).sum()
+            jp_ev = jp_ev[jp_ev['NET_DIR'] != 0].copy()
+            jp_ev['TRADE_DIRECTION'] = np.where(jp_ev['NET_DIR'] > 0, 'sell', 'buy')
+
+            if len(jp_ev) < 10:
+                pt_rows.append({
+                    'ARM': arm_label,
+                    'N_EVENTS': len(jp_ev),
+                    'N_ARM_PANEL': n_arm_panel,
+                    'N_WITH_EVENT_CAR': n_with_event_car,
+                    'N_TRADES_RAW': len(jp_raw),
+                    'P_SELL': np.nan, 'P_NEG_CAR': np.nan,
+                    'NULL_ACCURACY': np.nan, 'OBS_ACCURACY': np.nan,
+                    'EXCESS_ACCURACY': np.nan, 'PT_Z_STAT': np.nan,
+                    'PT_P_VALUE': np.nan,
+                    'FILTER_NOTE': (
+                        f'{n_arm_panel} panel → {n_with_event_car} with EVENT_CAR → '
+                        f'{n_before_tie_filter} with trades → {n_ties} ties removed → '
+                        f'{len(jp_ev)} events (< 10 threshold).'),
+                })
+                continue
+
+            n_tot = len(jp_ev)
+            p_sell = (jp_ev['TRADE_DIRECTION'] == 'sell').mean()
+            p_buy = 1.0 - p_sell
+            p_neg_car = (jp_ev['EVENT_CAR'] < 0).mean()
+            p_pos_car = 1.0 - p_neg_car
+            correct = (
+                ((jp_ev['TRADE_DIRECTION'] == 'sell') & (jp_ev['EVENT_CAR'] < 0)) |
+                ((jp_ev['TRADE_DIRECTION'] == 'buy') & (jp_ev['EVENT_CAR'] > 0))
+            )
+            obs_acc = correct.mean()
+            p_star = p_sell * p_neg_car + p_buy * p_pos_car
+            # PT (1992) eq.7 variance
+            var_p_star = (
+                (2 * p_neg_car - 1) ** 2 * p_sell * (1 - p_sell) / n_tot +
+                (2 * p_sell - 1) ** 2 * p_neg_car * (1 - p_neg_car) / n_tot +
+                4 * p_sell * p_neg_car * (1 - p_sell) * (1 - p_neg_car) / n_tot ** 2
+            )
+            var_obs = p_star * (1 - p_star) / n_tot
+            var_diff = var_obs - var_p_star
+            z_pt = (obs_acc - p_star) / np.sqrt(var_diff) if var_diff > 0 else np.nan
+            p_pt = 2 * (1 - stats.norm.cdf(abs(z_pt))) if not np.isnan(z_pt) else np.nan
+
+            pt_rows.append({
+                'ARM': arm_label,
+                'N_EVENTS': n_tot,
+                'N_ARM_PANEL': n_arm_panel,
+                'N_WITH_EVENT_CAR': n_with_event_car,
+                'N_TRADES_RAW': len(jp_raw),
+                'P_SELL': p_sell,
+                'P_NEG_CAR': p_neg_car,
+                'NULL_ACCURACY': p_star,
+                'OBS_ACCURACY': obs_acc,
+                'EXCESS_ACCURACY': obs_acc - p_star,
+                'PT_Z_STAT': z_pt,
+                'PT_P_VALUE': p_pt,
+                'FILTER_NOTE': (
+                    f'{n_arm_panel} panel → {n_with_event_car} with EVENT_CAR → '
+                    f'{n_before_tie_filter} with trades → {n_ties} ties removed → '
+                    f'{n_tot} events used. Same filter as full-sample PT (854/1712): '
+                    f'requires CAR_POST (from event study) + pre-event trades in CRSP_PROFITS.'),
+            })
+            logger.info("  §15b PT %s: n_ev=%d (of %d panel) obs=%.4f null=%.4f z=%.3f p=%.4f",
+                        arm_label, n_tot, n_arm_panel, obs_acc, p_star, z_pt, p_pt)
+
+    # Action-level PT for external arm: aggregate to one obs per ACTION_ID
+    # (collapses multi-ticker same-action events)
+    if (not vp.empty and 'EVENT_CAR' in vp.columns and
+            'TRADE_TYPE' in vp.columns and 'ACTION_ID' in panel.columns):
+        ext_vp = vp[vp['INITIATION'] == 'external'].copy()
+        if 'ACTION_ID' not in ext_vp.columns:
+            # Merge ACTION_ID from panel
+            aid_map = panel[['EVENT_ID', 'ACTION_ID']].drop_duplicates('EVENT_ID')
+            ext_vp = ext_vp.merge(aid_map, on='EVENT_ID', how='left')
+        jp_raw_act = ext_vp[['TRADE_TYPE', 'EVENT_CAR', 'ACTION_ID']].dropna()
+        if len(jp_raw_act) >= 10:
+            # Aggregate to action level: net trade direction and mean CAR
+            act_agg = (
+                jp_raw_act.groupby('ACTION_ID')
+                .agg(
+                    EVENT_CAR=('EVENT_CAR', 'mean'),
+                    N_SELLS=('TRADE_TYPE', lambda x: (x == 'sell').sum()),
+                    N_BUYS=('TRADE_TYPE', lambda x: (x == 'buy').sum()),
+                )
+                .reset_index()
+            )
+            act_agg['NET_DIR'] = np.sign(act_agg['N_SELLS'] - act_agg['N_BUYS'])
+            n_act_ties = (act_agg['NET_DIR'] == 0).sum()
+            act_agg = act_agg[act_agg['NET_DIR'] != 0].copy()
+            act_agg['TRADE_DIRECTION'] = np.where(act_agg['NET_DIR'] > 0, 'sell', 'buy')
+
+            if len(act_agg) >= 10:
+                n_act = len(act_agg)
+                p_sell_a = (act_agg['TRADE_DIRECTION'] == 'sell').mean()
+                p_buy_a = 1.0 - p_sell_a
+                p_neg_a = (act_agg['EVENT_CAR'] < 0).mean()
+                p_pos_a = 1.0 - p_neg_a
+                correct_a = (
+                    ((act_agg['TRADE_DIRECTION'] == 'sell') & (act_agg['EVENT_CAR'] < 0)) |
+                    ((act_agg['TRADE_DIRECTION'] == 'buy') & (act_agg['EVENT_CAR'] > 0))
+                )
+                obs_a = correct_a.mean()
+                p_star_a = p_sell_a * p_neg_a + p_buy_a * p_pos_a
+                var_ps_a = (
+                    (2 * p_neg_a - 1) ** 2 * p_sell_a * (1 - p_sell_a) / n_act +
+                    (2 * p_sell_a - 1) ** 2 * p_neg_a * (1 - p_neg_a) / n_act +
+                    4 * p_sell_a * p_neg_a * (1 - p_sell_a) * (1 - p_neg_a) / n_act ** 2
+                )
+                var_obs_a = p_star_a * (1 - p_star_a) / n_act
+                var_d_a = var_obs_a - var_ps_a
+                z_a = (obs_a - p_star_a) / np.sqrt(var_d_a) if var_d_a > 0 else np.nan
+                p_a = 2 * (1 - stats.norm.cdf(abs(z_a))) if not np.isnan(z_a) else np.nan
+
+                pt_rows.append({
+                    'ARM': 'external_ACTION_LEVEL',
+                    'N_EVENTS': n_act,
+                    'N_ARM_PANEL': len(panel[panel['INITIATION'] == 'external']),
+                    'N_WITH_EVENT_CAR': ext_vp['ACTION_ID'].nunique(),
+                    'N_TRADES_RAW': len(jp_raw_act),
+                    'P_SELL': p_sell_a, 'P_NEG_CAR': p_neg_a,
+                    'NULL_ACCURACY': p_star_a, 'OBS_ACCURACY': obs_a,
+                    'EXCESS_ACCURACY': obs_a - p_star_a,
+                    'PT_Z_STAT': z_a, 'PT_P_VALUE': p_a,
+                    'FILTER_NOTE': (
+                        f'Action-level aggregation: {n_act} unique political actions '
+                        f'({n_act_ties} ties removed). Collapses multi-ticker events '
+                        f'(mean 5.8 tickers/action) to one obs per action.'),
+                })
+                logger.info("  §15b PT external ACTION_LEVEL: n_act=%d obs=%.4f "
+                            "null=%.4f z=%.3f p=%.4f",
+                            n_act, obs_a, p_star_a, z_a, p_a)
+                initiation_pt = pd.DataFrame(pt_rows)
+
+    # ── (c) Size-decile accuracy slopes + interaction ─────────────────
+    slope_rows = []
+    if not vp.empty and 'EVENT_PROFITABLE' in vp.columns and 'TRADE_VALUE' in vp.columns:
+        # Political sells only
+        pol_sells = vp[(vp['TRADE_TYPE'] == 'sell') & vp['EVENT_PROFITABLE'].notna()].copy()
+        if len(pol_sells) >= 30:
+            try:
+                _, bins = pd.qcut(pol_sells['TRADE_VALUE'], 10, retbins=True, duplicates='drop')
+                bins[0] = 0
+                bins[-1] = np.inf
+                pol_sells['SIZE_DECILE'] = pd.cut(
+                    pol_sells['TRADE_VALUE'], bins=bins, labels=False) + 1
+            except ValueError:
+                pol_sells['SIZE_DECILE'] = 1
+
+            # Per-arm slopes
+            for arm_label in ['firm_initiated', 'external', 'reactive', 'firm_initiated+reactive']:
+                if arm_label == 'firm_initiated+reactive':
+                    arm_sells = pol_sells[pol_sells['INITIATION'].isin(
+                        ['firm_initiated', 'reactive'])]
+                else:
+                    arm_sells = pol_sells[pol_sells['INITIATION'] == arm_label]
+
+                valid_arm = arm_sells[arm_sells['EVENT_PROFITABLE'].notna()]
+                n_deciles_avail = len(valid_arm['SIZE_DECILE'].unique()) if len(valid_arm) > 0 else 0
+
+                # Report even if not estimable — item #4 fix
+                if len(valid_arm) < 20 or n_deciles_avail < 3:
+                    # Check why not estimable
+                    if len(valid_arm) == 0:
+                        reason = 'No sells with EVENT_PROFITABLE (requires EVENT_CAR from panel)'
+                    elif n_deciles_avail < 3:
+                        acc_vals = valid_arm['EVENT_PROFITABLE'].unique()
+                        reason = (f'Only {n_deciles_avail} decile(s) populated '
+                                  f'({len(valid_arm)} trades). '
+                                  f'Accuracy values: {sorted(acc_vals)}. '
+                                  f'Decile bins from pooled thresholds collapse '
+                                  f'when arm has narrow trade-value range.')
+                    else:
+                        reason = f'Only {len(valid_arm)} trades (< 20 threshold)'
+                    slope_rows.append({
+                        'ARM': arm_label,
+                        'SPEC': 'NOT_ESTIMABLE',
+                        'SLOPE': np.nan,
+                        'SLOPE_PVAL': np.nan,
+                        'SLOPE_R2': np.nan,
+                        'N_TRADES': len(valid_arm),
+                        'N_DECILES': n_deciles_avail,
+                        'REASON': reason,
+                    })
+                    logger.info("  §15c slope %s: NOT ESTIMABLE — %s", arm_label, reason)
+                    continue
+
+                decile_data = valid_arm.groupby('SIZE_DECILE').agg(
+                    accuracy=('EVENT_PROFITABLE', 'mean'),
+                    log_tv=('TRADE_VALUE', lambda x: np.log(x.median())),
+                )
+                # Check for constant accuracy (degenerate linregress)
+                if decile_data['accuracy'].nunique() <= 1:
+                    slope_rows.append({
+                        'ARM': arm_label,
+                        'SPEC': 'NOT_ESTIMABLE',
+                        'SLOPE': 0.0,
+                        'SLOPE_PVAL': np.nan,
+                        'SLOPE_R2': np.nan,
+                        'N_TRADES': len(valid_arm),
+                        'N_DECILES': len(decile_data),
+                        'REASON': 'Constant accuracy across deciles (zero variance in DV)',
+                    })
+                    continue
+
+                sl, _, r_val, p_val, _ = stats.linregress(
+                    decile_data['log_tv'].values, decile_data['accuracy'].values)
+                slope_rows.append({
+                    'ARM': arm_label,
+                    'SPEC': 'WITHIN_ARM',
+                    'SLOPE': sl,
+                    'SLOPE_PVAL': p_val,
+                    'SLOPE_R2': r_val ** 2,
+                    'N_TRADES': len(valid_arm),
+                    'N_DECILES': len(decile_data),
+                    'REASON': '',
+                })
+                logger.info("  §15c slope %s: %.6f (p=%.4f, R²=%.4f, N=%d)",
+                            arm_label, sl, p_val, r_val ** 2, len(valid_arm))
+
+            # Interaction: OLS accuracy ~ log_tv + FIRM_INITIATED + log_tv × FIRM_INITIATED
+            # (uses trade-level data, event-clustered SE)
+            fi_sells = pol_sells[
+                pol_sells['INITIATION'].isin(['firm_initiated', 'external'])
+            ].copy()
+            fi_sells = fi_sells[fi_sells['EVENT_PROFITABLE'].notna()]
+            if len(fi_sells) >= 30:
+                try:
+                    fi_sells['LOG_TV'] = np.log(fi_sells['TRADE_VALUE'].clip(lower=1))
+                    fi_sells['IS_FIRM_INITIATED'] = (
+                        fi_sells['INITIATION'] == 'firm_initiated').astype(float)
+                    fi_sells['INTERACTION'] = fi_sells['LOG_TV'] * fi_sells['IS_FIRM_INITIATED']
+                    X = sm.add_constant(fi_sells[['LOG_TV', 'IS_FIRM_INITIATED', 'INTERACTION']])
+                    y = fi_sells['EVENT_PROFITABLE'].astype(float)
+                    mask = y.notna() & X.notna().all(axis=1)
+                    groups = fi_sells.loc[mask, 'EVENT_ID']
+                    model = sm.OLS(y[mask], X[mask]).fit(
+                        cov_type='cluster', cov_kwds={'groups': groups})
+                    ci = model.conf_int()
+                    for var in model.params.index:
+                        slope_rows.append({
+                            'ARM': 'INTERACTION',
+                            'SPEC': var,
+                            'SLOPE': model.params[var],
+                            'SLOPE_PVAL': model.pvalues[var],
+                            'SLOPE_R2': model.rsquared,
+                            'N_TRADES': int(model.nobs),
+                            'N_DECILES': np.nan,
+                            'REASON': '',
+                        })
+                    logger.info(
+                        "  §15c interaction: coef=%.6f p=%.4f N=%d",
+                        model.params.get('INTERACTION', np.nan),
+                        model.pvalues.get('INTERACTION', np.nan),
+                        int(model.nobs))
+                except Exception as e:
+                    logger.warning("  §15c interaction regression failed: %s", e)
+
+    initiation_slopes = pd.DataFrame(slope_rows)
+
+    # ── (d) Political-vs-control accuracy premium per arm ─────────────
+    # Includes per-arm conditional base rate (P_NEG_CAR) and ACCURACY_MINUS_BASE_RATE
+    premium_rows = []
+    if (not vp.empty and 'PROFITABLE_30' in vp.columns and
+            control_trades is not None and not control_trades.empty):
+        ctrl_sells = control_trades[
+            (control_trades['TRADE_TYPE'] == 'sell') &
+            control_trades['PROFITABLE_30'].notna()
+        ]
+        if len(ctrl_sells) >= 5 and 'TICKER' in ctrl_sells.columns:
+            ctrl_tkr_acc = ctrl_sells.groupby('TICKER')['PROFITABLE_30'].mean()
+            if len(ctrl_tkr_acc) >= 5:
+                for arm_label in ['firm_initiated', 'external', 'reactive',
+                                  'firm_initiated+reactive']:
+                    if arm_label == 'firm_initiated+reactive':
+                        arm_sells = vp[
+                            (vp['TRADE_TYPE'] == 'sell') &
+                            vp['PROFITABLE_30'].notna() &
+                            vp['INITIATION'].isin(['firm_initiated', 'reactive'])
+                        ]
+                        arm_panel_sub = panel[panel['INITIATION'].isin(
+                            ['firm_initiated', 'reactive'])]
+                    else:
+                        arm_sells = vp[
+                            (vp['TRADE_TYPE'] == 'sell') &
+                            vp['PROFITABLE_30'].notna() &
+                            (vp['INITIATION'] == arm_label)
+                        ]
+                        arm_panel_sub = panel[panel['INITIATION'] == arm_label]
+
+                    # Per-arm conditional base rate: P(CAR_POST < 0) among arm events
+                    arm_cars = arm_panel_sub['CAR_POST'].dropna()
+                    p_neg_car = float((arm_cars < 0).mean()) if len(arm_cars) > 0 else np.nan
+
+                    if len(arm_sells) < 5 or 'EVENT_ID' not in arm_sells.columns:
+                        continue
+                    pol_ev_acc = arm_sells.groupby('EVENT_ID')['PROFITABLE_30'].mean()
+                    if len(pol_ev_acc) < 5:
+                        continue
+                    premium = pol_ev_acc.mean() - ctrl_tkr_acc.mean()
+                    _, welch_p = stats.ttest_ind(
+                        pol_ev_acc.values, ctrl_tkr_acc.values, equal_var=False)
+                    premium_rows.append({
+                        'ARM': arm_label,
+                        'POL_ACCURACY': pol_ev_acc.mean(),
+                        'CTRL_ACCURACY': ctrl_tkr_acc.mean(),
+                        'PREMIUM_PP': premium * 100,
+                        'WELCH_P': welch_p,
+                        'P_NEG_CAR': p_neg_car,
+                        'ACCURACY_MINUS_BASE_RATE': (pol_ev_acc.mean() - p_neg_car)
+                            if not np.isnan(p_neg_car) else np.nan,
+                        'N_POL_CLUSTERS': len(pol_ev_acc),
+                        'N_CTRL_CLUSTERS': len(ctrl_tkr_acc),
+                        'N_POL_TRADES': len(arm_sells),
+                        'N_EVENTS_WITH_CAR': len(arm_cars),
+                        'NOTE': ('Premium is NOT base-rate-immune. P_NEG_CAR is the '
+                                 'per-arm conditional base rate for sells. '
+                                 'ACCURACY_MINUS_BASE_RATE is the honest comparison. '
+                                 'See T15 PT Test tab for the base-rate-immune test.'),
+                    })
+                    logger.info("  §15d premium %s: %.2fpp (Welch p=%.4f), "
+                                "base_rate=%.3f, acc−base=%.2fpp",
+                                arm_label, premium * 100, welch_p,
+                                p_neg_car,
+                                (pol_ev_acc.mean() - p_neg_car) * 100
+                                    if not np.isnan(p_neg_car) else float('nan'))
+
+    initiation_premium = pd.DataFrame(premium_rows)
+
+    # ── (e) Post-event trading regression per arm ─────────────────────
+    # Reports all arms; arms with insufficient obs get a row with N and reason.
+    # Includes both complete-case (PRIMARY) and zero-imputed (ROBUSTNESS) specs.
+    reg_rows = []
+    reg_cols_needed = ['EVENT_ID', 'TICKER', 'EVENT_DATE', 'EVENT_CATEGORY',
+                       'REGULATORY_PERIOD', 'CAR_REMAINING', 'CAR_ANNOUNCE',
+                       'PRE_FULL_NET_SELL_RATIO']
+    reg_cols_optional = ['ACTION_ID']
+    post_early_cols = ['POST_EARLY_NET_SELL_RATIO', 'POST_EARLY_N_TRANSACTIONS']
+    b_avail = all(c in panel.columns for c in reg_cols_needed)
+    post_early_avail = all(c in panel.columns for c in post_early_cols)
+
+    if b_avail and post_early_avail:
+        ev_all = panel[
+            [c for c in (reg_cols_needed + reg_cols_optional + post_early_cols + ['INITIATION'])
+             if c in panel.columns]
+        ].drop_duplicates(subset=['EVENT_ID', 'TICKER', 'EVENT_DATE']).copy()
+
+        for col in ['CAR_REMAINING', 'CAR_ANNOUNCE', 'PRE_FULL_NET_SELL_RATIO']:
+            if col in ev_all.columns:
+                ev_all[col] = pd.to_numeric(ev_all[col], errors='coerce')
+
+        ev_all['POST_EARLY_N_TRANSACTIONS'] = pd.to_numeric(
+            ev_all['POST_EARLY_N_TRANSACTIONS'], errors='coerce').fillna(0)
+        ev_all['POST_EARLY_NET_SELL_RATIO'] = pd.to_numeric(
+            ev_all['POST_EARLY_NET_SELL_RATIO'], errors='coerce')
+        ev_all.loc[ev_all['POST_EARLY_N_TRANSACTIONS'] == 0,
+                   'POST_EARLY_NET_SELL_RATIO'] = np.nan
+
+        # Use all events that have CAR_REMAINING (not just fundamental).
+        # Cultural events now have decomposed CARs from
+        # _compute_cultural_cars_decomposed().
+        ev_fund = ev_all[ev_all['CAR_REMAINING'].notna()].copy()
+
+        def _run_arm_reg(arm_label, ev_arm, spec_suffix=''):
+            """Run one regression spec for an arm. Returns True if regression ran."""
+            nsi_col = 'POST_EARLY_NET_SELL_RATIO'
+            spec_label = f'{arm_label}_{spec_suffix}' if spec_suffix else arm_label
+
+            df_r = ev_arm[
+                ev_arm['CAR_REMAINING'].notna() &
+                ev_arm[nsi_col].notna() &
+                ev_arm['CAR_ANNOUNCE'].notna() &
+                ev_arm['PRE_FULL_NET_SELL_RATIO'].notna()
+            ].copy()
+
+            if len(df_r) < 20:
+                # Report the insufficient-obs row rather than silently omitting
+                n_fund = len(ev_arm)
+                n_car_rem = ev_arm['CAR_REMAINING'].notna().sum()
+                n_nsi = ev_arm[nsi_col].notna().sum()
+                reason = (
+                    f'N={len(df_r)} complete-case obs (< 20 threshold). '
+                    f'Arm has {n_fund} fundamental events, '
+                    f'{n_car_rem} with CAR_REMAINING, '
+                    f'{n_nsi} with {nsi_col}.')
+                if n_fund == 0:
+                    reason = (f'No events with CAR_REMAINING in this arm '
+                              f'({n_car_rem} of {len(ev_arm)} have it). '
+                              f'Post-event regression requires decomposed CARs.')
+                reg_rows.append({
+                    'ARM': arm_label,
+                    'SPEC': spec_label,
+                    'VARIABLE': 'NOT_ESTIMABLE',
+                    'COEF': np.nan, 'SE': np.nan, 'T_STAT': np.nan,
+                    'P_VALUE': np.nan, 'CI_025': np.nan, 'CI_975': np.nan,
+                    'N': len(df_r), 'R_SQUARED': np.nan,
+                    'REASON': reason,
+                })
+                logger.info("  §15e %s %s: %s", arm_label, spec_suffix, reason)
+                return False
+
+            try:
+                cat_d = pd.get_dummies(df_r['EVENT_CATEGORY'], prefix='cat',
+                                       drop_first=True).astype(float)
+                per_d = pd.get_dummies(df_r['REGULATORY_PERIOD'], prefix='period',
+                                       drop_first=True).astype(float)
+                X = pd.concat([
+                    pd.Series(1.0, index=df_r.index, name='const'),
+                    df_r[[nsi_col, 'CAR_ANNOUNCE', 'PRE_FULL_NET_SELL_RATIO']]
+                      .rename(columns={nsi_col: 'NET_SELL_INTENSITY'})
+                      .astype(float),
+                    cat_d, per_d,
+                ], axis=1)
+                y = df_r['CAR_REMAINING'].astype(float)
+                mask = y.notna() & X.notna().all(axis=1)
+                n_fit = mask.sum()
+                if n_fit < 20:
+                    return False
+                model = sm.OLS(y[mask], X[mask]).fit(
+                    cov_type='cluster',
+                    cov_kwds={'groups': df_r.loc[mask, 'EVENT_ID']})
+                ci = model.conf_int()
+                for var in model.params.index:
+                    reg_rows.append({
+                        'ARM': arm_label,
+                        'SPEC': spec_label,
+                        'VARIABLE': var,
+                        'COEF': model.params[var],
+                        'SE': model.bse[var],
+                        'T_STAT': model.tvalues[var],
+                        'P_VALUE': model.pvalues[var],
+                        'CI_025': ci.loc[var, 0],
+                        'CI_975': ci.loc[var, 1],
+                        'N': int(n_fit),
+                        'R_SQUARED': model.rsquared,
+                        'REASON': '',
+                    })
+                logger.info(
+                    "  §15e %s %s: N=%d β(NSI)=%.4f p=%.4f R²=%.3f",
+                    arm_label, spec_suffix, n_fit,
+                    model.params.get('NET_SELL_INTENSITY', np.nan),
+                    model.pvalues.get('NET_SELL_INTENSITY', np.nan),
+                    model.rsquared)
+                return True
+            except Exception as e:
+                logger.warning("  §15e %s %s regression failed: %s", arm_label, spec_suffix, e)
+                return False
+
+        for arm_label in ['firm_initiated', 'external', 'reactive', 'firm_initiated+reactive']:
+            if arm_label == 'firm_initiated+reactive':
+                ev_arm = ev_fund[ev_fund['INITIATION'].isin(
+                    ['firm_initiated', 'reactive'])]
+            else:
+                ev_arm = ev_fund[ev_fund['INITIATION'] == arm_label]
+
+            # PRIMARY: complete-case
+            _run_arm_reg(arm_label, ev_arm, 'PRIMARY')
+
+            # ROBUSTNESS: zero-imputed NSI
+            ev_imp = ev_arm.copy()
+            ev_imp['POST_EARLY_NET_SELL_RATIO'] = ev_imp['POST_EARLY_NET_SELL_RATIO'].fillna(0)
+            _run_arm_reg(arm_label, ev_imp, 'ZERO_IMPUTED')
+
+        # ROBUSTNESS: external arm clustered at ACTION_ID level
+        if 'ACTION_ID' in ev_fund.columns:
+            ev_ext = ev_fund[ev_fund['INITIATION'] == 'external'].copy()
+            nsi_col = 'POST_EARLY_NET_SELL_RATIO'
+            df_ac = ev_ext[
+                ev_ext['CAR_REMAINING'].notna() &
+                ev_ext[nsi_col].notna() &
+                ev_ext['CAR_ANNOUNCE'].notna() &
+                ev_ext['PRE_FULL_NET_SELL_RATIO'].notna()
+            ].copy()
+            n_actions = df_ac['ACTION_ID'].nunique() if len(df_ac) > 0 else 0
+            if len(df_ac) >= 20 and n_actions >= 10:
+                try:
+                    cat_d = pd.get_dummies(df_ac['EVENT_CATEGORY'], prefix='cat',
+                                           drop_first=True).astype(float)
+                    per_d = pd.get_dummies(df_ac['REGULATORY_PERIOD'], prefix='period',
+                                           drop_first=True).astype(float)
+                    X = pd.concat([
+                        pd.Series(1.0, index=df_ac.index, name='const'),
+                        df_ac[[nsi_col, 'CAR_ANNOUNCE', 'PRE_FULL_NET_SELL_RATIO']]
+                          .rename(columns={nsi_col: 'NET_SELL_INTENSITY'})
+                          .astype(float),
+                        cat_d, per_d,
+                    ], axis=1)
+                    y = df_ac['CAR_REMAINING'].astype(float)
+                    mask = y.notna() & X.notna().all(axis=1)
+                    model = sm.OLS(y[mask], X[mask]).fit(
+                        cov_type='cluster',
+                        cov_kwds={'groups': df_ac.loc[mask, 'ACTION_ID']})
+                    ci = model.conf_int()
+                    for var in model.params.index:
+                        reg_rows.append({
+                            'ARM': 'external',
+                            'SPEC': 'external_ACTION_CLUSTERED',
+                            'VARIABLE': var,
+                            'COEF': model.params[var],
+                            'SE': model.bse[var],
+                            'T_STAT': model.tvalues[var],
+                            'P_VALUE': model.pvalues[var],
+                            'CI_025': ci.loc[var, 0],
+                            'CI_975': ci.loc[var, 1],
+                            'N': int(mask.sum()),
+                            'R_SQUARED': model.rsquared,
+                            'REASON': f'Clustered at ACTION_ID level ({n_actions} clusters)',
+                        })
+                    logger.info("  §15e external ACTION_CLUSTERED: N=%d (%d action clusters) "
+                                "β(NSI)=%.4f p=%.4f",
+                                mask.sum(), n_actions,
+                                model.params.get('NET_SELL_INTENSITY', np.nan),
+                                model.pvalues.get('NET_SELL_INTENSITY', np.nan))
+                except Exception as e:
+                    logger.warning("  §15e external ACTION_CLUSTERED failed: %s", e)
+
+    initiation_post_reg = pd.DataFrame(reg_rows)
+
+    logger.info("§15 complete: summary=%d, tost=%d, pt=%d, slopes=%d, premium=%d, post_reg=%d",
+                len(initiation_summary), len(initiation_tost), len(initiation_pt),
+                len(initiation_slopes), len(initiation_premium), len(initiation_post_reg))
+
+    return {
+        'initiation_summary': initiation_summary,
+        'initiation_tost': initiation_tost,
+        'initiation_pt': initiation_pt,
+        'initiation_slopes': initiation_slopes,
+        'initiation_premium': initiation_premium,
+        'initiation_post_reg': initiation_post_reg,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════
 # RESULTS PERSISTENCE
 # ═════════════════════════════════════════════════════════════════════
 
@@ -5409,6 +6382,13 @@ def save_essay3_results(store, results_dict):
         'decomp_accuracy':     'ESSAY3_DECOMP_ACCURACY',
         'post_event_trading':  'ESSAY3_POST_EVENT_TRADING',
         'post_event_reg':      'ESSAY3_POST_EVENT_REG',
+        'cultural_car_decomp': 'ESSAY3_CULTURAL_CAR_DECOMP',
+        'initiation_summary':  'ESSAY3_T15_INITIATION_SUMMARY',
+        'initiation_tost':     'ESSAY3_T15_INITIATION_TOST',
+        'initiation_pt':       'ESSAY3_T15_INITIATION_PT',
+        'initiation_slopes':   'ESSAY3_T15_INITIATION_SLOPES',
+        'initiation_premium':  'ESSAY3_T15_INITIATION_PREMIUM',
+        'initiation_post_reg': 'ESSAY3_T15_INITIATION_POST_REG',
     }
     current_tables = set(table_map.values())
 
@@ -5498,6 +6478,11 @@ def run_essay3(store=None):
     # ── Compute CARs for fundamental political events ─────────────
     car_df = _compute_fundamental_cars(
         car_df, political_events, form4, store
+    )
+
+    # ── Compute decomposed CARs for cultural events ────────────────
+    car_df, cultural_car_decomp = _compute_cultural_cars_decomposed(
+        car_df, culture_events, store
     )
 
     # ── Build panel ──────────────────────────────────────────────────
@@ -5630,6 +6615,11 @@ def run_essay3(store=None):
         compute_delayed_reaction_tests(panel, crsp_profits, valid_pol)
     )
 
+    # ── §15 Initiation-arm split tests ──────────────────────────────
+    logger.info("§15 Initiation-arm split tests (firm_initiated vs external)...")
+    initiation_results = compute_initiation_split_tests(
+        panel, crsp_profits, control_trades, valid_pol)
+
     # ── Carried-forward robustness ──────────────────────────────────
     logger.info("Carried-forward robustness (TOST, placebo, bootstrap CI)...")
     tost = compute_tost_equivalence(panel)
@@ -5678,6 +6668,8 @@ def run_essay3(store=None):
         'decomp_accuracy':    decomp_accuracy,
         'post_event_trading': post_event_trading,
         'post_event_reg':     post_event_reg,
+        'cultural_car_decomp': cultural_car_decomp,
+        **initiation_results,
     }
 
     logger.info("Saving results...")
