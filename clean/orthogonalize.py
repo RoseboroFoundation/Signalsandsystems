@@ -94,6 +94,11 @@ ELECTION_DATES: List[str] = [
 ]
 
 
+def _normalize_freq(freq: str) -> str:
+    """Map user-friendly frequency codes to pandas-compatible ones."""
+    return {'M': 'MS', 'Q': 'QS', 'D': 'D'}.get(freq, freq)
+
+
 def _build_party_series(
     intervals: List[Tuple[str, str, int]],
     freq: str = 'M',
@@ -101,7 +106,7 @@ def _build_party_series(
     end: str = '2025-12-31',
 ) -> pd.Series:
     """Convert (start, end, value) intervals into a time series."""
-    idx = pd.date_range(start, end, freq=freq)
+    idx = pd.date_range(start, end, freq=_normalize_freq(freq))
     series = pd.Series(np.nan, index=idx, dtype=float)
     for s, e, val in intervals:
         mask = (series.index >= pd.Timestamp(s)) & (series.index <= pd.Timestamp(e))
@@ -141,6 +146,7 @@ def build_political_proxies(
         Columns: PRES_DEM, SENATE_DEM, HOUSE_DEM, UNIFIED_GOV,
                  EPU (if available), PARTISAN_CONFLICT (if available).
     """
+    pd_freq = _normalize_freq(freq)
     pres = _build_party_series(_PRESIDENT_PARTY, freq, start, end)
     senate = _build_party_series(_SENATE_MAJORITY, freq, start, end)
     house = _build_party_series(_HOUSE_MAJORITY, freq, start, end)
@@ -161,12 +167,15 @@ def build_political_proxies(
     # Try to load EPU index
     epu = _load_epu(epu_path, fred_api_key, start, end, freq)
     if epu is not None:
+        # Normalize EPU index to month-start for alignment
+        epu.index = epu.index.to_period('M').to_timestamp()
         df = df.join(epu, how='left')
         df['EPU'] = df['EPU'].interpolate(method='time')
 
     # Try to load Partisan Conflict index
     pc = _load_partisan_conflict(partisan_conflict_path, fred_api_key, start, end, freq)
     if pc is not None:
+        pc.index = pc.index.to_period('M').to_timestamp()
         df = df.join(pc, how='left')
         df['PARTISAN_CONFLICT'] = df['PARTISAN_CONFLICT'].interpolate(method='time')
 
@@ -301,10 +310,16 @@ def build_culture_index(
     for c in df.columns:
         if 'event' in c.lower() and 'date' in c.lower():
             date_col = c
-        if 'political' in c.lower() and 'lean' in c.lower():
-            lean_col = c
+        # Match "Estimated Political Leaning" but NOT "Political Leaning Justifications"
         if 'estimated' in c.lower() and 'political' in c.lower():
             lean_col = c
+    # Fallback: any column with 'political' and 'leaning' (not 'justification')
+    if lean_col is None:
+        for c in df.columns:
+            cl = c.lower()
+            if 'political' in cl and 'lean' in cl and 'justif' not in cl:
+                lean_col = c
+                break
 
     if date_col is None or lean_col is None:
         raise ValueError(
@@ -340,10 +355,10 @@ def build_culture_index(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    # Convert to timestamp index and fill gaps
+    # Convert to timestamp index (month-start) and fill gaps
     culture.index = culture.index.to_timestamp()
     full_idx = pd.date_range(
-        culture.index.min(), culture.index.max(), freq=freq)
+        culture.index.min(), culture.index.max(), freq=_normalize_freq(freq))
     culture = culture.reindex(full_idx, fill_value=0.0)
     culture.index.name = 'DATE'
     culture.name = 'CULTURE_RAW'
