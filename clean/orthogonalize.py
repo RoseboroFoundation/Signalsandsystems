@@ -58,8 +58,8 @@ _PRESIDENT_PARTY: List[Tuple[str, str, int]] = [
 
 # Senate majority party by Congress (start of each Congress in January)
 _SENATE_MAJORITY: List[Tuple[str, str, int]] = [
-    ('2000-01-01', '2001-01-02', 1),   # 106th: R majority, but D=0 here means R
-    ('2000-01-01', '2001-06-05', 0),   # 107th initially R (50-50, Cheney tiebreak)
+    ('2000-01-01', '2001-01-02', 0),   # 106th: R majority
+    ('2001-01-03', '2001-06-05', 0),   # 107th initially R (50-50, Cheney tiebreak)
     ('2001-06-06', '2003-01-02', 1),   # Jeffords switch → D majority
     ('2003-01-03', '2007-01-03', 0),   # 108th-109th: R
     ('2007-01-04', '2011-01-04', 1),   # 110th-111th: D
@@ -381,11 +381,12 @@ class OrthogonalizationResult:
     culture_raw : pd.Series
         Original (raw) culture index.
     culture_orthogonal : pd.Series
-        Residuals from the first-stage regression (the "systematic"
-        culture factor, orthogonal to politics by construction).
+        Residuals from the first-stage regression — the component of
+        culture that is orthogonal to politics by construction.
     first_stage_r2 : float
         R-squared from the full-sample first-stage regression.
-        High R2 confirms much of the raw factor is political.
+        Low R2 means the culture factor is largely independent of
+        politics (most variance survives orthogonalization).
     first_stage_adj_r2 : float
         Adjusted R-squared.
     first_stage_coefficients : pd.DataFrame
