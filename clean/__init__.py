@@ -84,6 +84,16 @@ from .party_platforms import PartyPlatformDownloader
 from .political_events import load_political_events
 from .political_exposure import load_political_exposure
 
+# Culture factor orthogonalization (Baker-Wurgler 2006 purging)
+from .orthogonalize import (
+    build_political_proxies,
+    build_culture_index,
+    orthogonalize_culture,
+    compare_raw_vs_orthogonal,
+    run_orthogonalization_pipeline,
+    OrthogonalizationResult,
+)
+
 # STOCK Act congressional trading (Essay 3 — legislator insider trading)
 from .stock_act import (
     load_stock_act_trades,
