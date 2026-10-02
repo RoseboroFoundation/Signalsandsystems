@@ -149,6 +149,24 @@ section[data-testid="stSidebar"] .stButton > button:hover {{
     background-color: #D4B86A;
     color: {NAVY} !important;
 }}
+/* Sidebar download button */
+section[data-testid="stSidebar"] .stDownloadButton > button {{
+    background-color: rgba(197, 165, 90, 0.15);
+    color: {WHITE} !important;
+    border: 1px solid rgba(197, 165, 90, 0.4);
+    font-family: 'Source Serif 4', 'Georgia', serif;
+    font-size: 0.82rem;
+    border-radius: 4px;
+    padding: 0.4rem 0.75rem;
+}}
+section[data-testid="stSidebar"] .stDownloadButton > button:hover {{
+    background-color: {GOLD};
+    color: {NAVY} !important;
+    border-color: {GOLD};
+}}
+section[data-testid="stSidebar"] .stDownloadButton > button * {{
+    color: inherit !important;
+}}
 /* Sidebar caption */
 section[data-testid="stSidebar"] .stCaption,
 section[data-testid="stSidebar"] small {{
@@ -605,7 +623,7 @@ with st.sidebar:
         f"color:rgba(255,255,255,0.75);'>"
         f"Ashley D. Roseboro<br>"
         f"<span style='font-size:0.75rem; color:rgba(255,255,255,0.5);'>"
-        f"College of Arts and Sciences<br>University of South Alabama</span></p>",
+        f"Mitchell College of Business<br>University of South Alabama</span></p>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -622,9 +640,9 @@ with st.sidebar:
     st.divider()
     st.markdown("#### Three-Essay Structure")
     for num, title in [
-        (1, "Breaking the Model"),
-        (2, "Culture Wars & Capital Markets"),
-        (3, "Insider Trading & Controversies"),
+        (1, "Breaking the Model: Volatility Regimes & FF5"),
+        (2, "Sociopolitical Controversies & Stock Performance"),
+        (3, "Informed Insider Trading Around Political Decisions"),
     ]:
         st.markdown(
             f"<span style='color:{GOLD};font-weight:600;'>{num}.</span> {title}",
@@ -634,17 +652,37 @@ with st.sidebar:
     st.divider()
     st.markdown("#### Data Sources")
     for src in [
-        "Culture War Companies (160 events)",
-        "Yahoo Finance (Stock Data)",
+        "Culture War Events (141 events, 2015-2025)",
+        "Yahoo Finance (Daily OHLCV)",
         "Fama-French 5-Factor + Momentum",
-        "CBOE VIX",
+        "CBOE VIX (Regime-Switching)",
         "FRED Macro Series (GDP, CPI, Rates)",
-        "Guardian, NYT, Reddit (News)",
+        "FinBERT Sentiment (~57,299 articles)",
+        "SEC Form 4 (29,633 insider trades)",
     ]:
         st.markdown(
             f"<span style='color:{GOLD}; margin-right:0.4rem;'>&#8226;</span> {src}",
             unsafe_allow_html=True,
         )
+
+    st.divider()
+    st.markdown("#### Download Workbooks")
+    _wb_files = [
+        ("Complete (All Essays)", "signs_and_signals_complete.xlsx"),
+        ("Essay 1 — Regimes & FF5", "essay1_full_results.xlsx"),
+        ("Essay 2 — Event Study & DiD", "essay2_results.xlsx"),
+        ("Essay 3 — Insider Trading", "essay3_full_results.xlsx"),
+    ]
+    for _label, _fname in _wb_files:
+        _fpath = BASE_DIR / _fname
+        if _fpath.exists():
+            st.download_button(
+                f"\u2913 {_label}",
+                data=_fpath.read_bytes(),
+                file_name=_fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
 
     st.divider()
     st.markdown("#### Methodology")
@@ -754,11 +792,12 @@ with st.sidebar:
 # MAIN TABS
 # =============================================================================
 
-tab_overview, tab_a1, tab_a2, tab_a3, tab_enriched, tab_raw = st.tabs([
+tab_overview, tab_a1, tab_a2, tab_a3, tab_code, tab_enriched, tab_raw = st.tabs([
     "Study Overview",
     "Article 1",
     "Article 2",
     "Article 3",
+    "Source Code",
     "Enriched Data",
     "Raw Data",
 ])
@@ -775,7 +814,7 @@ with tab_overview:
         f"<p style='font-size:0.95rem; text-transform:uppercase; letter-spacing:0.08em; "
         f"color:{NAVY}; margin-bottom:0.5rem;'>University of South Alabama</p>"
         f"<p style='font-size:0.85rem; color:{NAVY}; margin-bottom:2rem;'>"
-        f"College of Arts and Sciences</p>"
+        f"Mitchell College of Business</p>"
         f"<h1 style='font-size:1.8rem; line-height:1.4; margin-bottom:0.5rem;'>"
         f"Signals and Systems:<br>The Political Economy of Investor Sentiment "
         f"and Financial Innovation</h1>"
@@ -808,66 +847,79 @@ with tab_overview:
     st.markdown(
         "This dissertation examines the intersection of political signaling, investor "
         "sentiment, and financial market behavior through three interconnected essays. "
-        "Drawing on behavioral finance theory, market microstructure, and political economy, "
-        "the research investigates how political signals and culture war events impact "
-        "financial markets, asset pricing models, and trading behavior."
+        "Using 141 culture war events spanning 2015-2025, the research documents how "
+        "sociopolitical controversies create systematic risk that traditional asset pricing "
+        "models cannot capture, generate significant abnormal returns concentrated among "
+        "liberal-leaning firms, and provide an informational channel through which corporate "
+        "insiders extract value."
     )
     st.markdown(
-        "**Essay 1**, *\"Breaking the Model: How Culture Wars Expose Factor Model "
-        "Fragility,\"* examines how political events create market conditions that "
-        "challenge traditional asset pricing frameworks, specifically the Fama-French "
-        "five-factor model. **Essay 2**, *\"Culture Wars and Capital Markets: The Political "
-        "Economy of Abnormal Returns,\"* investigates the impact of culture war events on "
-        "stock returns using event study methodology and difference-in-differences analysis. "
+        "**Essay 1**, *\"Breaking the Model: Volatility Regimes and the Fama-French "
+        "Five-Factor Model,\"* estimates a three-state Markov regime-switching model on VIX "
+        "(mean levels: 13.3, 19.5, 31.6) and documents structural breaks in factor pricing "
+        "across regimes (Chow F = 26.23, p < 0.001). The profitability premium (RMW) rises "
+        "from 4.3% in calm markets to 12.8% under stress, while culture war stock alphas "
+        "are statistically indistinguishable from zero -- political controversy is not a "
+        "priced factor, but a noise amplifier. "
+        "**Essay 2**, *\"Sociopolitical Controversies and Sentiment, Strategy, and Stock "
+        "Performance,\"* finds a mean post-event CAR of -4.40% across 141 events, with "
+        "liberal-leaning firms bearing the heaviest losses (-5.28%) versus conservative "
+        "firms (-1.04%). FinBERT sentiment scoring of ~57,299 news articles reveals a "
+        "mean sentiment of -0.42 (strongly negative). The DiD treatment effect is "
+        "statistically insignificant, consistent with matched controls experiencing "
+        "contagion rather than isolation. VIX attenuates the treatment effect: in high-"
+        "volatility regimes, culture war signals are drowned by macro noise. "
         "**Essay 3**, *\"Informed Insider Trading Around Political Decisions: Foreknowledge, "
-        "Profits, and the Limits of Regulatory Architecture,\"* tests whether insiders trade "
-        "on advance knowledge of political decisions that move firm equity values."
+        "Profits, and the Limits of Regulatory Architecture,\"* analyzes 29,633 SEC Form 4 "
+        "trades across 1,712 event-firm windows. Sell accuracy is 54.68% (p < 0.001), but "
+        "the matched-control base rate is 57.84% -- insiders do not beat the unconditional "
+        "odds. The finding reframes insider trading as a volume-silent directional channel: "
+        "$3.5 billion in aggregate profits (Gini = 0.963) concentrated among a handful of "
+        "insiders who exploit the sell side of political foreknowledge."
     )
     st.markdown(
-        "The study utilizes a comprehensive dataset of 160 culture war events spanning "
-        "2015-2025, combined with daily stock returns, Fama-French factor data, and "
-        "macroeconomic indicators. Methodologically, the research employs event study "
-        "analysis with multiple factor model specifications (FF3, FF5, FF5+MOM), "
-        "difference-in-differences estimation with matched control firms, and "
-        "cross-sectional regression analysis to identify heterogeneous treatment effects "
-        "across firms classified by political leaning (Conservative, Liberal, Mixed)."
+        "The study employs Markov regime-switching estimation (Hamilton, 1989), "
+        "Fama-French five-factor spanning regressions, event study methodology with "
+        "Patell (1976) standardized t-tests, difference-in-differences estimation with "
+        "matched control firms, FinBERT NLP sentiment analysis, and SEC Form 4 insider "
+        "trading analysis with linear probability models and bootstrapped inference."
     )
 
     st.divider()
 
-    # --- Chapter 1: Introduction ---
-    st.subheader("Chapter 1: Introduction")
+    # --- Introduction ---
+    st.subheader("Introduction")
 
-    st.markdown("##### 1.1 Background and Motivation")
+    st.markdown("##### Background and Motivation")
     st.markdown(
         "The American political landscape has undergone a dramatic transformation over "
         "the past decade, with corporations increasingly finding themselves at the center "
         "of partisan disputes. From Nike's Colin Kaepernick campaign to Disney's opposition "
         "to Florida's Parental Rights in Education Act, companies have become active "
-        "participants in what scholars term \"culture wars\" -- public conflicts over "
-        "fundamental social values and norms."
+        "participants in what scholars term \"culture wars.\" These events create a unique "
+        "category of corporate risk: inherently political, generating responses that split "
+        "along partisan lines, and producing financial consequences that traditional "
+        "models struggle to explain."
     )
     st.markdown(
-        "These culture war events represent a unique and understudied category of "
-        "corporate risk. Unlike traditional operational or financial risks, culture war "
-        "events are inherently political, generating responses that split along partisan "
-        "lines. When Nike featured Colin Kaepernick in its \"Just Do It\" campaign in "
-        "September 2018, the company simultaneously experienced boycott calls from "
-        "conservative consumers and increased brand loyalty from liberal consumers. "
-        "This duality creates a natural experiment: how do financial markets process "
-        "information that is valued differently by ideologically segmented investor groups?"
+        "This dissertation treats culture war controversies as a laboratory for studying "
+        "how political signals propagate through financial markets. Three interconnected "
+        "essays trace the chain from macro regime structure (Essay 1), through firm-level "
+        "abnormal returns and sentiment transmission (Essay 2), to the micro-level channel "
+        "of insider trading (Essay 3). Together they document a political-economy risk "
+        "factor that operates outside the boundaries of traditional asset pricing."
     )
 
-    st.markdown("##### 1.2 Research Questions")
+    st.markdown("##### Research Questions")
     rq_col1, rq_col2, rq_col3 = st.columns(3)
     with rq_col1:
         st.markdown(
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:10rem;'>"
             f"<strong style='color:{GOLD};'>Essay 1</strong><br>"
-            f"Do culture war events create market conditions that expose "
-            f"<strong>factor model fragility</strong> in traditional asset pricing "
-            f"frameworks?</div>",
+            f"Do volatility regimes produce <strong>structural breaks</strong> in "
+            f"Fama-French five-factor pricing, and does culture war exposure constitute "
+            f"a distinct priced factor?</div>",
             unsafe_allow_html=True,
         )
     with rq_col2:
@@ -875,8 +927,9 @@ with tab_overview:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:10rem;'>"
             f"<strong style='color:{GOLD};'>Essay 2</strong><br>"
-            f"How do culture war events generate <strong>abnormal returns</strong>, "
-            f"and do these effects vary by a firm's political alignment?</div>",
+            f"Do sociopolitical controversies generate significant <strong>abnormal "
+            f"returns</strong>, and are these effects heterogeneous across political "
+            f"alignment, sentiment, and volatility regime?</div>",
             unsafe_allow_html=True,
         )
     with rq_col3:
@@ -884,34 +937,37 @@ with tab_overview:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:10rem;'>"
             f"<strong style='color:{GOLD};'>Essay 3</strong><br>"
-            f"Do insiders trade on <strong>advance knowledge</strong> of political "
-            f"decisions that move firm equity values?</div>",
+            f"Do corporate insiders trade on <strong>political foreknowledge</strong>, "
+            f"and does sell-side accuracy exceed unconditional base rates in "
+            f"matched controls?</div>",
             unsafe_allow_html=True,
         )
 
-    st.markdown("##### 1.3 Significance and Contributions")
+    st.markdown("##### Significance and Contributions")
     st.markdown(
         "This dissertation makes several contributions to the literature:\n\n"
-        "1. **To asset pricing theory**: By documenting how political events create "
-        "pricing anomalies that traditional factor models cannot explain, extending the "
-        "work of Fama and French (2015) and Hong and Kacperczyk (2009).\n\n"
-        "2. **To behavioral finance**: By providing evidence of politically motivated "
-        "trading behavior and its impact on market efficiency, building on the sentiment "
-        "framework of Baker and Wurgler (2006).\n\n"
-        "3. **To corporate governance**: By examining whether insiders exploit political "
-        "controversies for personal gain, contributing to the insider trading literature "
-        "of Cohen, Malloy, and Pomorski (2012).\n\n"
-        "4. **To political economy of finance**: By documenting the mechanisms through "
-        "which political polarization enters financial markets, extending the work of "
-        "Addoum and Kumar (2016) and Cookson, Engelberg, and Mullins (2020)."
+        "1. **To asset pricing theory**: By documenting regime-dependent structural breaks "
+        "in factor pricing (Chow F = 26.23) and showing that culture war exposure is a "
+        "noise amplifier, not a priced factor -- extending Fama and French (2015) and "
+        "Kozak, Nagel, and Santosh (2018).\n\n"
+        "2. **To behavioral finance**: By demonstrating that FinBERT-measured sentiment "
+        "(-0.42 mean) mediates the market response to political controversy, with VIX "
+        "regimes attenuating treatment effects -- building on Baker and Wurgler (2006).\n\n"
+        "3. **To corporate governance**: By reframing insider trading as a volume-silent "
+        "directional channel: sell accuracy of 54.68% is significant but falls below the "
+        "57.84% control base rate, with $3.5B in profits concentrated at Gini = 0.963 -- "
+        "contributing to Cohen, Malloy, and Pomorski (2012).\n\n"
+        "4. **To political economy of finance**: By documenting how political polarization "
+        "creates contagion effects (matched controls contaminated, DiD null) rather than "
+        "isolated treatment -- extending Cookson, Engelberg, and Mullins (2020)."
     )
 
     st.divider()
 
-    # --- Chapter 2: Literature Review ---
-    st.subheader("Chapter 2: Literature Review")
+    # --- Literature Review ---
+    st.subheader("Literature Review")
 
-    st.markdown("##### 2.1 Asset Pricing and Factor Models")
+    st.markdown("##### Asset Pricing and Factor Models")
     st.markdown(
         "The Capital Asset Pricing Model (CAPM) of Sharpe (1964) and Lintner (1965) "
         "established the foundation for understanding the relationship between risk and "
@@ -923,7 +979,7 @@ with tab_overview:
         "dominate (Kozak, Nagel, and Santosh, 2018)."
     )
 
-    st.markdown("##### 2.2 Political Economy and Financial Markets")
+    st.markdown("##### Political Economy and Financial Markets")
     st.markdown(
         "A growing body of research examines the relationship between political factors "
         "and financial markets. Hong and Kacperczyk (2009) document that \"sin stocks\" "
@@ -934,7 +990,7 @@ with tab_overview:
         "stock market trading volume using data from StockTwits."
     )
 
-    st.markdown("##### 2.3 Event Study Methodology")
+    st.markdown("##### Event Study Methodology")
     st.markdown(
         "Event study methodology, formalized by Fama, Fisher, Jensen, and Roll (1969) "
         "and refined by Brown and Warner (1985), provides the primary empirical tool for "
@@ -945,7 +1001,7 @@ with tab_overview:
         "event window."
     )
 
-    st.markdown("##### 2.4 Insider Trading and Information Asymmetry")
+    st.markdown("##### Insider Trading and Information Asymmetry")
     st.markdown(
         "The insider trading literature provides the theoretical foundation for Essay 3. "
         "Corporate insiders possess material nonpublic information that may include advance "
@@ -958,15 +1014,15 @@ with tab_overview:
 
     st.divider()
 
-    # --- Chapter 3: Data and Methodology ---
-    st.subheader("Chapter 3: Data and Methodology")
+    # --- Data and Methodology ---
+    st.subheader("Data and Methodology")
 
-    st.markdown("##### 3.1 Data Sources")
+    st.markdown("##### Data Sources")
     data_col1, data_col2 = st.columns(2)
     with data_col1:
         st.markdown("**Primary Data**")
         st.markdown(
-            "- **Culture War Events**: 160 events from 2015-2025, manually curated\n"
+            "- **Culture War Events**: 141 events from 2015-2025, manually curated\n"
             "- **Stock Data**: Daily OHLCV from Yahoo Finance\n"
             "- **Factor Data**: FF3, FF5, Momentum from Ken French's library\n"
             "- **Control Firms**: Matched by industry and size"
@@ -974,13 +1030,13 @@ with tab_overview:
     with data_col2:
         st.markdown("**Supplementary Data**")
         st.markdown(
-            "- **VIX**: CBOE Volatility Index\n"
+            "- **VIX**: CBOE Volatility Index (regime-switching)\n"
             "- **Macro**: GDP, CPI, employment, interest rates from FRED\n"
-            "- **News**: Guardian, NYT, Reddit sentiment data\n"
-            "- **SEC Form 4**: Insider transaction filings"
+            "- **News**: ~57,299 articles scored via FinBERT\n"
+            "- **SEC Form 4**: 29,633 insider trades across 1,712 event-firm windows"
         )
 
-    st.markdown("##### 3.2 Methodology Overview")
+    st.markdown("##### Methodology Overview")
     meth_data = {
         "Component": [
             "Factor Model Estimation",
@@ -1006,7 +1062,7 @@ with tab_overview:
     except TypeError:
         st.dataframe(pd.DataFrame(meth_data), use_container_width=True)
 
-    st.markdown("##### 3.3 Event Study Design")
+    st.markdown("##### Event Study Design")
     st.markdown(
         "The event study follows the standard framework:\n\n"
         "1. **Estimation Window**: 252 trading days ending 10 days before the event\n"
@@ -1058,11 +1114,12 @@ with tab_overview:
 
 with tab_a1:
     st.header("Essay 1: Breaking the Model")
-    st.markdown("*How Culture Wars Expose Factor Model Fragility*")
+    st.markdown("*Volatility Regimes and the Fama-French Five-Factor Model*")
     st.markdown(
         f"<p style='font-size:1rem; color:{NAVY}; margin-top:-0.5rem;'>"
-        f"<strong>Research Question:</strong> Do culture war events create market conditions "
-        f"that challenge the explanatory power of the Fama-French five-factor model?</p>",
+        f"<strong>Research Question:</strong> Do volatility regimes produce structural breaks "
+        f"in Fama-French five-factor pricing, and does culture war exposure constitute a "
+        f"distinct priced factor?</p>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -1093,10 +1150,13 @@ with tab_a1:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
             f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
-            f"The FF5 model explains only <strong>{rsq.mean():.1%}</strong> of return variation "
-            f"on average during culture war event windows (median R-sq = {rsq.median():.4f}). "
-            f"<strong>{(rsq < 0.20).mean():.0%}</strong> of regressions have R-sq below 0.20, "
-            f"indicating systematic factor model breakdown when political signals dominate.</div>",
+            f"A three-state Markov regime-switching model on VIX identifies Low (mean 13.3), "
+            f"Normal (19.5), and High (31.6) volatility regimes. Chow structural break test "
+            f"(F = 26.23, p < 0.001) confirms factor loadings shift across regimes. "
+            f"The profitability premium (RMW) rises from 4.3% in calm markets to 12.8% under stress, "
+            f"revealing a flight-to-quality dynamic. Culture war stock alphas are statistically "
+            f"indistinguishable from zero across all regimes -- political controversy is a "
+            f"<strong>noise amplifier</strong>, not a priced factor.</div>",
             unsafe_allow_html=True,
         )
 
@@ -1311,9 +1371,10 @@ with tab_a1:
     st.divider()
     st.header("Volatility Regime Analysis")
     st.markdown(
-        "Markov regime-switching on VIX identifies distinct volatility regimes "
-        "(Hamilton, 1989). FF5 spanning regressions and culture war stock pricing "
-        "regressions are then estimated within each regime."
+        "A three-state Markov regime-switching model (Hamilton, 1989) is estimated on the "
+        "CBOE VIX, yielding Low Volatility (mean ~13.3), Normal (~19.5), and High Volatility "
+        "(~31.6) regimes. FF5 spanning regressions and culture war stock pricing regressions "
+        "are then estimated within each regime to test for structural breaks in factor pricing."
     )
 
     # --- Model Selection (K=2,3,4) ---
@@ -1355,7 +1416,11 @@ with tab_a1:
         st.subheader("FF5 Spanning Regression by Regime")
         st.markdown(
             "MKT-RF regressed on SMB, HML, RMW, CMA within each volatility regime. "
-            "The Chow test confirms a statistically significant structural break (p < 0.001)."
+            "The Chow test confirms a statistically significant structural break "
+            "(F = 26.23, p < 0.001), rejecting the null that factor loadings are constant "
+            "across regimes. The profitability premium (RMW) rises from 4.3% annualized in "
+            "calm markets to 12.8% under stress, consistent with a flight-to-quality dynamic "
+            "where investors rotate into profitable, low-leverage firms during crises."
         )
 
         # Key finding callout
@@ -1415,7 +1480,9 @@ with tab_a1:
         st.markdown(
             "Annualized mean factor returns within each volatility regime. "
             "The market premium swings sharply: positive in calm markets, "
-            "negative in crisis."
+            "negative in crisis. The profitability premium (RMW) triples from Low to High "
+            "volatility, while the value premium (HML) reverses sign -- evidence that "
+            "regime structure fundamentally alters the factor reward landscape."
         )
 
         premia_display = factor_premia.copy()
@@ -1437,7 +1504,10 @@ with tab_a1:
         st.subheader("Culture War Stocks: FF5 by Regime")
         st.markdown(
             "Individual stock pricing regressions (R_i - RF ~ MKT_RF + SMB + HML + RMW + CMA) "
-            "within each regime. Benjamini-Hochberg FDR correction applied at q = 0.05."
+            "within each regime. Benjamini-Hochberg FDR correction applied at q = 0.05. "
+            "The null result is the key finding: culture war stock alphas are statistically "
+            "indistinguishable from zero across all regimes, meaning political controversy "
+            "does not constitute a separately priced factor in the cross-section of returns."
         )
 
         for col in cw_regime.columns:
@@ -1478,7 +1548,9 @@ with tab_a1:
     st.header("Matched Control Analysis")
     st.markdown(
         "Treatment (culture war) firms vs. industry-matched control firms. "
-        "Deltas isolate culture war exposure from sector effects."
+        "Deltas isolate culture war exposure from sector effects. The matched-pair "
+        "design tests whether culture war firms' factor loadings shift more than "
+        "their industry peers when moving between volatility regimes."
     )
 
     matched_ttest = load_table("ESSAY1_MATCHED_TTEST")
@@ -1587,9 +1659,11 @@ with tab_a1:
 
     st.header("FinBERT Sentiment & FOMO Z-Scores")
     st.markdown(
-        "FinBERT (ProsusAI/finbert) scores 57K+ culture war news articles. "
-        "FOMO z-scores measure how extreme each day's sentiment is relative "
-        "to its volatility regime norm — euphoria (Z>2) and panic (Z<-2)."
+        "FinBERT (ProsusAI/finbert) scores ~57,299 culture war news articles, producing "
+        "a mean sentiment of -0.42 (strongly negative). FOMO z-scores measure how extreme "
+        "each day's sentiment is relative to its volatility regime norm. Euphoria days "
+        "(Z > 2) and panic days (Z < -2) concentrate in High Volatility regimes, "
+        "confirming that sentiment extremes co-move with macro stress."
     )
 
     sent_daily = load_table("ESSAY1_SENTIMENT_DAILY")
@@ -1711,12 +1785,13 @@ with tab_a1:
 # =============================================================================
 
 with tab_a2:
-    st.header("Essay 2: Culture Wars and Capital Markets")
-    st.markdown("*The Political Economy of Abnormal Returns*")
+    st.header("Essay 2: Sociopolitical Controversies and Stock Performance")
+    st.markdown("*Sentiment, Strategy, and Stock Performance*")
     st.markdown(
         f"<p style='font-size:1rem; color:{NAVY}; margin-top:-0.5rem;'>"
-        f"<strong>Research Question:</strong> How do culture war events generate abnormal "
-        f"returns, and do these effects vary by a firm's political alignment?</p>",
+        f"<strong>Research Question:</strong> Do sociopolitical controversies generate "
+        f"significant abnormal returns, and are these effects heterogeneous across "
+        f"political alignment, sentiment, and volatility regime?</p>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -1756,10 +1831,12 @@ with tab_a2:
             f"<strong style='color:{GOLD};'>Key Finding</strong><br>"
             f"Culture war events generate a mean post-event CAR of "
             f"<strong>{_mean_car:.2%}</strong> across {_n_treat} treatment-firm events. "
-            f"Treatment firms underperform matched controls by "
-            f"<strong>{_treat_all['CAR_POST'].mean() - _ctrl_all['CAR_POST'].mean():.2%}</strong> "
-            f"in the post-event window, consistent with culture wars destroying shareholder "
-            f"value.</div>",
+            f"Liberal-leaning firms bear the heaviest losses (~-5.28%) versus conservative "
+            f"firms (~-1.04%). The DiD treatment effect is statistically insignificant, "
+            f"consistent with matched controls experiencing contagion rather than isolation. "
+            f"FinBERT sentiment averages -0.42 (strongly negative). VIX attenuates the "
+            f"treatment effect: in high-volatility regimes, culture war signals are drowned "
+            f"by macro noise.</div>",
             unsafe_allow_html=True,
         )
 
@@ -1944,8 +2021,12 @@ with tab_a2:
         # ===== SECTION 8: Difference-in-Differences =====
         st.subheader("Difference-in-Differences Analysis")
         st.markdown(
-            "DiD estimation isolates the treatment effect by comparing culture war "
-            "firms to matched controls. The model stacks pre- and post-event CARs "
+            "DiD estimation attempts to isolate the treatment effect by comparing culture war "
+            "firms to matched controls. The treatment effect is statistically insignificant "
+            "across all specifications, consistent with the interpretation that matched "
+            "controls are contaminated by contagion -- when a culture war event strikes one "
+            "firm, industry peers are also affected, violating the stable unit treatment "
+            "value assumption (SUTVA). The model stacks pre- and post-event CARs "
             "into a panel and estimates:"
         )
         st.latex(
@@ -2085,8 +2166,9 @@ with tab_a3:
     st.markdown("*Foreknowledge, Profits, and the Limits of Regulatory Architecture*")
     st.markdown(
         f"<p style='font-size:1rem; color:{NAVY}; margin-top:-0.5rem;'>"
-        f"<strong>Research Question:</strong> Do insiders trade on advance knowledge of "
-        f"political decisions that move firm equity values?</p>",
+        f"<strong>Research Question:</strong> Do corporate insiders trade on political "
+        f"foreknowledge, and does sell-side directional accuracy exceed the unconditional "
+        f"base rate established by matched non-political control windows?</p>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -2094,17 +2176,20 @@ with tab_a3:
     # --- Motivation ---
     st.subheader("Motivation")
     st.markdown(
-        "In the 180 days before political decisions that move firm equity values, "
-        "insiders trade in directions that significantly predict the event-day price "
-        "reaction. This essay tests whether pre-event insider trades are directionally "
-        "accurate at rates exceeding chance, compares political to non-political control "
-        "windows, and measures the aggregate dollar magnitude of informed-trading profits."
+        "This essay analyzes 29,633 SEC Form 4 trades across 1,712 event-firm windows to "
+        "test whether corporate insiders exploit political foreknowledge. The central finding "
+        "is nuanced: sell-side directional accuracy is 54.68% (p < 0.001 vs. 50%), but the "
+        "matched non-political control base rate is 57.84% -- insiders do not beat the "
+        "unconditional odds. The result reframes insider trading not as a mean-accuracy "
+        "phenomenon but as a *volume-silent directional channel*: aggregate profits of "
+        "$3.5 billion are concentrated at Gini = 0.963, meaning a handful of insiders "
+        "capture nearly all the informed-trading surplus."
     )
     st.markdown(
         "Essay 2 establishes that political events generate significant abnormal returns. "
-        "The persistent mispricing documented there reflects, in part, systematic extraction "
-        "of value by informed insiders — a microfoundation linking political-economic risk to "
-        "corporate valuation through an identifiable channel."
+        "Essay 3 traces the micro-channel through which that mispricing is exploited: "
+        "insiders who sell before large negative-CAR events, in small and medium trades "
+        "that avoid regulatory detection thresholds."
     )
 
     st.divider()
@@ -2118,9 +2203,9 @@ with tab_a3:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
             f"<strong style='color:{GOLD};'>H1: Directional Accuracy</strong><br><br>"
-            f"Pre-event insider sells are directionally accurate (event-profitable) at "
-            f"rates significantly above 50%, and at higher rates than matched non-political "
-            f"control windows.</div>",
+            f"Pre-event insider sells are directionally accurate at rates above 50%. "
+            f"Result: 54.68% (p < 0.001), but below the 57.84% control base rate. "
+            f"Insiders are informed vs. chance, but not vs. unconditional market drift.</div>",
             unsafe_allow_html=True,
         )
     with hyp_col2:
@@ -2130,7 +2215,8 @@ with tab_a3:
             f"<strong style='color:{GOLD};'>H2: Proximity Gradient</strong><br><br>"
             f"Directional accuracy is highest in the 0-30 day window before events "
             f"and declines with distance, consistent with increasing information "
-            f"precision as events approach.</div>",
+            f"precision as events approach. The gradient confirms a foreknowledge "
+            f"signal that intensifies near the event date.</div>",
             unsafe_allow_html=True,
         )
     with hyp_col3:
@@ -2138,8 +2224,9 @@ with tab_a3:
             f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
             f"<strong style='color:{GOLD};'>H3: Dollar Magnitudes</strong><br><br>"
-            f"The aggregate dollar magnitude of informed-trading profits is economically "
-            f"significant, concentrated in sells before large negative-CAR events.</div>",
+            f"Aggregate informed-trading profits are $3.5 billion, concentrated at "
+            f"Gini = 0.963. A handful of insiders capture nearly all the surplus, "
+            f"trading in sizes below regulatory detection thresholds.</div>",
             unsafe_allow_html=True,
         )
 
@@ -2152,10 +2239,10 @@ with tab_a3:
     with meth_col1:
         st.markdown("**Data**")
         st.markdown(
-            "- **SEC Form 4** filings for firms exposed to political decisions\n"
-            "- **Political events** from comprehensive event database (2000-2025)\n"
-            "- **Matched controls**: ticker-matched trades outside political windows\n"
-            "- **FF5-adjusted CARs**: 30/60-day post-trade cumulative abnormal returns"
+            "- **SEC Form 4**: 29,633 insider trades across 1,712 event-firm windows\n"
+            "- **Political events**: 141 culture war events (2015-2025)\n"
+            "- **Matched controls**: Ticker-matched trades outside political windows\n"
+            "- **FF5-adjusted CARs**: Post-event cumulative abnormal returns"
         )
     with meth_col2:
         st.markdown("**Analysis Plan**")
@@ -2163,9 +2250,9 @@ with tab_a3:
             "1. Event-CAR directional profitability (sell + negative CAR = profitable)\n"
             "2. Two-proportion z-test: political vs control accuracy rates\n"
             "3. Proximity windows: 0-30, 31-60, 61-90, 91-180 days before event\n"
-            "4. Dollar magnitudes by CAR severity (-5%, -10%, -15%)\n"
-            "5. LPM with ticker FE: accuracy ~ log(size) × political\n"
-            "6. Regulatory period comparison (Pre-SOX through Post-Amendments)"
+            "4. Dollar magnitudes and Gini concentration\n"
+            "5. LPM with ticker FE: accuracy ~ log(size) x political\n"
+            "6. TOST equivalence, bootstrapped Wilcoxon, placebo permutation"
         )
 
     st.divider()
@@ -2228,13 +2315,18 @@ with tab_a3:
             _n = int(_all_sells["N_TRADES"].iloc[0]) if "N_TRADES" in _all_sells.columns else 0
             _p = float(_all_sells["METRIC_PVAL"].iloc[0])
             _ctrl_acc = float(_ctrl_sells["METRIC_VALUE"].iloc[0]) if not _ctrl_sells.empty else 0
+            _premium = _acc - _ctrl_acc
+            _premium_sign = "+" if _premium > 0 else ""
             st.markdown(
                 f"<div style='background-color:{LIGHT_GRAY}; border-left:4px solid {GOLD}; "
                 f"padding:1.25rem; border-radius:0 4px 4px 0; margin-bottom:1rem;'>"
                 f"<strong style='color:{GOLD};'>Headline Finding</strong><br>"
                 f"Political insider sells are <strong>{_acc:.1%}</strong> directionally accurate "
-                f"(N={_n:,}, p={_p:.1e}) vs <strong>{_ctrl_acc:.1%}</strong> in matched controls. "
-                f"Premium: <strong>+{(_acc - _ctrl_acc):.1%}pp</strong>.</div>",
+                f"(N={_n:,}, p={_p:.1e}) vs <strong>{_ctrl_acc:.1%}</strong> in matched controls "
+                f"({_premium_sign}{_premium:.1%}pp). Insiders beat chance but not the "
+                f"unconditional base rate. The finding reframes insider trading as a "
+                f"<strong>volume-silent directional channel</strong>: $3.5B in aggregate profits "
+                f"concentrated at Gini = 0.963.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -2501,14 +2593,17 @@ with tab_a3:
         "This essay extends the insider trading literature (Seyhun, 1986; Lakonishok "
         "and Lee, 2001; Cohen et al., 2012) into the political economy domain. Key "
         "implications:\n\n"
-        "- **SEC enforcement** — whether political foreknowledge constitutes material "
-        "nonpublic information under Rule 10b-5\n"
-        "- **Regulatory design** — whether post-2023 cooling-off amendments achieve "
-        "their intended effect (our evidence suggests they have not)\n"
-        "- **Market efficiency** — the sell-side accuracy premium and proximity gradient "
-        "provide a microfoundation linking political-economic risk to corporate valuation\n"
-        "- **Dollar magnitudes** — billions in aggregate informed-trading profits challenge "
-        "the view that insider trading around political events is economically trivial"
+        "- **Conditional vs. unconditional accuracy** — the 54.68% sell accuracy is "
+        "significant vs. 50% but falls below the 57.84% control base rate, requiring "
+        "reinterpretation of what 'informed' means in this context\n"
+        "- **Volume-silent channel** — insiders exploit the sell side of political "
+        "foreknowledge in trade sizes below regulatory detection thresholds\n"
+        "- **Extreme concentration** — Gini = 0.963 means a handful of insiders capture "
+        "nearly all $3.5B in aggregate profits\n"
+        "- **Regulatory design** — post-2023 cooling-off amendments have not altered "
+        "the directional accuracy pattern, suggesting structural reform is needed\n"
+        "- **CG attenuation** — accuracy declines with trade size, consistent with "
+        "informed traders camouflaging through smaller positions"
     )
 
     # --- Chart Gallery ---
@@ -2518,7 +2613,120 @@ with tab_a3:
 
 
 # =============================================================================
-# TAB 4: ENRICHED DATA
+# TAB 4: SOURCE CODE
+# =============================================================================
+
+with tab_code:
+    st.header("Source Code")
+    st.markdown(
+        "Complete Python source for the dissertation research pipeline. "
+        "Browse by essay or view the full pipeline from data cleaning through visualization."
+    )
+    st.divider()
+
+    # --- Helper to render a file ---
+    def _render_code_file(rel_path, description, key_prefix="code"):
+        _abs_path = BASE_DIR / rel_path
+        st.subheader(rel_path)
+        st.caption(description)
+        if _abs_path.exists():
+            _src = _abs_path.read_text(encoding="utf-8")
+            _lines = len(_src.splitlines())
+            st.markdown(f"**{_lines:,} lines**")
+            st.code(_src, language="python", line_numbers=True)
+            st.download_button(
+                f"Download {_abs_path.name}",
+                data=_src.encode("utf-8"),
+                file_name=_abs_path.name,
+                mime="text/x-python",
+                key=f"dl_{key_prefix}_{rel_path.replace('/', '_')}",
+            )
+        else:
+            st.warning(f"File not found: {rel_path}")
+        st.divider()
+
+    _code_files_essay = {
+        "Essay 1 — Volatility Regimes & FF5": [
+            ("model/essay1.py", "Markov regime-switching, FF5 spanning regressions, "
+             "culture war stock pricing, FinBERT sentiment, FOMO z-scores"),
+            ("model/essay1_matched.py", "Matched control analysis: paired t-tests, "
+             "regime amplification, sign consistency"),
+        ],
+        "Essay 2 — Event Study & DiD": [
+            ("model/essay2.py", "NLP pipeline (FinBERT sentiment, filing analysis), "
+             "political alignment scoring, factor model estimation"),
+            ("model/essay2_did.py", "Difference-in-differences: CAR panel construction, "
+             "parallel trends pre-test, three DiD specifications"),
+        ],
+        "Essay 3 — Insider Trading": [
+            ("model/essay3.py", "Insider trading analysis: directional accuracy, "
+             "proximity gradient, dollar magnitudes, concentration, bootstrapped inference"),
+            ("model/essay3_stock_act.py", "STOCK Act regulatory period analysis"),
+        ],
+    }
+
+    _code_files_pipeline = {
+        "Step 1: Data Cleaning (clean/)": [
+            ("clean/__init__.py", "Package init and public API"),
+            ("clean/orchestration.py", "Orchestration: runs all cleaning steps in sequence (~20h)"),
+            ("clean/config.py", "Configuration: paths, date ranges, ticker lists"),
+            ("clean/market_data.py", "Yahoo Finance stock data download and cleaning"),
+            ("clean/news.py", "News article collection (Guardian, NYT, Reddit)"),
+            ("clean/political_events.py", "Culture war event curation and validation"),
+            ("clean/political_exposure.py", "Political exposure scoring for firms"),
+            ("clean/fred_loaders.py", "FRED macroeconomic data (GDP, CPI, rates, employment)"),
+            ("clean/sec_filings.py", "SEC filing download and parsing (10-K, 10-Q)"),
+            ("clean/sec_form4.py", "SEC Form 4 insider trading filings"),
+            ("clean/party_platforms.py", "Party platform corpus for political alignment"),
+            ("clean/orthogonalize.py", "Orthogonalization of macro controls"),
+            ("clean/stock_act.py", "STOCK Act regulatory period definitions"),
+            ("clean/cache.py", "Caching utilities for API calls"),
+            ("clean/validation.py", "Data validation and quality checks"),
+        ],
+        "Step 2: ETL & Database": [
+            ("ETL.py", "Extract-Transform-Load: merges cleaned data into analytical tables"),
+            ("Database.py", "Database backend: Athena and SQLite loaders, table creation"),
+        ],
+        "Step 3: Model Pipeline": [
+            ("Model.py", "Entry point: runs Essay 1 pipeline via run_and_save()"),
+            ("model/__init__.py", "Model package: public API re-exports"),
+            ("model/datastore.py", "DataStore: SQLite read/write interface for results"),
+            ("model/reporting.py", "Orchestration: run_and_save() for Essay 1"),
+            ("model/essay1.py", "Essay 1: Markov regimes, FF5, sentiment, FOMO"),
+            ("model/essay1_matched.py", "Essay 1: Matched control analysis"),
+            ("model/essay2.py", "Essay 2: NLP, FinBERT, political alignment, factor model"),
+            ("model/essay2_did.py", "Essay 2: Difference-in-differences"),
+            ("model/essay3.py", "Essay 3: Insider trading analysis"),
+            ("model/essay3_stock_act.py", "Essay 3: STOCK Act regulatory periods"),
+            ("model/orthogonal_integration.py", "Orthogonalized macro control integration"),
+        ],
+        "Step 4: Visualization & Dashboard": [
+            ("visual.py", "Chart generation: 80+ figures saved to FIGURES table"),
+            ("dashboard.py", "This Streamlit dashboard"),
+        ],
+    }
+
+    _top_tabs = st.tabs(["Essay Models", "Complete Pipeline"])
+
+    with _top_tabs[0]:
+        _essay_tab_names = list(_code_files_essay.keys())
+        _essay_tabs = st.tabs(_essay_tab_names)
+        for _et, _group_name in zip(_essay_tabs, _essay_tab_names):
+            with _et:
+                for _rel_path, _desc in _code_files_essay[_group_name]:
+                    _render_code_file(_rel_path, _desc, key_prefix="essay")
+
+    with _top_tabs[1]:
+        _pipe_tab_names = list(_code_files_pipeline.keys())
+        _pipe_tabs = st.tabs(_pipe_tab_names)
+        for _pt, _group_name in zip(_pipe_tabs, _pipe_tab_names):
+            with _pt:
+                for _rel_path, _desc in _code_files_pipeline[_group_name]:
+                    _render_code_file(_rel_path, _desc, key_prefix="pipe")
+
+
+# =============================================================================
+# TAB 5: ENRICHED DATA
 # =============================================================================
 
 with tab_enriched:
@@ -2725,7 +2933,7 @@ st.markdown(
     color: {NAVY}; padding: 1rem 0; font-size: 0.85rem;'>
     Signals and Systems: The Political Economy of Investor Sentiment and Financial Innovation<br>
     <span style='font-size:0.8rem;'>Ashley D. Roseboro &middot;
-    College of Arts and Sciences, University of South Alabama &middot; 2026</span>
+    Mitchell College of Business, University of South Alabama &middot; 2026
     </div>""",
     unsafe_allow_html=True,
 )
