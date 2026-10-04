@@ -670,7 +670,10 @@ def _orthogonalize_expanding(
 def _durbin_watson(resid: pd.Series) -> float:
     """Compute Durbin-Watson statistic."""
     diff = np.diff(resid.values)
-    return float(np.sum(diff**2) / np.sum(resid.values**2))
+    denom = np.sum(resid.values**2)
+    if denom == 0:
+        return np.nan
+    return float(np.sum(diff**2) / denom)
 
 
 # ═══════════════════════════════════════════════════════════════════════

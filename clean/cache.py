@@ -49,7 +49,13 @@ def _save_cache(result, cache_dir):
                 value.to_parquet(os.path.join(cache_dir, f'{key}.parquet'))
                 manifest['keys'].append({'name': key, 'kind': 'dataframe'})
             elif key == 'summary_stats' and isinstance(value, dict):
-                with open(os.path.join(cache_dir, '_summary_stats.json'), 'w') as f:
+                # Backward-compatible: summary_stats always saved as JSON
+                with open(os.path.join(cache_dir, f'_{key}.json'), 'w') as f:
+                    json.dump(_make_json_serializable(value), f)
+                manifest['keys'].append({'name': key, 'kind': 'json'})
+            elif isinstance(value, dict) and not any(isinstance(v, (dict, pd.DataFrame)) for v in value.values()):
+                # Dict of scalars (e.g., diagnostics) — save as JSON
+                with open(os.path.join(cache_dir, f'_{key}.json'), 'w') as f:
                     json.dump(_make_json_serializable(value), f)
                 manifest['keys'].append({'name': key, 'kind': 'json'})
             elif isinstance(value, dict):
@@ -83,7 +89,8 @@ def _load_cache(cache_dir):
                     os.path.join(cache_dir, f'{name}.parquet')
                 )
             elif kind == 'json':
-                with open(os.path.join(cache_dir, '_summary_stats.json'), 'r') as f:
+                json_path = os.path.join(cache_dir, f'_{name}.json')
+                with open(json_path, 'r') as f:
                     result[name] = _restore_summary_stats(json.load(f))
             elif kind == 'subdir':
                 result[name] = _load_cache(os.path.join(cache_dir, name))

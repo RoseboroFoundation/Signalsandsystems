@@ -117,8 +117,8 @@ def _build_culture_factors(store: DataStore):
 
     # Build culture index
     culture_raw = build_culture_index(events_df, freq='M', method='net_score')
-    if culture_raw.std() == 0:
-        logger.error("Culture index has zero variance")
+    if culture_raw.std() < 1e-10:
+        logger.error("Culture index has zero/near-zero variance")
         return None, None
 
     # Build political proxies
@@ -347,9 +347,9 @@ def _run_essay2_integration(
                     'SPEC': spec_name,
                     'N_OBS': int(fit.nobs),
                     'R2': fit.rsquared,
-                    'TREAT_BETA': fit.params.get('TREAT', np.nan),
-                    'TREAT_T': fit.tvalues.get('TREAT', np.nan),
-                    'TREAT_P': fit.pvalues.get('TREAT', np.nan),
+                    'TREAT_BETA': fit.params['TREAT'] if 'TREAT' in fit.params.index else np.nan,
+                    'TREAT_T': fit.tvalues['TREAT'] if 'TREAT' in fit.tvalues.index else np.nan,
+                    'TREAT_P': fit.pvalues['TREAT'] if 'TREAT' in fit.pvalues.index else np.nan,
                 }
                 for col in culture_cols:
                     if col in fit.params.index:

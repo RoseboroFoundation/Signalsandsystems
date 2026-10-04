@@ -1010,7 +1010,7 @@ class AthenaLoader(BaseLoader):
 
         except Exception as e:
             status = 'FAILED'
-            error_msg = str(e)[:500]
+            error_msg = str(e)[:2000]
             rows = 0
             if s3_uploaded and not glue_registered:
                 logger.error(
@@ -1222,8 +1222,8 @@ class AthenaLoader(BaseLoader):
                     df[col] = pd.to_numeric(df[col], errors='coerce')
                 elif glue_type == 'boolean':
                     df[col] = df[col].map({'true': True, 'false': False, 'True': True, 'False': False})
-            except Exception:
-                pass  # leave column as-is if coercion fails
+            except Exception as exc:
+                logger.debug("_coerce_types: column '%s' coercion failed: %s", col, exc)
 
         return df
 
@@ -1335,7 +1335,7 @@ class SQLiteLoader(BaseLoader):
             write_df.to_sql(table_name, self.conn, if_exists=if_exists, index=False)
         except Exception as e:
             status = 'FAILED'
-            error_msg = str(e)[:500]
+            error_msg = str(e)[:2000]
             rows = 0
             logger.error("  [FAIL] %s: %s", table_name, e)
 
@@ -1395,20 +1395,23 @@ class SQLiteLoader(BaseLoader):
         )
         tables = []
         for (name,) in cur.fetchall():
-            count = self.conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+            safe_name = name.replace('"', '""')
+            count = self.conn.execute(f'SELECT COUNT(*) FROM "{safe_name}"').fetchone()[0]
             tables.append({'name': name, 'rows': count})
         return tables
 
     def read_table(self, table_name, limit=None):
         """Read a table into a pandas DataFrame."""
-        query = f'SELECT * FROM "{table_name}"'
+        safe_name = table_name.replace('"', '""')
+        query = f'SELECT * FROM "{safe_name}"'
         if limit:
-            query += f" LIMIT {limit}"
+            query += f" LIMIT {int(limit)}"
         return pd.read_sql(query, self.conn)
 
     def get_table_info(self, table_name):
         """Get column info for a table."""
-        cur = self.conn.execute(f'PRAGMA table_info("{table_name}")')
+        safe_name = table_name.replace('"', '""')
+        cur = self.conn.execute(f'PRAGMA table_info("{safe_name}")')
         return [
             {'name': r[1], 'type': r[2], 'nullable': not r[3]}
             for r in cur.fetchall()

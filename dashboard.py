@@ -525,11 +525,11 @@ def load_table(table_name):
 @st.cache_data(ttl=300)
 def load_figure_blob(figure_name):
     """Load a figure's PNG bytes from the FIGURES table."""
-    safe_name = figure_name.replace("'", "''")
     try:
         with _get_loader() as db:
-            df = db.run_query(
-                f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{safe_name}'"
+            df = pd.read_sql(
+                "SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = ?",
+                db.conn, params=(figure_name,),
             )
             if not df.empty:
                 return df.iloc[0]["IMAGE_DATA"]
@@ -539,8 +539,9 @@ def load_figure_blob(figure_name):
     if DB_BACKEND == "athena":
         try:
             with SQLiteLoader(db_path=str(DB_PATH)) as db:
-                df = db.run_query(
-                    f"SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = '{safe_name}'"
+                df = pd.read_sql(
+                    "SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = ?",
+                    db.conn, params=(figure_name,),
                 )
                 if not df.empty:
                     return df.iloc[0]["IMAGE_DATA"]
@@ -565,8 +566,8 @@ def load_summary():
             summary["median_car"] = float(r.get("MEDIAN_CAR", 0))
             summary["n_did"] = int(r.get("N_DID", 0))
             summary["model_name"] = r.get("MODEL_NAME", "FF5")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("load_summary failed: %s", exc)
     return summary
 
 
@@ -585,14 +586,16 @@ def database_has_data():
     for _tbl in _check_tables:
         try:
             with _get_loader() as db:
-                result = db.run_query(f"SELECT COUNT(*) as n FROM {_tbl}")
+                safe_tbl = _tbl.replace('"', '""')
+                result = db.run_query(f'SELECT COUNT(*) as n FROM "{safe_tbl}"')
                 if not result.empty and result.iloc[0]["n"] > 0:
                     return True
         except Exception:
             if DB_BACKEND == "athena" and DB_PATH.exists():
                 try:
                     with SQLiteLoader(db_path=str(DB_PATH)) as db:
-                        result = db.run_query(f"SELECT COUNT(*) as n FROM {_tbl}")
+                        safe_tbl = _tbl.replace('"', '""')
+                        result = db.run_query(f'SELECT COUNT(*) as n FROM "{safe_tbl}"')
                         if not result.empty and result.iloc[0]["n"] > 0:
                             return True
                 except Exception:

@@ -148,8 +148,9 @@ def _run_stock_ff5(
     ret['DATE'] = pd.to_datetime(ret['DATE'], errors='coerce')
     merged = ret.merge(factor_regime, on='DATE', how='inner')
     merged = merged.dropna(subset=['RETURN'] + factor_cols + ['RF'])
-    # Convert percent to decimal if needed (median-based check)
-    if merged['RETURN'].abs().max() > 1.5:
+    # Convert percent to decimal if needed — use proportion-based check
+    # to avoid a single outlier (e.g., 200% gain) triggering rescaling
+    if (merged['RETURN'].abs() > 1.5).mean() > 0.10:
         logger.warning("%s: returns appear to be in percent, dividing by 100", ticker)
         merged['RETURN'] = merged['RETURN'] / 100
     merged['EXCESS_RETURN'] = merged['RETURN'] - merged['RF']

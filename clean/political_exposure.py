@@ -340,6 +340,7 @@ def match_tickers_to_lobby_data(tickers, lobbying_df, pac_df):
     # Process lobbying data
     lobby_by_ticker = {}
     if not lobbying_df.empty:
+        lobbying_df = lobbying_df.copy()  # avoid mutating caller's DataFrame
         for col in ['client_name', 'registrant_name']:
             if col not in lobbying_df.columns:
                 continue
@@ -367,6 +368,7 @@ def match_tickers_to_lobby_data(tickers, lobbying_df, pac_df):
     # Process PAC data
     pac_by_ticker = {}
     if not pac_df.empty:
+        pac_df = pac_df.copy()  # avoid mutating caller's DataFrame
         for col in ['contributor_name', 'committee_name']:
             if col not in pac_df.columns:
                 continue

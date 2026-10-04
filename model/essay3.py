@@ -427,11 +427,12 @@ def _compute_tost(vals, sesoi_d):
     p_tost = max(p_upper, p_lower)
 
     ncp = mean_val / se if se > 0 else 0
+    # TOST uses one-sided alpha=0.05 per test, so critical value is ppf(0.95)
     power = 1 - stats.t.cdf(
-        stats.t.ppf(0.975, df=n - 1), df=n - 1, loc=abs(ncp)
+        stats.t.ppf(0.95, df=n - 1), df=n - 1, loc=abs(ncp)
     ) if se > 0 else np.nan
 
-    z_alpha = stats.norm.ppf(0.975)
+    z_alpha = stats.norm.ppf(0.95)  # one-sided for TOST
     z_beta = stats.norm.ppf(0.80)
     mde_raw = (z_alpha + z_beta) * se if se > 0 else np.nan
     mde_d = mde_raw / std_val if std_val > 0 and not np.isnan(mde_raw) else np.nan
@@ -5677,7 +5678,7 @@ def compute_initiation_split_tests(panel, crsp_profits, control_trades, valid_po
         # Required N for 80% power at d=0.2, given observed SD
         # N = ((z_alpha + z_beta) / (delta/sigma))^2
         # delta = SESOI_D * sigma, so N = ((z_alpha + z_beta) / SESOI_D)^2
-        z_alpha = stats.norm.ppf(0.975)
+        z_alpha = stats.norm.ppf(0.95)  # one-sided for TOST
         z_beta = stats.norm.ppf(0.80)
         required_n = int(np.ceil(((z_alpha + z_beta) / SESOI_D) ** 2))
         t['REQUIRED_N_80PCT_POWER'] = required_n

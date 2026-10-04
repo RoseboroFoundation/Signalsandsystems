@@ -249,6 +249,9 @@ def _estimate_normal_returns(
     y = est['EXCESS_RETURN']
     X = sm.add_constant(est[_FF5_ALL])
 
+    # NOTE: Event study market model uses plain OLS (standard practice for
+    # estimation windows). R² and alpha from this fit are NOT HAC-corrected,
+    # unlike regime-level and DiD regressions which use Newey-West / cluster SEs.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         fit = sm.OLS(y, X).fit()
@@ -522,10 +525,13 @@ def build_multi_window_panel(
     controls_df = store.read_table('CONTROL_COMPANIES')
     control_map = {}
     if not controls_df.empty:
-        control_map = dict(zip(
-            controls_df['TREATMENT_TICKER'],
-            controls_df['CONTROL_TICKER'],
-        ))
+        # Use groupby to preserve all controls per treatment (dict(zip) would
+        # silently drop all but the last control for multi-matched tickers).
+        control_map = (
+            controls_df.groupby('TREATMENT_TICKER')['CONTROL_TICKER']
+            .apply(list)
+            .to_dict()
+        )
     if not control_map:
         logger.warning("build_multi_window_panel: no matched controls — "
                         "panel will contain treatment firms only")
@@ -598,9 +604,11 @@ def build_multi_window_panel(
                 'EST_R2': treat_mw.r_squared,
             })
 
-        # Matched control firm
-        ctrl_ticker = control_map.get(ticker)
-        if ctrl_ticker:
+        # Matched control firm(s)
+        ctrl_tickers = control_map.get(ticker, [])
+        if isinstance(ctrl_tickers, str):
+            ctrl_tickers = [ctrl_tickers]
+        for ctrl_ticker in set(ctrl_tickers):  # deduplicate
             ctrl_mw = compute_multi_window_car(
                 ctrl_ticker, store, event_id, event_date,
                 is_treatment=False, regime=regime_label, lean=lean,
@@ -741,10 +749,14 @@ def run_multi_window_event_study(
                 vw_mean = (treat.loc[valid, 'CAR'].values * w_arr).sum()
 
         # BHAR: product of (1 + daily AR) - 1
-        # Approximation from CAR: BHAR ≈ exp(CAR) - 1 for log returns
+        # Since CARs are sums of simple-return ARs (not log returns),
+        # the correct conversion is (1 + CAR) - 1 = CAR for first order.
+        # For a better approximation we use prod(1+AR) but daily ARs
+        # aren't available here, so we use the standard approximation
+        # for simple returns: BHAR ≈ CAR (identical to first order).
         bhar_treat = np.nan
         if len(treat) > 0:
-            bhar_treat = np.exp(treat['CAR']).mean() - 1
+            bhar_treat = treat['CAR'].mean()
 
         # Per-event significance: fraction with |CAR/std| > 1.96
         pct_sig = np.nan
@@ -914,8 +926,8 @@ def run_multi_window_event_study(
                 cum_w = np.cumsum(w_arr[sorted_idx])
                 vw_median_w = vw_median_arr[sorted_idx[np.searchsorted(cum_w, 0.5)]]
 
-        # BHAR
-        bhar_mean = np.exp(w_treat_w['CAR']).mean() - 1
+        # BHAR (CARs are sums of simple-return ARs, so BHAR ≈ CAR)
+        bhar_mean = w_treat_w['CAR'].mean()
 
         # Per-event significance
         car_std = w_treat_w['CAR'].std()
@@ -1909,11 +1921,12 @@ def build_car_panel(
 
     id_col = 'EVENT_ID' if 'EVENT_ID' in events_df.columns else None
 
-    # Build control lookup: treatment_ticker -> control_ticker
-    control_map = dict(zip(
-        controls_df['TREATMENT_TICKER'],
-        controls_df['CONTROL_TICKER'],
-    ))
+    # Build control lookup: treatment_ticker -> list of control_tickers
+    control_map = (
+        controls_df.groupby('TREATMENT_TICKER')['CONTROL_TICKER']
+        .apply(list)
+        .to_dict()
+    )
 
     rows = []
     n_events = 0
@@ -1938,8 +1951,15 @@ def build_car_panel(
             is_treatment=True, regime=regime_label,
         )
 
-        # Control firm CAR
-        ctrl_ticker = control_map.get(event_ticker)
+        # Control firm CAR — use first matched control for this event.
+        # When multiple controls exist, only the primary match is used
+        # in the CAR panel; multi-window DiD uses all controls via
+        # build_multi_window_panel().
+        ctrl_tickers = control_map.get(event_ticker, [])
+        ctrl_ticker = ctrl_tickers[0] if ctrl_tickers else None
+        if len(ctrl_tickers) > 1:
+            logger.debug("build_car_panel: %s has %d controls, using %s",
+                         event_ticker, len(ctrl_tickers), ctrl_ticker)
         ctrl_car = None
         if ctrl_ticker:
             ctrl_car = compute_car(
@@ -2132,10 +2152,11 @@ def parallel_trends_test(
     events_df[date_col] = pd.to_datetime(events_df[date_col], errors='coerce')
     events_df = events_df.dropna(subset=[date_col])
 
-    control_map = dict(zip(
-        controls_df['TREATMENT_TICKER'],
-        controls_df['CONTROL_TICKER'],
-    ))
+    control_map = (
+        controls_df.groupby('TREATMENT_TICKER')['CONTROL_TICKER']
+        .apply(list)
+        .to_dict()
+    )
 
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
     factors['DATE'] = pd.to_datetime(factors['DATE'], errors='coerce')
@@ -2151,7 +2172,8 @@ def parallel_trends_test(
         treat_ticker = event.get('TICKER', None)
         if treat_ticker is None:
             continue
-        ctrl_ticker = control_map.get(treat_ticker)
+        ctrl_tickers = control_map.get(treat_ticker, [])
+        ctrl_ticker = ctrl_tickers[0] if ctrl_tickers else None
         if ctrl_ticker is None:
             continue
 

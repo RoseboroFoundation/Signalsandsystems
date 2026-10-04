@@ -418,7 +418,7 @@ def _download_scdb(cache_dir):
     from io import BytesIO
 
     # SCDB case-centered with citation data
-    url = 'http://scdb.wustl.edu/_brickFiles/2024_01/SCDB_2024_01_caseCentered_Citation.csv.zip'
+    url = 'https://scdb.wustl.edu/_brickFiles/2024_01/SCDB_2024_01_caseCentered_Citation.csv.zip'
     csv_path = os.path.join(cache_dir, 'scdb_cases.csv')
 
     logger.info("  Downloading Supreme Court Database from wustl.edu...")
@@ -443,7 +443,7 @@ def _download_scdb(cache_dir):
 def load_court_decisions(cache_dir):
     """Load Supreme Court decisions from SCDB CSV.
 
-    Auto-downloads from http://scdb.wustl.edu if not present locally.
+    Auto-downloads from https://scdb.wustl.edu if not present locally.
     """
     csv_path = os.path.join(cache_dir, 'scdb_cases.csv')
     if not os.path.exists(csv_path):
@@ -475,8 +475,11 @@ def load_court_decisions(cache_dir):
 
         policy_area = SCDB_ISSUE_TO_POLICY.get(issue_area, 'unknown')
         naics = ','.join(POLICY_AREA_TO_NAICS.get(policy_area, []))
-        margin = abs(int(maj_votes or 0) - int(min_votes or 0))
-        total = int(maj_votes or 0) + int(min_votes or 0)
+        # Guard against NaN from CSV (int(nan) raises ValueError)
+        maj_int = int(maj_votes) if pd.notna(maj_votes) else 0
+        min_int = int(min_votes) if pd.notna(min_votes) else 0
+        margin = abs(maj_int - min_int)
+        total = maj_int + min_int
         is_close = margin <= 2 if total > 0 else False
 
         # Direction: 1=conservative, 2=liberal, 3=unspecifiable

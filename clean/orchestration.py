@@ -205,7 +205,7 @@ def load_data():
 
     # Progress tracking — write step/total to a file the dashboard can read
     _progress_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'clean_progress.txt')
-    _total_steps = 34
+    _total_steps = 31
     _current_step = 0
 
     def _report(label):

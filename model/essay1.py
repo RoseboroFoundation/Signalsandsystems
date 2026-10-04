@@ -159,8 +159,11 @@ def estimate_vix_regimes(
     raw_trans = np.squeeze(fit.regime_transition)  # (k, k)
     transition_matrix = raw_trans.T                # now rows sum to 1
     row_sums = transition_matrix.sum(axis=1)
-    assert np.allclose(row_sums, 1.0, atol=1e-4), \
-        f"Transition matrix rows don't sum to 1: {row_sums}"
+    if not np.allclose(row_sums, 1.0, atol=1e-4):
+        raise ValueError(
+            f"Transition matrix rows don't sum to 1: {row_sums}. "
+            "Check statsmodels version and regime_transition shape."
+        )
 
     # Expected duration in each regime (statsmodels provides this directly)
     raw_durations = fit.expected_durations

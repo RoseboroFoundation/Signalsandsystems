@@ -50,7 +50,8 @@ from .datastore import DataStore
 
 logger = logging.getLogger(__name__)
 
-# ── Price data cache ──────────────────────────────────────────────────
+# ── Price data cache (bounded to prevent memory leaks on large runs) ──
+_PRICE_CACHE_MAX = 500
 _price_cache = {}
 
 
@@ -73,6 +74,12 @@ def _compute_car_yf(ticker, event_date, pre_window=(-5, -1),
 
     # Cache key
     cache_key = (ticker, start_dl.strftime('%Y-%m'), end_dl.strftime('%Y-%m'))
+
+    if len(_price_cache) >= _PRICE_CACHE_MAX:
+        # Evict oldest entries when cache is full
+        keys_to_drop = list(_price_cache.keys())[:len(_price_cache) // 2]
+        for k in keys_to_drop:
+            del _price_cache[k]
 
     if cache_key not in _price_cache:
         try:
@@ -800,7 +807,7 @@ def compute_placebo(panel, n_permutations=1000, seed=42):
 
     null_accuracies = []
     for _ in range(n_permutations):
-        # Shuffle the ACCURATE column (equivalent to random trade dates)
+        # Shuffle the ACCURATE column to test if observed accuracy exceeds chance
         shuffled = rng.permutation(valid['ACCURATE'].values)
         null_accuracies.append(shuffled.mean())
 

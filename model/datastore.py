@@ -259,6 +259,13 @@ class DataStore:
 
         df = stocks.sort_values(['TICKER', 'DATE']).copy()
         df['RETURN'] = df.groupby('TICKER')['ADJ_CLOSE'].pct_change()
+        # Guard against returns <= -1 (delisted/halted securities) which
+        # produce -inf or NaN from log1p
+        bad_mask = df['RETURN'] <= -1
+        if bad_mask.any():
+            logger.warning("datastore: %d rows with RETURN <= -1 set to NaN before log1p",
+                           bad_mask.sum())
+            df.loc[bad_mask, 'RETURN'] = np.nan
         df['LOG_RETURN'] = np.log1p(df['RETURN'])
         return df
 
@@ -362,7 +369,7 @@ class DataStore:
             'N_EVENTS': len(self.events),
             'N_TICKERS': self.stock_returns['TICKER'].nunique() if 'TICKER' in self.stock_returns.columns else 0,
         }
-        if event_results is not None and not event_results.empty:
+        if event_results is not None and not event_results.empty and 'STATUS' in event_results.columns:
             ok = event_results[event_results['STATUS'] == 'OK']
             summary_row['N_EVENT_STUDIES'] = len(ok)
             summary_row['N_SIGNIFICANT_CAR_005'] = int((ok['CAR_P'] < 0.05).sum()) if 'CAR_P' in ok.columns else 0

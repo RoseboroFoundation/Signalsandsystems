@@ -173,7 +173,8 @@ class ResultStore:
             # Athena returns lowercase columns; normalize to uppercase
             df.columns = [c.upper() for c in df.columns]
             return df
-        except Exception:
+        except Exception as exc:
+            logger.warning("ResultStore._read('%s') failed: %s", table_name, exc)
             return pd.DataFrame()
 
     # ── load all tables ────────────────────────────────────────────────
@@ -252,21 +253,24 @@ class ResultStore:
 
     @staticmethod
     def _upsert_figure_sqlite(loader, df, name):
-        """Delete-then-append inside the same transaction so a failed append
+        """Delete-then-append inside an exclusive transaction so a failed append
         does not leave the row missing.  Falls back to DROP on schema drift."""
+        loader.conn.execute('BEGIN EXCLUSIVE')
         try:
-            loader.conn.execute(
-                'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
+            try:
+                loader.conn.execute(
+                    'DELETE FROM FIGURES WHERE FIGURE_NAME = ?', (name,))
+            except Exception:
+                # Table missing or schema mismatch — DROP and let write_table recreate
+                loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
+            res = loader.write_table(df, 'FIGURES', replace=False)
+            if res.get('status') == 'SUCCESS':
+                loader.conn.commit()
+            else:
+                loader.conn.rollback()
         except Exception:
-            # Table missing or schema mismatch — DROP and let write_table recreate
-            loader.conn.execute('DROP TABLE IF EXISTS FIGURES')
-            loader.conn.commit()
-        # append inside the same transaction (DELETE not yet committed)
-        res = loader.write_table(df, 'FIGURES', replace=False)
-        if res.get('status') == 'SUCCESS':
-            loader.conn.commit()
-        else:
             loader.conn.rollback()
+            raise
         return res
 
     def _save_figure_to_sqlite(self, df, name):
@@ -288,14 +292,17 @@ class ResultStore:
     def save_figure(self, name, fig, metadata=None):
         os.makedirs(FIGURE_DIR, exist_ok=True)
         png_path = os.path.join(FIGURE_DIR, f'{name}.png')
-        fig.savefig(png_path)
-        file_size = os.path.getsize(png_path)
 
+        # Single render to BytesIO, then write to both disk and DB
         buf = io.BytesIO()
         fig.savefig(buf, format='png')
         buf.seek(0)
         png_bytes = buf.read()
         buf.close()
+
+        with open(png_path, 'wb') as f:
+            f.write(png_bytes)
+        file_size = len(png_bytes)
 
         row = {
             'FIGURE_NAME': name,

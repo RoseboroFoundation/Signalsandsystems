@@ -437,8 +437,9 @@ class Form4Downloader:
 
             cik = self.get_company_cik(ticker)
             if not cik:
-                # Write empty file so we don't retry
-                pd.DataFrame().to_csv(ticker_file, index=False)
+                # Skip but do NOT cache empty file — transient failures
+                # should be retried on next run
+                logger.warning("CIK lookup failed for %s — skipping (will retry next run)", ticker)
                 continue
 
             filings = self.download_form4_filings(ticker, cik, start_date, end_date)
@@ -471,7 +472,7 @@ class Form4Downloader:
             df['transaction_date'] = pd.to_datetime(df['transaction_date'], errors='coerce')
             df['filing_date'] = pd.to_datetime(df['filing_date'], errors='coerce')
             df = df.dropna(subset=['transaction_date'])
-            df['transaction_value'] = df['shares'] * df['price_per_share']
+            df['transaction_value'] = df['shares'] * df['price_per_share'].fillna(0)
             df = df.sort_values('transaction_date')
 
             if save_csv:

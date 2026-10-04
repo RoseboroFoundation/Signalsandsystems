@@ -98,7 +98,8 @@ def load_secrets():
 
     # ── Write .env file ───────────────────────────────────────────
     env_path = "/app/.env"
-    with open(env_path, "w") as f:
+    fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         for k, v in sorted(env_vars.items()):
             # Escape newlines and quotes for .env format
             safe_v = str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
@@ -183,8 +184,7 @@ def main():
             "--port", "8081",
             "--log-level", "info",
             "--timeout-keep-alive", "30",
-            "--reload",
-            "--reload-dir", "/app",
+            "--workers", "1",
         ])
 
     elif service_type == "services":

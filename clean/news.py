@@ -472,7 +472,7 @@ class CompanyNewsAggregator:
                                 limit=max_results // len(search_queries),
                                 sort='relevance'
                             ):
-                                created = datetime.fromtimestamp(submission.created_utc)
+                                created = datetime.utcfromtimestamp(submission.created_utc)
 
                                 if created < start_date or created > end_date:
                                     continue

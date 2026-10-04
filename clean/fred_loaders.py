@@ -69,8 +69,14 @@ def load_inflation_data(
         inflation_yoy = inflation_raw.pct_change(periods=12) * 100
         inflation_yoy.columns = [f'{col}_YoY' for col in inflation_yoy.columns]
 
-        logger.info("Calculating month-over-month changes...")
-        inflation_mom = inflation_raw.pct_change() * 100 * 12
+        # Annualize MoM changes — use frequency-aware multiplier
+        # (monthly series × 12, quarterly series × 4)
+        logger.info("Calculating month-over-month (annualized) changes...")
+        freq_multiplier = pd.Series(12, index=inflation_raw.columns)
+        for col in inflation_raw.columns:
+            if 'GDP_Deflator' in col:
+                freq_multiplier[col] = 4  # quarterly data
+        inflation_mom = inflation_raw.pct_change() * 100 * freq_multiplier
         inflation_mom.columns = [f'{col}_MoM' for col in inflation_mom.columns]
 
         inflation_combined = pd.concat([
