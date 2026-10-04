@@ -2706,7 +2706,7 @@ with tab_code:
         ],
     }
 
-    _top_tabs = st.tabs(["Essay Models", "Complete Pipeline"])
+    _top_tabs = st.tabs(["Essay Models", "Complete Pipeline", "R Code"])
 
     with _top_tabs[0]:
         _essay_tab_names = list(_code_files_essay.keys())
@@ -2723,6 +2723,122 @@ with tab_code:
             with _pt:
                 for _rel_path, _desc in _code_files_pipeline[_group_name]:
                     _render_code_file(_rel_path, _desc, key_prefix="pipe")
+
+    with _top_tabs[2]:
+        st.subheader("R Implementation")
+        st.markdown(
+            "Complete R translation of the dissertation research pipeline. "
+            "All Python code has been converted to idiomatic R using tidyverse, "
+            "ggplot2, fixest, and other standard R packages for reproducible research."
+        )
+        st.divider()
+
+        # --- Download all R code as ZIP ---
+        _r_code_dir = BASE_DIR / "r_code"
+        _r_files = sorted(_r_code_dir.glob("*.R")) if _r_code_dir.exists() else []
+
+        if _r_files:
+            import zipfile
+            _zip_buf = BytesIO()
+            with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for rf in _r_files:
+                    zf.write(rf, rf.name)
+            _zip_buf.seek(0)
+
+            _total_lines = sum(len(rf.read_text().splitlines()) for rf in _r_files)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("R Scripts", len(_r_files))
+            c2.metric("Total Lines", f"{_total_lines:,}")
+            c3.metric("Total Size", f"{sum(rf.stat().st_size for rf in _r_files) / 1024:.0f} KB")
+
+            st.download_button(
+                "Download All R Code (.zip)",
+                data=_zip_buf.getvalue(),
+                file_name="signals_and_systems_r_code.zip",
+                mime="application/zip",
+                key="dl_r_code_zip",
+            )
+            st.divider()
+
+            # --- Required R packages ---
+            with st.expander("Required R Packages", expanded=False):
+                st.code(
+                    'install.packages(c(\n'
+                    '  "tidyverse", "quantmod", "tidyquant", "fredr",\n'
+                    '  "depmixS4", "sandwich", "lmtest", "fixest",\n'
+                    '  "TOSTER", "boot", "zoo", "broom",\n'
+                    '  "tidytext", "sentimentr", "textdata",\n'
+                    '  "DBI", "RSQLite", "openxlsx", "irr",\n'
+                    '  "ggplot2", "patchwork", "scales", "viridis",\n'
+                    '  "httr", "jsonlite", "rvest", "xml2"\n'
+                    '))',
+                    language="r",
+                )
+
+            st.divider()
+
+            # --- R file listing ---
+            _r_code_files = {
+                "Data Pipeline": [
+                    ("r_code/clean.R", "Data cleaning: FRED loaders, Yahoo Finance, SEC filings, "
+                     "political events, Fama-French factors, orthogonalization"),
+                    ("r_code/etl.R", "ETL pipeline: loads all 35+ datasets with dependency resolution"),
+                    ("r_code/database.R", "Database backend: SQLite/Athena read/write via DBI"),
+                ],
+                "Essay 1 — Volatility Regimes & FF5": [
+                    ("r_code/essay1.R", "Markov regime-switching (depmixS4), FF5 regressions, "
+                     "culture war stock pricing, FOMO z-scores, Chow tests"),
+                    ("r_code/essay1_matched.R", "Matched control analysis: paired t-tests, "
+                     "regime amplification, sign consistency"),
+                ],
+                "Essay 2 — Event Study & DiD": [
+                    ("r_code/essay2.R", "NLP pipeline (sentimentr/tidytext), political alignment "
+                     "scoring, TF-IDF distinctive phrases"),
+                    ("r_code/essay2_did.R", "Difference-in-differences: CAR panel, parallel trends, "
+                     "bootstrap CIs, placebo tests, cluster-robust SEs (fixest)"),
+                ],
+                "Essay 3 — Insider Trading": [
+                    ("r_code/essay3.R", "Insider trading analysis: directional accuracy, TOST "
+                     "equivalence, proximity gradient, Fama-MacBeth, bootstrap, placebo"),
+                ],
+                "Visualization & Reporting": [
+                    ("r_code/visual.R", "ggplot2 visualizations: regime plots, event study CARs, "
+                     "coefficient plots, heatmaps, placebo distributions"),
+                    ("r_code/reporting.R", "Summary statistics and Excel workbook generation (openxlsx)"),
+                    ("r_code/compute_kappa.R", "Cohen's kappa inter-rater reliability (irr package)"),
+                    ("r_code/run_pipeline.R", "Master script: sources all files and runs full pipeline"),
+                ],
+            }
+
+            def _render_r_file(rel_path, description, key_prefix="rcode"):
+                _abs_path = BASE_DIR / rel_path
+                st.subheader(rel_path.replace("r_code/", ""))
+                st.caption(description)
+                if _abs_path.exists():
+                    _src = _abs_path.read_text(encoding="utf-8")
+                    _lines = len(_src.splitlines())
+                    st.markdown(f"**{_lines:,} lines**")
+                    st.code(_src, language="r", line_numbers=True)
+                    st.download_button(
+                        f"Download {_abs_path.name}",
+                        data=_src.encode("utf-8"),
+                        file_name=_abs_path.name,
+                        mime="text/x-r",
+                        key=f"dl_{key_prefix}_{rel_path.replace('/', '_')}",
+                    )
+                else:
+                    st.warning(f"File not found: {rel_path}")
+                st.divider()
+
+            _r_tab_names = list(_r_code_files.keys())
+            _r_tabs = st.tabs(_r_tab_names)
+            for _rt, _group_name in zip(_r_tabs, _r_tab_names):
+                with _rt:
+                    for _rel_path, _desc in _r_code_files[_group_name]:
+                        _render_r_file(_rel_path, _desc, key_prefix="rcode")
+        else:
+            st.info("R code files not yet generated. Run the R conversion pipeline first.")
 
 
 # =============================================================================
