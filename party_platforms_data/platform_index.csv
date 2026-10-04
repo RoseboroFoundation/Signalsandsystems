@@ -1,0 +1,13 @@
+year,party,source,url,word_count,note,file_path,downloaded_at
+2004,Republican,APP,https://www.presidency.ucsb.edu/documents/2004-republican-party-platform,42574,,./party_platforms_data/republican_platform_2004.txt,2026-03-15T19:42:02.021811
+2004,Democratic,APP,https://www.presidency.ucsb.edu/documents/2004-democratic-party-platform,17712,,./party_platforms_data/democratic_platform_2004.txt,2026-03-15T19:42:03.264431
+2008,Republican,APP,https://www.presidency.ucsb.edu/documents/2008-republican-party-platform,23734,,./party_platforms_data/republican_platform_2008.txt,2026-03-15T19:42:04.556281
+2008,Democratic,APP,https://www.presidency.ucsb.edu/documents/2008-democratic-party-platform,25915,,./party_platforms_data/democratic_platform_2008.txt,2026-03-15T19:42:05.856207
+2012,Republican,APP,https://www.presidency.ucsb.edu/documents/2012-republican-party-platform,31079,,./party_platforms_data/republican_platform_2012.txt,2026-03-15T19:42:09.437923
+2012,Democratic,APP,https://www.presidency.ucsb.edu/documents/2012-democratic-party-platform,26489,,./party_platforms_data/democratic_platform_2012.txt,2026-03-15T19:42:10.614365
+2016,Republican,APP,https://www.presidency.ucsb.edu/documents/2016-republican-party-platform,36169,,./party_platforms_data/republican_platform_2016.txt,2026-03-15T19:42:14.133374
+2016,Democratic,APP,https://www.presidency.ucsb.edu/documents/2016-democratic-party-platform,25864,,./party_platforms_data/democratic_platform_2016.txt,2026-03-15T19:42:17.435989
+2020,Republican,APP,https://www.presidency.ucsb.edu/documents/2016-republican-party-platform,36169,Re-adopted 2016 platform (no new platform issued),./party_platforms_data/republican_platform_2020.txt,2026-03-15T19:42:20.607139
+2020,Democratic,APP,https://www.presidency.ucsb.edu/documents/2020-democratic-party-platform,42105,,./party_platforms_data/democratic_platform_2020.txt,2026-03-15T19:42:22.853544
+2024,Republican,APP,https://www.presidency.ucsb.edu/documents/2024-republican-party-platform,5364,,./party_platforms_data/republican_platform_2024.txt,2026-03-15T19:42:25.266442
+2024,Democratic,APP,https://www.presidency.ucsb.edu/documents/2024-democratic-party-platform,42788,,./party_platforms_data/democratic_platform_2024.txt,2026-03-15T19:42:27.829258

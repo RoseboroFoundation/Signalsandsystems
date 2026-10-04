@@ -16,6 +16,9 @@ news_data/
 sec_form4_data/
 analysis_data/
 
+# Large SEC filing text (31MB+)
+sec_filings_data/sec_filing_text_*.csv
+
 # Generated CSVs (keep Culture_War input data)
 vix_data_*.csv
 full_macro_data_*.csv

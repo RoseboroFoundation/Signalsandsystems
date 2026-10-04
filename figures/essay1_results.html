@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Essay 1 Results</title>
+<style>
+  body { font-family: 'Georgia', serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 22px; text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
+  h2 { font-size: 16px; margin-top: 36px; color: #333; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 24px 0; font-size: 13px; }
+  th { background: #2c3e50; color: #fff; padding: 8px 12px; text-align: center; font-weight: 600; }
+  td { padding: 7px 12px; border-bottom: 1px solid #ddd; text-align: center; }
+  tr:nth-child(even) { background: #f8f9fa; }
+  .num { font-family: 'Courier New', monospace; }
+  .sig { color: #c0392b; font-weight: bold; }
+  .pos { color: #27ae60; }
+  .neg { color: #c0392b; }
+  .note { font-size: 12px; color: #666; margin-top: -16px; margin-bottom: 20px; }
+  .stars { font-size: 11px; color: #666; margin-top: -16px; }
+</style></head><body>
+<h1>Essay 1: Volatility Regimes and the Fama-French Five-Factor Model</h1>
+<h2>Table 1: Model Selection (Markov Regime-Switching on VIX)</h2>
+<table><tr><th>K</th><th>AIC</th><th>BIC</th><th>Log-Likelihood</th><th>Parameters</th></tr>
+<tr><td>2</td><td class='num'>38,244.4</td><td class='num'>38,285.1</td><td class='num'>-19,116.2</td><td>6</td></tr>
+<tr><td>3</td><td class='num'>33,691.6</td><td class='num'>33,773.1</td><td class='num'>-16,833.8</td><td>12</td></tr>
+<tr><td>4</td><td class='num'>30,602.3</td><td class='num'>30,738.1</td><td class='num'>-15,281.2</td><td>20</td></tr>
+</table>
+<p class='note'>Lower AIC/BIC indicates better fit. Both criteria favor K=4; K=3 selected on parsimony.</p>
+<h2>Table 2: Identified Volatility Regimes</h2>
+<table><tr><th>Regime</th><th>Mean VIX</th><th>Std Dev</th><th>Range</th><th>Days</th><th>% of Sample</th><th>E[Duration]</th></tr>
+<tr><td><b>Low Volatility</b></td><td class='num'>13.3</td><td class='num'>1.7</td><td class='num'>9.1 – 19.0</td><td>2,532</td><td>38.6%</td><td>57 days</td></tr>
+<tr><td><b>Normal</b></td><td class='num'>19.5</td><td class='num'>2.5</td><td class='num'>14.3 – 27.6</td><td>2,578</td><td>39.3%</td><td>32 days</td></tr>
+<tr><td><b>High Volatility</b></td><td class='num'>31.7</td><td class='num'>9.2</td><td class='num'>20.7 – 82.7</td><td>1,457</td><td>22.2%</td><td>41 days</td></tr>
+</table>
+<p class='note'>6,567 trading days (Jan 2000 – present). Regimes identified via Hamilton (1989) Markov-switching model with switching variance.</p>
+<h2>Table 3: Regime Transition Probabilities</h2>
+<table><tr><th>From \ To</th><th>Low Volatility</th><th>Normal</th><th>High Volatility</th></tr>
+<tr><td><b>Low Volatility</b></td><td class='num' style="font-weight:bold">0.9826</td><td class='num'>0.0174</td><td class='num'>0.0000</td></tr>
+<tr><td><b>Normal</b></td><td class='num'>0.0174</td><td class='num' style="font-weight:bold">0.9683</td><td class='num'>0.0143</td></tr>
+<tr><td><b>High Volatility</b></td><td class='num'>0.0000</td><td class='num'>0.0245</td><td class='num' style="font-weight:bold">0.9755</td></tr>
+</table>
+<p class='note'>Row-stochastic matrix: P(to column | from row). Note zero probability of direct Low ↔ High transition.</p>
+<h2>Table 4: Factor Premia by Regime (Annualized)</h2>
+<table><tr><th>Regime</th><th>N</th><th>MKT-RF</th><th>SMB</th><th>HML</th><th>RMW</th><th>CMA</th></tr>
+<tr><td><b>Low Volatility</b></td><td>2,519</td><td class='num pos'>+23.82%</td><td class='num pos'>+1.73%</td><td class='num pos'>+0.33%</td><td class='num pos'>+0.33%</td><td class='num neg'>-4.42%</td></tr>
+<tr><td><b>Normal</b></td><td>2,567</td><td class='num pos'>+9.23%</td><td class='num pos'>+2.85%</td><td class='num pos'>+4.82%</td><td class='num pos'>+4.51%</td><td class='num pos'>+6.82%</td></tr>
+<tr><td><b>High Volatility</b></td><td>1,453</td><td class='num neg'>-21.44%</td><td class='num neg'>-0.10%</td><td class='num pos'>+2.38%</td><td class='num pos'>+12.82%</td><td class='num pos'>+6.42%</td></tr>
+</table>
+<p class='note'>Daily mean returns annualized (×252). MKT-RF = excess market return; SMB = size; HML = value; RMW = profitability; CMA = investment.</p>
+<h2>Table 5: FF5 Regression Coefficients by Regime</h2>
+<p class='note' style='margin-bottom:8px'>Dependent variable: Excess market return (MKT-RF). Newey-West HAC standard errors (5 lags).</p>
+<table><tr><th>Regime</th><th>α</th><th>SMB</th><th>HML</th><th>RMW</th><th>CMA</th><th>R²</th></tr>
+<tr><td><b>Low Volatility</b></td><td class='num'>+0.0009***<br><span style="color:#888;font-size:11px">(0.000)</span></td><td class='num'><span class='pos'>+0.376</span>***<br><span style="color:#888;font-size:11px">(12.78)</span></td><td class='num'><span class='neg'>-0.061</span>*<br><span style="color:#888;font-size:11px">(-1.73)</span></td><td class='num'><span class='neg'>-0.252</span>***<br><span style="color:#888;font-size:11px">(-6.20)</span></td><td class='num'><span class='neg'>-0.320</span>***<br><span style="color:#888;font-size:11px">(-5.94)</span></td><td class='num'>0.176</td></tr>
+<tr><td><b>Normal</b></td><td class='num'>+0.0006***<br><span style="color:#888;font-size:11px">(0.001)</span></td><td class='num'><span class='pos'>+0.140</span>**<br><span style="color:#888;font-size:11px">(2.56)</span></td><td class='num'><span class='pos'>+0.042</span><br><span style="color:#888;font-size:11px">(0.95)</span></td><td class='num'><span class='neg'>-0.565</span>***<br><span style="color:#888;font-size:11px">(-12.22)</span></td><td class='num'><span class='neg'>-0.438</span>***<br><span style="color:#888;font-size:11px">(-6.30)</span></td><td class='num'>0.188</td></tr>
+<tr><td><b>High Volatility</b></td><td class='num'>-0.0002<br><span style="color:#888;font-size:11px">(0.596)</span></td><td class='num'><span class='neg'>-0.123</span><br><span style="color:#888;font-size:11px">(-1.40)</span></td><td class='num'><span class='pos'>+0.525</span>***<br><span style="color:#888;font-size:11px">(7.06)</span></td><td class='num'><span class='neg'>-0.825</span>***<br><span style="color:#888;font-size:11px">(-8.74)</span></td><td class='num'><span class='neg'>-1.046</span>***<br><span style="color:#888;font-size:11px">(-8.44)</span></td><td class='num'>0.239</td></tr>
+</table>
+<p class='stars'>*** p < 0.01, ** p < 0.05, * p < 0.10. t-statistics in parentheses.</p>
+<h2>Table 6: Chow Test for Structural Break</h2>
+<table style='width:400px'><tr><th>Statistic</th><th>Value</th></tr>
+<tr><td>F-statistic</td><td class='num sig'>26.23</td></tr>
+<tr><td>p-value</td><td class='num sig'>0.000000</td></tr>
+<tr><td>Degrees of freedom</td><td class='num'>(10, 6,524)</td></tr>
+<tr><td>Significant at 1%</td><td class='sig'>Yes</td></tr>
+</table>
+<p class='note'>H₀: Factor loadings are equal across all regimes. Rejected at all conventional significance levels.</p>
+<h2>Table 7: Regime-Interaction Model</h2>
+<p class='note' style='margin-bottom:8px'>Baseline: Low Volatility regime. Tests whether factor loadings shift in Normal and High Volatility regimes.</p>
+<table><tr><th>Variable</th><th>Coefficient</th><th>t-stat</th><th>p-value</th><th></th></tr>
+<tr><td style='text-align:left'>const</td><td class='num pos'>+0.0009</td><td class='num'>8.61</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>SMB</td><td class='num pos'>+0.3762</td><td class='num'>12.85</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>HML</td><td class='num neg'>-0.0610</td><td class='num'>-1.77</td><td class='num'>0.0774</td><td class='sig'>*</td></tr>
+<tr><td style='text-align:left'>RMW</td><td class='num neg'>-0.2518</td><td class='num'>-6.23</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>CMA</td><td class='num neg'>-0.3204</td><td class='num'>-6.07</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>Normal</td><td class='num neg'>-0.0003</td><td class='num'>-1.58</td><td class='num'>0.1135</td><td class='sig'></td></tr>
+<tr><td style='text-align:left'>High Vol</td><td class='num neg'>-0.0011</td><td class='num'>-2.57</td><td class='num'>0.0101</td><td class='sig'>**</td></tr>
+<tr><td style='text-align:left'>Normal × SMB</td><td class='num neg'>-0.2362</td><td class='num'>-3.84</td><td class='num'>0.0001</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>Normal × HML</td><td class='num pos'>+0.1034</td><td class='num'>1.84</td><td class='num'>0.0663</td><td class='sig'>*</td></tr>
+<tr><td style='text-align:left'>Normal × RMW</td><td class='num neg'>-0.3127</td><td class='num'>-5.15</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>Normal × CMA</td><td class='num neg'>-0.1179</td><td class='num'>-1.37</td><td class='num'>0.1721</td><td class='sig'></td></tr>
+<tr><td style='text-align:left'>High Vol × SMB</td><td class='num neg'>-0.4987</td><td class='num'>-5.41</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>High Vol × HML</td><td class='num pos'>+0.5856</td><td class='num'>7.16</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>High Vol × RMW</td><td class='num neg'>-0.5734</td><td class='num'>-5.59</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+<tr><td style='text-align:left'>High Vol × CMA</td><td class='num neg'>-0.7260</td><td class='num'>-5.38</td><td class='num'>0.0000</td><td class='sig'>***</td></tr>
+</table>
+<p class='stars'>*** p < 0.01, ** p < 0.05, * p < 0.10. Newey-West HAC standard errors (5 lags).</p>
+</body></html>

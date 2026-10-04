@@ -1,0 +1,8 @@
+Variable,N,Mean,Std. Dev.,Min,P25,Median,P75,Max
+Market Excess Return (Mkt-RF),6559,0.032,1.2373,-12.01,-0.49,0.07,0.61,11.36
+Small Minus Big (SMB),6559,0.0075,0.6472,-4.58,-0.36,0.01,0.37,5.71
+High Minus Low (HML),6559,0.0106,0.7798,-5.03,-0.33,-0.01,0.34,6.73
+Robust Minus Weak (RMW),6559,0.019,0.5506,-2.97,-0.26,0.01,0.29,4.57
+Conservative Minus Aggressive (CMA),6559,0.0098,0.4507,-5.31,-0.21,0.0,0.22,2.47
+Risk-Free Rate (RF),6559,0.0075,0.0085,0.0,0.0,0.0,0.01,0.03
+CBOE Volatility Index (VIX),6567,19.83,8.36,9.14,13.99,17.77,23.21,82.69

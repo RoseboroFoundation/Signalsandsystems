@@ -1,0 +1,29 @@
+\begin{table}[htbp]
+\centering
+\caption{Sensitivity of Political-Alignment Classification to Threshold Choice}
+\label{tab:threshold_sensitivity}
+\begin{tabular}{c rrr rrr rrr c}
+\toprule
+$\pm\tau$ & $N_C$ & $N_L$ & $N_M$ & \%$C$ & \%$L$ & \%$M$ & $\bar{s}_C$ & $\bar{s}_L$ & $\bar{s}_M$ & $d$ \\
+\midrule
+0.05 & 71 & 40 &  7 & 60.2 & 33.9 &  5.9 & $+$0.362 & $-$0.282 & $-$0.007 & 2.99 \\
+0.10 & 63 & 33 & 22 & 53.4 & 28.0 & 18.6 & $+$0.397 & $-$0.326 & $+$0.002 & 3.52 \\
+0.15 & 56 & 28 & 34 & 47.5 & 23.7 & 28.8 & $+$0.431 & $-$0.360 & $+$0.008 & 4.03 \\
+0.20 & 50 & 25 & 43 & 42.4 & 21.2 & 36.4 & $+$0.463 & $-$0.384 & $+$0.018 & 4.51 \\
+0.25 & 43 & 17 & 58 & 36.4 & 14.4 & 49.2 & $+$0.502 & $-$0.459 & $+$0.010 & 5.45 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[flushleft]\small
+\item \textit{Notes.} Each row reclassifies $N=118$ firms using symmetric
+thresholds $\pm\tau$ on the composite alignment score
+$\textsc{alignment} = 0.4 \times \textit{distinctive} + 0.4 \times
+\textit{stance} + 0.2 \times \textit{cosine}$.  Firms with
+$\textsc{alignment} > \tau$ are classified Conservative ($N_C$),
+those with $\textsc{alignment} < -\tau$ as Liberal ($N_L$), and
+the remainder as Mixed ($N_M$).  $\bar{s}_C$, $\bar{s}_L$,
+$\bar{s}_M$ are within-group mean alignment scores.  $d$ is
+Cohen's $d$ between the Conservative and Liberal groups,
+measuring between-group separation in standard-deviation units.
+The baseline specification uses $\tau = 0.05$.
+\end{tablenotes}
+\end{table}

@@ -1,0 +1,39 @@
+\begin{table}[htbp]
+\centering
+\caption{DiD Estimates under Alternative Clustering}
+\label{tab:cluster_robust}
+\begin{tabular}{l cc cc}
+\toprule
+ & \multicolumn{2}{c}{(1) Basic} & \multicolumn{2}{c}{(2) With Lean} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+ & Firm & Event & Firm & Event \\
+\midrule
+Intercept & $-$0.0060 & $-$0.0060 & $-$0.0133 & $-$0.0133 \\
+ & (0.0084) & (0.0064) & (0.0091) & (0.0081) \\[4pt]
+Treat & $-$0.0157$^{*}$ & $-$0.0157$^{**}$ & $-$0.0122 & $-$0.0122 \\
+ & (0.0092) & (0.0080) & (0.0092) & (0.0083) \\[4pt]
+Post & $-$0.0134 & $-$0.0134$^{*}$ & $-$0.0134 & $-$0.0134$^{*}$ \\
+ & (0.0081) & (0.0078) & (0.0082) & (0.0078) \\[4pt]
+Treat $\times$ Post & $+$0.0128 & $+$0.0128 & $+$0.0112 & $+$0.0112 \\
+ & (0.0086) & (0.0100) & (0.0107) & (0.0109) \\[4pt]
+Lean & & & $+$0.0226 & $+$0.0226$^{*}$ \\
+ & & & (0.0165) & (0.0134) \\[4pt]
+Treat $\times$ Post $\times$ Lean & & & $+$0.0090 & $+$0.0090 \\
+ & & & (0.0215) & (0.0179) \\
+\midrule
+Clustering & Firm & Event & Firm & Event \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[flushleft]\small
+\item \textit{Notes.} Each column reports OLS estimates of the
+cross-sectional DiD specification.  Columns labelled ``Firm'' cluster
+standard errors by firm (the primary specification); columns labelled
+``Event'' cluster by event, accounting for cross-sectional correlation
+of abnormal returns among firms exposed to the same event on the same
+date \citep{kolari2010}.  Point estimates are identical across clustering
+dimensions because only the variance--covariance matrix changes.
+Near-singular design matrices are detected via QR decomposition; no
+collinear columns were dropped in either specification.
+$^{***}\,p<0.01$;\enspace $^{**}\,p<0.05$;\enspace $^{*}\,p<0.10$.
+\end{tablenotes}
+\end{table}

@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\caption{Sensitivity of Political Alignment Classification to Threshold Choice}
+\label{tab:threshold_sensitivity}
+\begin{tabular}{ccccccc}
+\toprule
+ & \multicolumn{2}{c}{Conservative} & \multicolumn{2}{c}{Liberal} & \multicolumn{2}{c}{Mixed} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+Threshold ($\pm$) & $n$ & \% & $n$ & \% & $n$ & \% \\
+\midrule
+0.05 & 97 & 68.8 & 37 & 26.2 &  7 &  5.0 \\
+0.10 & 93 & 66.0 & 30 & 21.3 & 18 & 12.8 \\
+0.15 & 81 & 57.4 & 26 & 18.4 & 34 & 24.1 \\
+0.20 & 70 & 49.6 & 22 & 15.6 & 49 & 34.8 \\
+0.25 & 58 & 41.1 & 18 & 12.8 & 65 & 46.1 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[flushleft]
+\small
+\item \textit{Notes:} $N = 141$ culture-war events. Firms with \textsc{alignment} $> t$ are classified as conservative; firms with \textsc{alignment} $< -t$ are classified as liberal; the remainder are classified as mixed. The composite alignment score is a weighted average of distinctive-phrase similarity (0.4), FinBERT stance (0.4), and raw cosine similarity (0.2). Sample mean = 0.168; median = 0.197; $\sigma$ = 0.360.
+\end{tablenotes}
+\end{table}
