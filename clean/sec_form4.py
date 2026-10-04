@@ -429,9 +429,14 @@ class Form4Downloader:
                 if len(cached) > 0:
                     logger.info("Using cached %d transactions for %s", len(cached), ticker)
                     all_dfs.append(cached)
-                else:
-                    logger.info("Skipping %s (cached, no data)", ticker)
-                continue
+                    continue
+                # Empty cache — accept only if < 30 days old (new filings
+                # may have appeared since the last run)
+                age_days = (time.time() - os.path.getmtime(ticker_file)) / 86400
+                if age_days < 30:
+                    logger.info("Skipping %s (cached empty, %.0fd old)", ticker, age_days)
+                    continue
+                logger.info("Re-checking %s (empty cache is %.0fd old)", ticker, age_days)
 
             logger.info("Processing %s...", ticker)
 
@@ -473,6 +478,9 @@ class Form4Downloader:
             df['filing_date'] = pd.to_datetime(df['filing_date'], errors='coerce')
             df = df.dropna(subset=['transaction_date'])
             df['transaction_value'] = df['shares'] * df['price_per_share'].fillna(0)
+            # Signed value: dispositions negative, acquisitions positive
+            sign = df['acquired_disposed'].map({'A': 1, 'D': -1}).fillna(1)
+            df['transaction_value_signed'] = df['transaction_value'] * sign
             df = df.sort_values('transaction_date')
 
             if save_csv:

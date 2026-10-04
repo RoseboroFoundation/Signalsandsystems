@@ -189,7 +189,7 @@ def _run_essay1_integration(
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
     factors['DATE'] = pd.to_datetime(factors['DATE'], errors='coerce')
     for col in _FF5_ALL + ['RF']:
-        if factors[col].abs().max() > 1.5:
+        if (factors[col].abs() > 1.5).mean() > 0.10:
             factors[col] = factors[col] / 100
 
     # Merge with regime assignments
@@ -220,7 +220,7 @@ def _run_essay1_integration(
     returns = pd.concat(all_rows, ignore_index=True)
     merged = returns.merge(factors, on='DATE', how='inner')
     merged = merged.dropna(subset=['RETURN'] + _FF5_ALL + ['RF'])
-    if merged['RETURN'].abs().max() > 1.5:
+    if (merged['RETURN'].abs() > 1.5).mean() > 0.10:
         merged['RETURN'] = merged['RETURN'] / 100
     merged['EXCESS_RETURN'] = merged['RETURN'] - merged['RF']
 

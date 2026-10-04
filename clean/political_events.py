@@ -285,7 +285,7 @@ def _parse_congressional_votes(raw_votes):
         if related_bill:
             bill_number = related_bill.get('display_number', '')
             bill_title = related_bill.get('title_without_number', '')
-            bill_title_short = related_bill.get('title', '')
+            subjects = related_bill.get('subjects', [])
 
         description = question or bill_title or f"Vote {vote_id}"
         policy_area = classify_policy_area(description, subjects)
@@ -297,7 +297,7 @@ def _parse_congressional_votes(raw_votes):
             continue
 
         rows.append({
-            'EVENT_ID': f"vote_{chamber[0]}_{event_date.year}_{vote_id}",
+            'EVENT_ID': f"vote_{chamber[0] if chamber else 'X'}_{event_date.year}_{vote_id}",
             'EVENT_DATE': event_date,
             'EVENT_TYPE': 'CONGRESSIONAL_VOTE',
             'EVENT_SUBTYPE': category,

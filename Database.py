@@ -1195,7 +1195,7 @@ class AthenaLoader(BaseLoader):
         glue_table = table_name.lower()
         query = f'SELECT * FROM "{glue_table}"'
         if limit:
-            query += f" LIMIT {limit}"
+            query += f" LIMIT {int(limit)}"
         df = self.run_query(query)
         return self._coerce_types(df, glue_table)
 

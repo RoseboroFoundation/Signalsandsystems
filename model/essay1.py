@@ -399,7 +399,7 @@ def ff5_by_regime(
     # Use median of absolute values — max > 1 fires on legitimate returns.
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
     for col in _FF5_ALL + ['RF']:
-        if factors[col].abs().max() > 1.5:
+        if (factors[col].abs() > 1.5).mean() > 0.10:
             factors[col] = factors[col] / 100
 
     # Merge with regime assignments
@@ -727,7 +727,7 @@ def culture_war_by_regime(
 
         # Convert percent to decimal if needed (median-based check)
         for col in _FF5_ALL + ['RF']:
-            if col in merged.columns and merged[col].abs().max() > 1.5:
+            if col in merged.columns and (merged[col].abs() > 1.5).mean() > 0.10:
                 merged[col] = merged[col] / 100
 
         merged['EXCESS_RETURN'] = merged['RETURN'] - merged['RF']

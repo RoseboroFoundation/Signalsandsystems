@@ -508,8 +508,8 @@ def load_table(table_name):
             if df is not None and not df.empty:
                 return df
             return pd.DataFrame()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("load_table(%s) primary backend failed: %s", table_name, exc)
     # Table may only exist in SQLite (model results, figures, etc.)
     if DB_BACKEND == "athena":
         try:
@@ -525,8 +525,10 @@ def load_table(table_name):
 @st.cache_data(ttl=300)
 def load_figure_blob(figure_name):
     """Load a figure's PNG bytes from the FIGURES table."""
+    # Figure blobs are always stored in SQLite (never uploaded to Athena),
+    # so always use SQLiteLoader regardless of DB_BACKEND.
     try:
-        with _get_loader() as db:
+        with SQLiteLoader(db_path=str(DB_PATH)) as db:
             df = pd.read_sql(
                 "SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = ?",
                 db.conn, params=(figure_name,),
@@ -535,18 +537,6 @@ def load_figure_blob(figure_name):
                 return df.iloc[0]["IMAGE_DATA"]
     except Exception as exc:
         logger.debug("Figure load failed for '%s': %s", figure_name, exc)
-    # Fallback to SQLite if Athena didn't have it
-    if DB_BACKEND == "athena":
-        try:
-            with SQLiteLoader(db_path=str(DB_PATH)) as db:
-                df = pd.read_sql(
-                    "SELECT IMAGE_DATA FROM FIGURES WHERE FIGURE_NAME = ?",
-                    db.conn, params=(figure_name,),
-                )
-                if not df.empty:
-                    return df.iloc[0]["IMAGE_DATA"]
-        except Exception as exc:
-            logger.debug("SQLite fallback failed for '%s': %s", figure_name, exc)
     return None
 
 

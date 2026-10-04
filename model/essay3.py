@@ -937,10 +937,11 @@ def build_insider_panel(form4, culture_events, political_events,
     )
     panel['ABNORMAL_SELLING'] = (panel['ABNORMAL_NET_TRADING'] > 0).astype(int)
 
-    assert panel['ABNORMAL_NET_TRADING'].abs().sum() > 0, (
-        "ABNORMAL_NET_TRADING is identically zero — column lookup failed "
-        "(check _compute_window_metrics keys vs build_insider_panel lookups)"
-    )
+    if panel['ABNORMAL_NET_TRADING'].dropna().abs().sum() == 0:
+        raise ValueError(
+            "ABNORMAL_NET_TRADING is identically zero — column lookup failed "
+            "(check _compute_window_metrics keys vs build_insider_panel lookups)"
+        )
 
     # Stratify
     panel = _stratify_panel(panel)

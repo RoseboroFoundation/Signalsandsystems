@@ -788,10 +788,12 @@ def compute_member_fixed_effects(panel):
 # ═════════════════════════════════════════════════════════════════════
 
 def compute_placebo(panel, n_permutations=1000, seed=42):
-    """Date-permutation placebo: shuffle trade dates, re-compute accuracy.
+    """Direction-permutation placebo: shuffle trade directions, re-compute accuracy.
 
-    If accuracy is driven by genuine foreknowledge, random trade dates
-    should produce ~50% accuracy (or the base rate).
+    If accuracy is driven by genuine foreknowledge, randomly assigning
+    BUY/SELL directions should produce ~50% accuracy (base rate).
+    We permute the DIRECTION column and recompute accuracy each iteration
+    to build a null distribution.
 
     Returns
     -------
@@ -805,11 +807,19 @@ def compute_placebo(panel, n_permutations=1000, seed=42):
     observed_accuracy = valid['ACCURATE'].mean()
     rng = np.random.RandomState(seed)
 
+    # Pre-compute post-event CARs for reuse across permutations
+    car_post = valid['CAR_POST'].values
+    directions = valid['DIRECTION'].values
+
     null_accuracies = []
     for _ in range(n_permutations):
-        # Shuffle the ACCURATE column to test if observed accuracy exceeds chance
-        shuffled = rng.permutation(valid['ACCURATE'].values)
-        null_accuracies.append(shuffled.mean())
+        # Shuffle trade directions to break any foreknowledge signal
+        shuffled_dir = rng.permutation(directions)
+        perm_accurate = np.where(
+            shuffled_dir == 'BUY', (car_post > 0).astype(float),
+            np.where(shuffled_dir == 'SELL', (car_post < 0).astype(float), np.nan)
+        )
+        null_accuracies.append(np.nanmean(perm_accurate))
 
     null_arr = np.array(null_accuracies)
     p_value = (null_arr >= observed_accuracy).mean()

@@ -29,8 +29,8 @@ def _restore_summary_stats(data):
                 if k in ('start_date', 'end_date') and isinstance(v, str):
                     try:
                         value[k] = pd.Timestamp(v)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to restore Timestamp for %s.%s: %s", key, k, exc)
     return data
 
 
@@ -63,6 +63,10 @@ def _save_cache(result, cache_dir):
                 manifest['keys'].append({'name': key, 'kind': 'subdir'})
             elif value is None:
                 manifest['keys'].append({'name': key, 'kind': 'none'})
+            elif isinstance(value, (int, float, str, bool)):
+                with open(os.path.join(cache_dir, f'_{key}.json'), 'w') as f:
+                    json.dump(value, f)
+                manifest['keys'].append({'name': key, 'kind': 'scalar'})
 
     with open(os.path.join(cache_dir, '_manifest.json'), 'w') as f:
         json.dump(manifest, f)
@@ -94,6 +98,10 @@ def _load_cache(cache_dir):
                     result[name] = _restore_summary_stats(json.load(f))
             elif kind == 'subdir':
                 result[name] = _load_cache(os.path.join(cache_dir, name))
+            elif kind == 'scalar':
+                json_path = os.path.join(cache_dir, f'_{name}.json')
+                with open(json_path, 'r') as f:
+                    result[name] = json.load(f)
             elif kind == 'none':
                 result[name] = None
         return result

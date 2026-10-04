@@ -273,7 +273,7 @@ def ff5_matched_control_analysis(
     factors = store.ff5[['DATE'] + pricing_factors + ['RF']].dropna().copy()
     factors['DATE'] = pd.to_datetime(factors['DATE'], errors='coerce')
     for col in pricing_factors + ['RF']:
-        if factors[col].abs().max() > 1.5:
+        if (factors[col].abs() > 1.5).mean() > 0.10:
             logger.warning("Factor %s appears to be in percent, dividing by 100", col)
             factors[col] = factors[col] / 100
 

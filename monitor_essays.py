@@ -18,7 +18,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -612,7 +612,7 @@ def build_change_report(previous: dict, current: dict, essays_run: list) -> dict
     n_moderate = sum(1 for c in changes if c.get("severity") == "moderate")
 
     return {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "essays_run": essays_run,
         "n_metrics_compared": len(current),
         "n_changes": len(changes),
@@ -802,7 +802,7 @@ def main():
 
     logger.info("=" * 60)
     logger.info("  Dissertation Essay Monitor (v2 — detailed analysis)")
-    logger.info("  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    logger.info("  %s", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"))
     logger.info("=" * 60)
 
     # Load data

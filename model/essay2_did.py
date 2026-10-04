@@ -212,12 +212,12 @@ def _estimate_normal_returns(
 
     # Convert percent to decimal if needed
     for col in _FF5_ALL + ['RF']:
-        if factors[col].abs().max() > 1.5:
+        if (factors[col].abs() > 1.5).mean() > 0.10:
             factors[col] = factors[col] / 100
 
     ret = returns[['DATE', 'RETURN']].copy()
     ret['DATE'] = pd.to_datetime(ret['DATE'], errors='coerce')
-    if ret['RETURN'].abs().max() > 1.5:
+    if (ret['RETURN'].abs() > 1.5).mean() > 0.10:
         ret['RETURN'] = ret['RETURN'] / 100
 
     merged = ret.merge(factors, on='DATE', how='inner').sort_values('DATE').reset_index(drop=True)
@@ -799,7 +799,11 @@ def run_multi_window_event_study(
             t_stat, p_val = stats.ttest_ind(treat, ctrl, equal_var=False)
             diff = treat.mean() - ctrl.mean()
             # Cohen's d
-            pooled_std = np.sqrt((treat.std()**2 + ctrl.std()**2) / 2)
+            n_a, n_b = len(treat), len(ctrl)
+            pooled_std = np.sqrt(
+                ((n_a - 1) * treat.std(ddof=1)**2 + (n_b - 1) * ctrl.std(ddof=1)**2)
+                / (n_a + n_b - 2)
+            ) if n_a + n_b > 2 else 0
             cohens_d = diff / pooled_std if pooled_std > 0 else np.nan
         else:
             t_stat, p_val, diff, cohens_d = np.nan, np.nan, np.nan, np.nan
@@ -1289,7 +1293,11 @@ def run_contagion_test(
         if len(peers_car) >= 3 and len(nonpeers_car) >= 3:
             t_stat, p_val = stats.ttest_ind(peers_car, nonpeers_car, equal_var=False)
             diff = peers_car.mean() - nonpeers_car.mean()
-            pooled_std = np.sqrt((peers_car.std()**2 + nonpeers_car.std()**2) / 2)
+            n_a, n_b = len(peers_car), len(nonpeers_car)
+            pooled_std = np.sqrt(
+                ((n_a - 1) * peers_car.std(ddof=1)**2 + (n_b - 1) * nonpeers_car.std(ddof=1)**2)
+                / (n_a + n_b - 2)
+            ) if n_a + n_b > 2 else 0
             cohens_d = diff / pooled_std if pooled_std > 0 else np.nan
         else:
             t_stat, p_val, diff, cohens_d = np.nan, np.nan, np.nan, np.nan
@@ -1643,7 +1651,11 @@ def run_enhanced_contagion(
         if len(peers_car) >= 3 and len(tnp_car) >= 3:
             t_stat, p_val = stats.ttest_ind(peers_car, tnp_car, equal_var=False)
             diff = peers_car.mean() - tnp_car.mean()
-            pooled_std = np.sqrt((peers_car.std()**2 + tnp_car.std()**2) / 2)
+            n_a, n_b = len(peers_car), len(tnp_car)
+            pooled_std = np.sqrt(
+                ((n_a - 1) * peers_car.std(ddof=1)**2 + (n_b - 1) * tnp_car.std(ddof=1)**2)
+                / (n_a + n_b - 2)
+            ) if n_a + n_b > 2 else 0
             cohens_d = diff / pooled_std if pooled_std > 0 else np.nan
         else:
             t_stat, p_val, diff, cohens_d = np.nan, np.nan, np.nan, np.nan
@@ -1715,7 +1727,11 @@ def run_enhanced_contagion(
         if len(cons) >= 3 and len(b2b) >= 3:
             t_stat, p_val = stats.ttest_ind(cons, b2b, equal_var=False)
             diff = cons.mean() - b2b.mean()
-            pooled_std = np.sqrt((cons.std()**2 + b2b.std()**2) / 2)
+            n_a, n_b = len(cons), len(b2b)
+            pooled_std = np.sqrt(
+                ((n_a - 1) * cons.std(ddof=1)**2 + (n_b - 1) * b2b.std(ddof=1)**2)
+                / (n_a + n_b - 2)
+            ) if n_a + n_b > 2 else 0
             cohens_d = diff / pooled_std if pooled_std > 0 else np.nan
         else:
             t_stat, p_val, diff, cohens_d = np.nan, np.nan, np.nan, np.nan
@@ -1779,7 +1795,11 @@ def run_enhanced_contagion(
             if len(grp_a) >= 3 and len(grp_b) >= 3:
                 t_stat, p_val = stats.ttest_ind(grp_a, grp_b, equal_var=False)
                 diff = grp_a.mean() - grp_b.mean()
-                pooled_std = np.sqrt((grp_a.std()**2 + grp_b.std()**2) / 2)
+                n_a, n_b = len(grp_a), len(grp_b)
+                pooled_std = np.sqrt(
+                    ((n_a - 1) * grp_a.std(ddof=1)**2 + (n_b - 1) * grp_b.std(ddof=1)**2)
+                    / (n_a + n_b - 2)
+                ) if n_a + n_b > 2 else 0
                 cohens_d = diff / pooled_std if pooled_std > 0 else np.nan
             else:
                 t_stat, p_val, diff, cohens_d = np.nan, np.nan, np.nan, np.nan
@@ -2161,7 +2181,7 @@ def parallel_trends_test(
     factors = store.ff5[['DATE'] + _FF5_ALL + ['RF']].dropna().copy()
     factors['DATE'] = pd.to_datetime(factors['DATE'], errors='coerce')
     for col in _FF5_ALL + ['RF']:
-        if factors[col].abs().max() > 1.5:
+        if (factors[col].abs() > 1.5).mean() > 0.10:
             factors[col] = factors[col] / 100
 
     day_range = list(range(pre_window[0], pre_window[1] + 1))

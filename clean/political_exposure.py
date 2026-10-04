@@ -494,7 +494,7 @@ def load_political_exposure(tickers=None, start_date='2000-01-01',
         ])
 
     # Match tickers to lobbying/PAC data
-    exposure = match_tickers_to_lobby_data(tickers, lobbying_df, pac_df)
+    exposure = match_tickers_to_lobby_data(target_tickers, lobbying_df, pac_df)
 
     if exposure.empty:
         logger.warning("No ticker matches found in lobbying/PAC data")

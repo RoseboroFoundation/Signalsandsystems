@@ -30,7 +30,8 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.series import DataPoint
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 logging.basicConfig(level=logging.WARNING)
 
 # ── Add project root to path ──────────────────────────────────────────────

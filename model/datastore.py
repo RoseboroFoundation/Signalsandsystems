@@ -343,7 +343,7 @@ class DataStore:
             df['RUN_TIMESTAMP'] = timestamp
             res = self._loader.write_table(df, 'EVENT_STUDY_RESULTS', replace=True)
             results['EVENT_STUDY_RESULTS'] = res
-            logger.info("Saved EVENT_STUDY_RESULTS: %d rows", res['rows'])
+            logger.info("Saved EVENT_STUDY_RESULTS: %d rows", res.get('rows', 0) if res else 0)
 
         if did_results is not None and not did_results.empty:
             df = did_results.copy()
@@ -351,7 +351,7 @@ class DataStore:
             df['RUN_TIMESTAMP'] = timestamp
             res = self._loader.write_table(df, 'DID_RESULTS', replace=True)
             results['DID_RESULTS'] = res
-            logger.info("Saved DID_RESULTS: %d rows", res['rows'])
+            logger.info("Saved DID_RESULTS: %d rows", res.get('rows', 0) if res else 0)
 
         if cross_sectional is not None and not cross_sectional.empty:
             df = cross_sectional.copy()
@@ -359,7 +359,7 @@ class DataStore:
             df['RUN_TIMESTAMP'] = timestamp
             res = self._loader.write_table(df, 'CROSS_SECTIONAL_CAR', replace=True)
             results['CROSS_SECTIONAL_CAR'] = res
-            logger.info("Saved CROSS_SECTIONAL_CAR: %d rows", res['rows'])
+            logger.info("Saved CROSS_SECTIONAL_CAR: %d rows", res.get('rows', 0) if res else 0)
 
         # Save a run summary row
         summary_row = {

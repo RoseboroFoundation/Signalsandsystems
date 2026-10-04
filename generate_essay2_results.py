@@ -5,7 +5,8 @@ Reads from the DataStore (SQLite/AWS) and writes to essay2_results.xlsx.
 import sys
 import os
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -247,7 +247,12 @@ def load_data():
     try:
         if data_dict['culturewardata'] is not None:
             cw = data_dict['culturewardata']
-            treatment_tickers = cw['Ticker'].dropna().unique().tolist()
+            ticker_col = next(
+                (c for c in ['Ticker', 'ticker', 'TICKER', 'Symbol', 'symbol']
+                 if c in cw.columns), None)
+            if ticker_col is None:
+                raise KeyError("No ticker column found in culture war data")
+            treatment_tickers = cw[ticker_col].dropna().unique().tolist()
             control_tickers = []
             for col in ['Control Ticker', 'Control_Ticker', 'CONTROL_TICKER']:
                 if col in cw.columns:
