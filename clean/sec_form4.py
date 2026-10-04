@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from .config import logger
+from .config import logger, _load_sec_cik_mapping
 
 class Form4Downloader:
     """Download and parse SEC Form 4 filings."""
@@ -63,54 +63,9 @@ class Form4Downloader:
         return None
 
     def _load_cik_mapping(self) -> Dict[str, str]:
-        """
-        Load ticker to CIK mapping from SEC.
-
-        Returns:
-        --------
-        Dict[str, str] : Mapping of ticker symbols to CIK numbers
-        """
+        """Load ticker to CIK mapping from SEC (delegates to shared helper)."""
         cache_file = os.path.join(self.output_dir, 'ticker_cik_mapping.json')
-
-        # Check for cached mapping (refresh if older than 7 days)
-        if os.path.exists(cache_file):
-            file_age = time.time() - os.path.getmtime(cache_file)
-            if file_age < 7 * 24 * 60 * 60:  # 7 days
-                try:
-                    with open(cache_file, 'r') as f:
-                        logger.info("Loading cached CIK mapping...")
-                        return json.load(f)
-                except Exception as e:
-                    logger.debug("Failed to read CIK cache: %s", e)
-
-        logger.info("Downloading ticker-to-CIK mapping from SEC...")
-        try:
-            # SEC provides a JSON file with all company tickers and CIKs
-            url = "https://www.sec.gov/files/company_tickers.json"
-            response = requests.get(url, headers=self._get_headers(url))
-            time.sleep(0.2)
-
-            if response.status_code == 200:
-                data = response.json()
-                mapping = {}
-                for entry in data.values():
-                    ticker = entry.get('ticker', '').upper()
-                    cik = str(entry.get('cik_str', '')).zfill(10)
-                    if ticker and cik:
-                        mapping[ticker] = cik
-
-                # Cache the mapping
-                with open(cache_file, 'w') as f:
-                    json.dump(mapping, f)
-
-                logger.info("Loaded %d ticker-to-CIK mappings", len(mapping))
-                return mapping
-            else:
-                logger.error("Failed to download CIK mapping: HTTP %s", response.status_code)
-                return {}
-        except Exception as e:
-            logger.error("loading CIK mapping: %s", e)
-            return {}
+        return _load_sec_cik_mapping(cache_file, user_agent=self.user_agent)
 
     def download_form4_filings(
         self,

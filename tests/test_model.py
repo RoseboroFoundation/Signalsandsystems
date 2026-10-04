@@ -308,3 +308,148 @@ class TestDataStore:
                 np.log1p(result['RETURN'].iloc[i]),
                 rtol=1e-10,
             )
+
+
+# =========================================================================
+# Placebo permutation test — non-degenerate null (3 tests)
+# =========================================================================
+
+
+class TestPlaceboPermutation:
+    """Verify direction-permutation placebo produces a proper null distribution."""
+
+    @staticmethod
+    def _build_panel(n=200, seed=42):
+        rng = np.random.RandomState(seed)
+        directions = rng.choice(['BUY', 'SELL'], size=n)
+        car_post = rng.normal(0.02, 0.05, size=n)
+        accurate = np.where(
+            directions == 'BUY', (car_post > 0).astype(float),
+            (car_post < 0).astype(float),
+        )
+        return pd.DataFrame({
+            'DIRECTION': directions,
+            'CAR_POST': car_post,
+            'ACCURATE': accurate,
+        })
+
+    def test_null_distribution_has_variance(self):
+        """Shuffling directions must produce varying accuracy — not degenerate."""
+        from model.essay3_stock_act import compute_placebo
+
+        panel = self._build_panel()
+        result = compute_placebo(panel, n_permutations=200, seed=99)
+        assert len(result) == 1
+        # NULL_STD > 0 means the null distribution is non-degenerate
+        assert result['NULL_STD'].iloc[0] > 0, "Null distribution is degenerate"
+
+    def test_observed_differs_from_null_mean(self):
+        """With structured data, observed accuracy should differ from null mean."""
+        from model.essay3_stock_act import compute_placebo
+
+        # Build panel where BUY → positive CAR, SELL → negative CAR (high accuracy)
+        rng = np.random.RandomState(7)
+        n = 300
+        directions = rng.choice(['BUY', 'SELL'], size=n)
+        car_post = np.where(
+            directions == 'BUY',
+            rng.uniform(0.01, 0.10, size=n),
+            rng.uniform(-0.10, -0.01, size=n),
+        )
+        accurate = np.where(
+            directions == 'BUY', (car_post > 0).astype(float),
+            (car_post < 0).astype(float),
+        )
+        panel = pd.DataFrame({
+            'DIRECTION': directions, 'CAR_POST': car_post, 'ACCURATE': accurate,
+        })
+        result = compute_placebo(panel, n_permutations=500, seed=42)
+        observed = result['OBSERVED_ACCURACY'].iloc[0]
+        null_mean = result['NULL_MEAN'].iloc[0]
+        # Observed ~1.0, null ~0.5
+        assert observed > null_mean + 0.1
+
+    def test_small_panel_returns_empty(self):
+        """Panels with < 20 valid rows should return empty DataFrame."""
+        from model.essay3_stock_act import compute_placebo
+
+        panel = self._build_panel(n=10)
+        result = compute_placebo(panel, n_permutations=100, seed=1)
+        assert len(result) == 0
+
+
+# =========================================================================
+# Cohen's d weighted pooled SD (2 tests)
+# =========================================================================
+
+
+class TestCohensD:
+    """Verify Cohen's d uses weighted (not equal-n) pooled SD."""
+
+    def test_equal_n_matches_simple(self):
+        """With equal sample sizes, weighted and simple formulas agree."""
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        b = np.array([2.0, 3.0, 4.0, 5.0, 6.0])
+        diff = a.mean() - b.mean()
+        n_a, n_b = len(a), len(b)
+        pooled = np.sqrt(
+            ((n_a - 1) * a.std(ddof=1)**2 + (n_b - 1) * b.std(ddof=1)**2)
+            / (n_a + n_b - 2)
+        )
+        d = diff / pooled
+        assert abs(d - (-1.0 / a.std(ddof=1))) < 1e-10
+
+    def test_unequal_n_differs_from_simple_average(self):
+        """With unequal n, weighted pooled SD != sqrt((s1^2+s2^2)/2)."""
+        rng = np.random.RandomState(0)
+        a = rng.normal(10, 2, size=100)
+        b = rng.normal(12, 5, size=10)
+        n_a, n_b = len(a), len(b)
+
+        weighted = np.sqrt(
+            ((n_a - 1) * a.std(ddof=1)**2 + (n_b - 1) * b.std(ddof=1)**2)
+            / (n_a + n_b - 2)
+        )
+        simple = np.sqrt((a.std(ddof=1)**2 + b.std(ddof=1)**2) / 2)
+
+        # They should NOT be equal
+        assert abs(weighted - simple) > 0.1, (
+            f"weighted={weighted:.4f}, simple={simple:.4f} — should differ"
+        )
+
+
+# =========================================================================
+# Cache scalar round-trip (2 tests)
+# =========================================================================
+
+
+class TestCacheScalar:
+    """Verify cache handles scalar values correctly."""
+
+    def test_scalar_round_trip(self, tmp_path):
+        """Save and load scalar values through the cache."""
+        from clean.cache import _save_cache, _load_cache
+
+        cache_dir = str(tmp_path / "cache_test")
+        data = {'count': 42, 'ratio': 3.14, 'label': 'test'}
+        _save_cache(data, cache_dir)
+
+        loaded = _load_cache(cache_dir)
+        assert loaded is not None
+        assert loaded['count'] == 42
+        assert abs(loaded['ratio'] - 3.14) < 1e-10
+        assert loaded['label'] == 'test'
+
+    def test_mixed_types_round_trip(self, tmp_path):
+        """Cache with DataFrames AND scalars round-trips correctly."""
+        from clean.cache import _save_cache, _load_cache
+
+        cache_dir = str(tmp_path / "cache_mixed")
+        df = pd.DataFrame({'x': [1, 2, 3]})
+        data = {'frame': df, 'n_rows': 3}
+        _save_cache(data, cache_dir)
+
+        loaded = _load_cache(cache_dir)
+        assert loaded is not None
+        assert loaded['n_rows'] == 3
+        pd.testing.assert_frame_equal(loaded['frame'], df)

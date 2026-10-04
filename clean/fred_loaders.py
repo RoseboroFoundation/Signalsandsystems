@@ -12,7 +12,8 @@ from .cache import _save_cache, _load_cache
 def load_inflation_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False,
 ):
     """
     Load inflation data from FRED (Federal Reserve Economic Data).
@@ -46,6 +47,10 @@ def load_inflation_data(
 
     os.makedirs(cache_path, exist_ok=True)
     cache_dir = os.path.join(cache_path, f'inflation_data_{start_date}_{end_date}')
+
+    if force_refresh and os.path.exists(cache_dir):
+        import shutil
+        shutil.rmtree(cache_dir)
 
     if os.path.exists(cache_dir):
         logger.info("Loading cached inflation data from %s", cache_dir)
@@ -110,7 +115,8 @@ def load_inflation_data(
 def load_inflation_expectations_data(
     start_date='2000-01-01',
     end_date=None,
-    cache_path='./data/fred'
+    cache_path='./data/fred',
+    force_refresh=False,
 ):
     """
     Load inflation expectations and breakeven inflation data from FRED.
@@ -146,6 +152,10 @@ def load_inflation_expectations_data(
         cache_path,
         f'inflation_expectations_{start_date}_{end_date}'
     )
+
+    if force_refresh and os.path.exists(cache_dir):
+        import shutil
+        shutil.rmtree(cache_dir)
 
     if os.path.exists(cache_dir):
         logger.info("Loading cached inflation expectations from %s", cache_dir)
@@ -311,11 +321,11 @@ def load_comprehensive_inflation_data(
 
     # Load core inflation data
     logger.info("[1/3] Loading core inflation measures...")
-    core_data = load_inflation_data(start_date, end_date, cache_path)
+    core_data = load_inflation_data(start_date, end_date, cache_path, force_refresh=force_refresh)
 
     # Load expectations data
     logger.info("[2/3] Loading inflation expectations...")
-    expectations_data = load_inflation_expectations_data(start_date, end_date, cache_path)
+    expectations_data = load_inflation_expectations_data(start_date, end_date, cache_path, force_refresh=force_refresh)
 
     # Load component-level inflation
     logger.info("[3/3] Loading component-level inflation...")
@@ -398,8 +408,10 @@ def load_comprehensive_inflation_data(
     logger.info("Total observations: %d", len(combined_df))
 
     logger.info("--- Series Categories ---")
-    logger.info("Core inflation measures: %d", len(core_data['combined'].columns) if core_data else 0)
-    logger.info("Expectations measures: %d", len(expectations_data['combined'].columns) if expectations_data else 0)
+    logger.info("Core inflation measures: %d",
+                len(core_data.get('combined', pd.DataFrame()).columns) if core_data else 0)
+    logger.info("Expectations measures: %d",
+                len(expectations_data.get('combined', pd.DataFrame()).columns) if expectations_data else 0)
     logger.info("Component measures: %d", len(components_yoy.columns))
 
     return result

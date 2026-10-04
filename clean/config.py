@@ -16,7 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # API Keys
 API_KEY = os.getenv('FRED_API_KEY')
 
-# Date range defaults
+# Date range defaults — dissertation analysis window (intentionally fixed)
 START_DATE = '2000-01-01'
 END_DATE = '2025-12-31'
 
@@ -54,6 +54,63 @@ def _download_fred_series(series_dict, start_date, end_date):
         except Exception as e:
             logger.warning("Could not download %s (%s): %s", name, code, e)
     return pd.DataFrame(data)
+
+
+def _load_sec_cik_mapping(cache_file, user_agent=None):
+    """Load or refresh ticker→CIK mapping from SEC (shared by sec_filings + sec_form4).
+
+    Parameters
+    ----------
+    cache_file : str
+        Path to the JSON cache file.
+    user_agent : str, optional
+        SEC-required User-Agent header.
+
+    Returns
+    -------
+    dict : {ticker: cik_str}
+    """
+    import json
+    import time
+    import requests
+
+    if os.path.exists(cache_file):
+        age = time.time() - os.path.getmtime(cache_file)
+        if age < 7 * 24 * 3600:
+            try:
+                with open(cache_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    logger.info("Downloading ticker-to-CIK mapping from SEC...")
+    url = "https://www.sec.gov/files/company_tickers.json"
+    headers = {'User-Agent': user_agent or 'research@example.com',
+               'Accept-Encoding': 'gzip, deflate',
+               'Host': 'www.sec.gov'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        time.sleep(0.15)
+        if resp.status_code != 200:
+            logger.warning("CIK download failed: HTTP %s", resp.status_code)
+            return {}
+    except Exception as e:
+        logger.warning("CIK download failed: %s", e)
+        return {}
+
+    data = resp.json()
+    mapping = {}
+    for entry in data.values():
+        t = entry.get('ticker', '').upper()
+        c = str(entry.get('cik_str', '')).zfill(10)
+        if t and c:
+            mapping[t] = c
+
+    os.makedirs(os.path.dirname(cache_file) or '.', exist_ok=True)
+    with open(cache_file, 'w') as f:
+        json.dump(mapping, f)
+    logger.info("Loaded %d ticker-to-CIK mappings", len(mapping))
+    return mapping
 
 
 def import_culture_war_data(file_path):

@@ -129,9 +129,10 @@ def _compute_car_yf(ticker, event_date, pre_window=(-5, -1),
     all_dates = ar.index.normalize()
     event_dt = pd.Timestamp(event_date).normalize()
 
-    # Find event date position (or nearest)
-    if event_dt in all_dates:
-        event_idx = list(all_dates).index(event_dt)
+    # Find event date position (or nearest) — use searchsorted for O(log n)
+    idx = all_dates.searchsorted(event_dt)
+    if idx < len(all_dates) and all_dates[idx] == event_dt:
+        event_idx = idx
     else:
         diffs = abs(all_dates - event_dt)
         event_idx = diffs.argmin()

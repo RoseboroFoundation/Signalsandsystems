@@ -696,6 +696,15 @@ with st.sidebar:
     st.divider()
     st.markdown("#### Pipeline")
 
+    # Auth gate — pipeline execution requires admin password
+    _admin_pw = os.getenv("DASHBOARD_ADMIN_PASSWORD", "")
+    _pipeline_unlocked = False
+    if _admin_pw:
+        _pw_input = st.text_input("Admin password", type="password", key="pipeline_pw")
+        _pipeline_unlocked = (_pw_input == _admin_pw)
+    else:
+        _pipeline_unlocked = True  # No password configured — allow access
+
     # --- Step 1: Clean (long-running, background) ---
     _clean_log = BASE_DIR / "data" / "clean.log"
     _clean_pid = BASE_DIR / "data" / "clean.pid"
@@ -733,7 +742,7 @@ with st.sidebar:
             if _last_line:
                 st.caption(f"Last clean run: {_last_line[0][:120]}")
 
-        if st.button("Step 1: Clean Raw Data (~20h)", use_container_width=True):
+        if _pipeline_unlocked and st.button("Step 1: Clean Raw Data (~20h)", use_container_width=True):
             _clean_log.parent.mkdir(parents=True, exist_ok=True)
             with open(_clean_log, "w") as _lf:
                 _proc = subprocess.Popen(
@@ -746,7 +755,7 @@ with st.sidebar:
             st.rerun()
 
     # --- Steps 2-9: ETL through charts (foreground) ---
-    if st.button("Step 2: Run ETL → Models → Charts", use_container_width=True):
+    if _pipeline_unlocked and st.button("Step 2: Run ETL → Models → Charts", use_container_width=True):
         _steps = [
             ("Running ETL", [sys.executable, "ETL.py"]),
             ("Loading database", [sys.executable, "Database.py"]),

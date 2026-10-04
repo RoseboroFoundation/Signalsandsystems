@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from .config import logger
+from .config import logger, _load_sec_cik_mapping
 
 
 class SECFilingDownloader:
@@ -70,34 +70,7 @@ class SECFilingDownloader:
     def _load_cik_mapping(self) -> Dict[str, str]:
         """Load or refresh the ticker→CIK mapping from SEC."""
         cache_file = os.path.join(self.output_dir, 'ticker_cik_mapping.json')
-
-        if os.path.exists(cache_file):
-            age = time.time() - os.path.getmtime(cache_file)
-            if age < 7 * 24 * 3600:
-                try:
-                    with open(cache_file, 'r') as f:
-                        return json.load(f)
-                except Exception:
-                    pass
-
-        logger.info("Downloading ticker-to-CIK mapping from SEC...")
-        url = "https://www.sec.gov/files/company_tickers.json"
-        resp = self._request(url)
-        if resp is None:
-            return {}
-
-        data = resp.json()
-        mapping = {}
-        for entry in data.values():
-            t = entry.get('ticker', '').upper()
-            c = str(entry.get('cik_str', '')).zfill(10)
-            if t and c:
-                mapping[t] = c
-
-        with open(cache_file, 'w') as f:
-            json.dump(mapping, f)
-        logger.info("Loaded %d ticker-to-CIK mappings", len(mapping))
-        return mapping
+        return _load_sec_cik_mapping(cache_file, user_agent=self.user_agent)
 
     # ── Filing index retrieval ────────────────────────────────────────
 
