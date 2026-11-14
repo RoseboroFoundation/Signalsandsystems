@@ -94,6 +94,9 @@ from .orthogonalize import (
     OrthogonalizationResult,
 )
 
+# Word2Vec political stance scoring (Li et al. 2021 methodology)
+from .word2vec_stance import StanceScorer, extract_seed_dictionaries
+
 # STOCK Act congressional trading (Essay 3 — legislator insider trading)
 from .stock_act import (
     load_stock_act_trades,
