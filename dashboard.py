@@ -651,7 +651,7 @@ with st.sidebar:
         "CBOE VIX (Regime-Switching)",
         "FRED Macro Series (GDP, CPI, Rates)",
         "FinBERT Sentiment (~57,299 articles)",
-        "SEC Form 4 (29,633 insider trades)",
+        "SEC Form 4 (38,882 insider trades)",
     ]:
         st.markdown(
             f"<span style='color:{GOLD}; margin-right:0.4rem;'>&#8226;</span> {src}",
@@ -872,9 +872,9 @@ with tab_overview:
         "contagion rather than isolation. VIX attenuates the treatment effect: in high-"
         "volatility regimes, culture war signals are drowned by macro noise. "
         "**Essay 3**, *\"Informed Insider Trading Around Political Decisions: Foreknowledge, "
-        "Profits, and the Limits of Regulatory Architecture,\"* analyzes 29,633 SEC Form 4 "
-        "trades across 1,712 event-firm windows. Sell accuracy is 54.68% (p < 0.001), but "
-        "the matched-control base rate is 57.84% -- insiders do not beat the unconditional "
+        "Profits, and the Limits of Regulatory Architecture,\"* analyzes 38,882 SEC Form 4 "
+        "trades across 1,712 event-firm windows. Sell accuracy is 54.13% (p < 0.001), but "
+        "the matched-control base rate is 57.24% -- insiders do not beat the unconditional "
         "odds. The finding reframes insider trading as a volume-silent directional channel: "
         "$3.5 billion in aggregate profits (Gini = 0.963) concentrated among a handful of "
         "insiders who exploit the sell side of political foreknowledge."
@@ -956,8 +956,8 @@ with tab_overview:
         "(-0.42 mean) mediates the market response to political controversy, with VIX "
         "regimes attenuating treatment effects -- building on Baker and Wurgler (2006).\n\n"
         "3. **To corporate governance**: By reframing insider trading as a volume-silent "
-        "directional channel: sell accuracy of 54.68% is significant but falls below the "
-        "57.84% control base rate, with $3.5B in profits concentrated at Gini = 0.963 -- "
+        "directional channel: sell accuracy of 54.13% is significant but falls below the "
+        "57.24% control base rate, with $3.5B in profits concentrated at Gini = 0.963 -- "
         "contributing to Cohen, Malloy, and Pomorski (2012).\n\n"
         "4. **To political economy of finance**: By documenting how political polarization "
         "creates contagion effects (matched controls contaminated, DiD null) rather than "
@@ -1035,7 +1035,7 @@ with tab_overview:
             "- **VIX**: CBOE Volatility Index (regime-switching)\n"
             "- **Macro**: GDP, CPI, employment, interest rates from FRED\n"
             "- **News**: ~57,299 articles scored via FinBERT\n"
-            "- **SEC Form 4**: 29,633 insider trades across 1,712 event-firm windows"
+            "- **SEC Form 4**: 38,882 insider trades across 1,712 event-firm windows"
         )
 
     st.markdown("##### Methodology Overview")
@@ -2178,10 +2178,10 @@ with tab_a3:
     # --- Motivation ---
     st.subheader("Motivation")
     st.markdown(
-        "This essay analyzes 29,633 SEC Form 4 trades across 1,712 event-firm windows to "
+        "This essay analyzes 38,882 SEC Form 4 trades across 1,712 event-firm windows to "
         "test whether corporate insiders exploit political foreknowledge. The central finding "
-        "is nuanced: sell-side directional accuracy is 54.68% (p < 0.001 vs. 50%), but the "
-        "matched non-political control base rate is 57.84% -- insiders do not beat the "
+        "is nuanced: sell-side directional accuracy is 54.13% (p < 0.001 vs. 50%), but the "
+        "matched non-political control base rate is 57.24% -- insiders do not beat the "
         "unconditional odds. The result reframes insider trading not as a mean-accuracy "
         "phenomenon but as a *volume-silent directional channel*: aggregate profits of "
         "$3.5 billion are concentrated at Gini = 0.963, meaning a handful of insiders "
@@ -2206,7 +2206,7 @@ with tab_a3:
             f"padding:1rem; border-radius:0 4px 4px 0; min-height:12rem;'>"
             f"<strong style='color:{GOLD};'>H1: Directional Accuracy</strong><br><br>"
             f"Pre-event insider sells are directionally accurate at rates above 50%. "
-            f"Result: 54.68% (p < 0.001), but below the 57.84% control base rate. "
+            f"Result: 54.13% (p < 0.001), but below the 57.24% control base rate. "
             f"Insiders are informed vs. chance, but not vs. unconditional market drift.</div>",
             unsafe_allow_html=True,
         )
@@ -2241,8 +2241,8 @@ with tab_a3:
     with meth_col1:
         st.markdown("**Data**")
         st.markdown(
-            "- **SEC Form 4**: 29,633 insider trades across 1,712 event-firm windows\n"
-            "- **Political events**: 141 culture war events (2015-2025)\n"
+            "- **SEC Form 4**: 38,882 insider trades across 1,712 event-firm windows\n"
+            "- **Political events**: 1,712 political events (2000-2025)\n"
             "- **Matched controls**: Ticker-matched trades outside political windows\n"
             "- **FF5-adjusted CARs**: Post-event cumulative abnormal returns"
         )
@@ -2595,8 +2595,8 @@ with tab_a3:
         "This essay extends the insider trading literature (Seyhun, 1986; Lakonishok "
         "and Lee, 2001; Cohen et al., 2012) into the political economy domain. Key "
         "implications:\n\n"
-        "- **Conditional vs. unconditional accuracy** — the 54.68% sell accuracy is "
-        "significant vs. 50% but falls below the 57.84% control base rate, requiring "
+        "- **Conditional vs. unconditional accuracy** — the 54.13% sell accuracy is "
+        "significant vs. 50% but falls below the 57.24% control base rate, requiring "
         "reinterpretation of what 'informed' means in this context\n"
         "- **Volume-silent channel** — insiders exploit the sell side of political "
         "foreknowledge in trade sizes below regulatory detection thresholds\n"

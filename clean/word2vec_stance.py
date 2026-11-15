@@ -97,11 +97,13 @@ def extract_seed_dictionaries(
     -------
     (liberal_seeds, conservative_seeds) : tuple of sets
     """
-    dem_texts = platform_corpus[
-        platform_corpus['party'] == 'Democratic'
+    # Sort for deterministic ordering (reproducibility)
+    corpus_sorted = platform_corpus.sort_values(['party', 'year']).reset_index(drop=True)
+    dem_texts = corpus_sorted[
+        corpus_sorted['party'] == 'Democratic'
     ]['text'].tolist()
-    rep_texts = platform_corpus[
-        platform_corpus['party'] == 'Republican'
+    rep_texts = corpus_sorted[
+        corpus_sorted['party'] == 'Republican'
     ]['text'].tolist()
 
     if not dem_texts or not rep_texts:
@@ -111,7 +113,7 @@ def extract_seed_dictionaries(
     all_texts = dem_texts + rep_texts
     labels = ['D'] * len(dem_texts) + ['R'] * len(rep_texts)
 
-    # Fit TF-IDF on all platforms
+    # Fit TF-IDF on all platforms (deterministic: no random components)
     tfidf = TfidfVectorizer(
         tokenizer=_tokenize,
         token_pattern=None,
@@ -120,6 +122,9 @@ def extract_seed_dictionaries(
         max_features=10000,
         sublinear_tf=True,
     )
+    # Note: TfidfVectorizer is deterministic given the same input.
+    # Reproducibility depends on stable input ordering, which is
+    # guaranteed because we sort by party then year below.
     X = tfidf.fit_transform(all_texts)
     vocab = tfidf.get_feature_names_out()
 
@@ -313,7 +318,8 @@ class StanceScorer:
         expand_topn: int = 50,
         expand_threshold: float = 0.3,
     ):
-        self.platform_dir = platform_dir
+        # Resolve to absolute path for robustness when cwd differs
+        self.platform_dir = os.path.abspath(platform_dir)
         self.filing_text_path = filing_text_path
         self.seed_topn = seed_topn
         self.expand_topn = expand_topn
@@ -418,6 +424,8 @@ class StanceScorer:
             filing_texts['FILING_DATE'], errors='coerce')
         filing_texts['YEAR'] = filing_texts['FILING_DATE'].dt.year
 
+        # Note: TfidfVectorizer is deterministic given stable input order.
+        # Filing texts are grouped by (TICKER, FILING_DATE) which is stable.
         tfidf = TfidfVectorizer(
             tokenizer=_tokenize,
             token_pattern=None,

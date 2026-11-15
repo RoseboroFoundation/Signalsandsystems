@@ -154,9 +154,9 @@ class DataStore:
         self.stock_returns = self._compute_returns(raw_stocks)
 
         # --- Factor Models ---
-        self.ff3 = self._read('FF3_FACTORS', parse_dates=['DATE'])
-        self.ff5 = self._read('FF5_FACTORS', parse_dates=['DATE'])
-        self.momentum = self._read('MOMENTUM_FACTORS', parse_dates=['DATE'])
+        self.ff3 = self._normalize_factors(self._read('FF3_FACTORS', parse_dates=['DATE']))
+        self.ff5 = self._normalize_factors(self._read('FF5_FACTORS', parse_dates=['DATE']))
+        self.momentum = self._normalize_factors(self._read('MOMENTUM_FACTORS', parse_dates=['DATE']))
 
         # Merge all factors into one frame
         self.factors = self._merge_factors()
@@ -180,6 +180,39 @@ class DataStore:
         logger.info("DataStore ready (%s backend, %d events, %d political events, %d tickers)",
                      self.backend, len(self.events), len(self.political_events),
                      self.stock_returns['TICKER'].nunique() if 'TICKER' in self.stock_returns.columns else 0)
+
+    @staticmethod
+    def _normalize_factors(df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure factor data is in decimal form (not percent).
+
+        Kenneth French's data library distributes factors in percent
+        (e.g., 0.50 means 0.50%). This method detects that and divides
+        by 100 so all downstream code works in decimal returns.
+        """
+        if df.empty:
+            return df
+
+        factor_cols = [c for c in df.columns
+                       if c not in ('DATE', 'date', 'Date')]
+        if not factor_cols:
+            return df
+
+        # Heuristic: if the median absolute value of any numeric factor
+        # column exceeds 0.10 (i.e., 10% daily — implausible), the data
+        # is in percent form.  Kenneth French factors typically range
+        # ±5 in percent, mapping to ±0.05 in decimal.
+        numeric_cols = df[factor_cols].select_dtypes(include=[np.number]).columns
+        if numeric_cols.empty:
+            return df
+
+        medians = df[numeric_cols].abs().median()
+        if (medians > 0.10).any():
+            logger.info("Factor data appears to be in percent — converting to decimal "
+                        "(median abs values: %s)",
+                        ', '.join(f'{c}={medians[c]:.2f}' for c in numeric_cols[:5]))
+            df = df.copy()
+            df[numeric_cols] = df[numeric_cols] / 100
+        return df
 
     def _reshape_stock_data(self, df):
         """
@@ -259,14 +292,15 @@ class DataStore:
 
         df = stocks.sort_values(['TICKER', 'DATE']).copy()
         df['RETURN'] = df.groupby('TICKER')['ADJ_CLOSE'].pct_change()
-        # Guard against returns <= -1 (delisted/halted securities) which
-        # produce -inf or NaN from log1p
+        # Returns <= -1 are legitimate (delisting, total loss). Keep them
+        # in RETURN for event studies and regressions, but guard log1p
+        # which requires RETURN > -1.
         bad_mask = df['RETURN'] <= -1
         if bad_mask.any():
-            logger.warning("datastore: %d rows with RETURN <= -1 set to NaN before log1p",
-                           bad_mask.sum())
-            df.loc[bad_mask, 'RETURN'] = np.nan
-        df['LOG_RETURN'] = np.log1p(df['RETURN'])
+            logger.info("datastore: %d rows with RETURN <= -1 (delisting/total loss) "
+                        "— kept in RETURN, set to NaN only in LOG_RETURN",
+                        bad_mask.sum())
+        df['LOG_RETURN'] = np.where(bad_mask, np.nan, np.log1p(df['RETURN']))
         return df
 
     def _merge_factors(self):
