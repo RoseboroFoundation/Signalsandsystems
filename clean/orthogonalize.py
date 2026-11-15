@@ -355,16 +355,22 @@ def build_culture_index(
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    # Convert to timestamp index (month-start) and fill gaps
+    # Convert to timestamp index (month-start) and fill gaps.
+    # Empty months are NaN (not zero) so the first-stage orthogonalization
+    # regresses only on months with actual culture-war events.  Downstream
+    # consumers that need a continuous series should fillna(0) explicitly.
     culture.index = culture.index.to_timestamp()
     full_idx = pd.date_range(
         culture.index.min(), culture.index.max(), freq=_normalize_freq(freq))
-    culture = culture.reindex(full_idx, fill_value=0.0)
+    culture = culture.reindex(full_idx)  # NaN for months with no events
     culture.index.name = 'DATE'
     culture.name = 'CULTURE_RAW'
 
-    logger.info("Culture index (%s): %d periods, mean=%.2f, std=%.2f",
-                method, len(culture), culture.mean(), culture.std())
+    n_active = culture.notna().sum()
+    logger.info("Culture index (%s): %d periods (%d active, %d empty), "
+                "mean=%.2f, std=%.2f",
+                method, len(culture), n_active, len(culture) - n_active,
+                culture.mean(), culture.std())
     return culture
 
 
@@ -674,110 +680,6 @@ def _durbin_watson(resid: pd.Series) -> float:
     if denom == 0:
         return np.nan
     return float(np.sum(diff**2) / denom)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# HORSE-RACE AND COMPARISON UTILITIES
-# ═══════════════════════════════════════════════════════════════════════
-
-def compare_raw_vs_orthogonal(
-    raw: pd.Series,
-    orthogonal: pd.Series,
-    returns: pd.Series,
-    lags: int = 1,
-    controls: Optional[pd.DataFrame] = None,
-    hac_maxlags: int = 4,
-) -> pd.DataFrame:
-    """Horse-race: compare raw vs orthogonalized culture factor in
-    predicting aggregate market returns.
-
-    If the raw factor predicts but the orthogonal does not, the result
-    is driven by politics. If the orthogonal retains power, the culture
-    contribution is distinct.
-
-    Parameters
-    ----------
-    raw : pd.Series
-        Raw culture index.
-    orthogonal : pd.Series
-        Orthogonalized culture index.
-    returns : pd.Series
-        Market returns (e.g., MKT_RF).
-    lags : int
-        Number of periods to lag the culture factors.
-    controls : pd.DataFrame, optional
-        Additional control variables.
-    hac_maxlags : int
-        Newey-West lags.
-
-    Returns
-    -------
-    pd.DataFrame
-        Model comparison with R2, coefficients, t-stats for each spec.
-    """
-    import warnings
-
-    df = pd.DataFrame({
-        'RETURNS': returns,
-        'CULTURE_RAW': raw.shift(lags),
-        'CULTURE_ORTHO': orthogonal.shift(lags),
-    }).dropna()
-
-    if controls is not None:
-        df = df.join(controls, how='inner').dropna()
-
-    results = []
-
-    # Spec 1: Raw culture only
-    y = df['RETURNS']
-    X1 = sm.add_constant(df[['CULTURE_RAW']])
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        fit1 = sm.OLS(y, X1).fit(cov_type='HAC', cov_kwds={'maxlags': hac_maxlags})
-    results.append({
-        'SPECIFICATION': '1. Raw culture only',
-        'R_SQUARED': fit1.rsquared,
-        'ADJ_R_SQUARED': fit1.rsquared_adj,
-        'CULTURE_COEF': fit1.params['CULTURE_RAW'],
-        'CULTURE_T': fit1.tvalues['CULTURE_RAW'],
-        'CULTURE_P': fit1.pvalues['CULTURE_RAW'],
-        'N_OBS': int(fit1.nobs),
-    })
-
-    # Spec 2: Orthogonalized culture only
-    X2 = sm.add_constant(df[['CULTURE_ORTHO']])
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        fit2 = sm.OLS(y, X2).fit(cov_type='HAC', cov_kwds={'maxlags': hac_maxlags})
-    results.append({
-        'SPECIFICATION': '2. Orthogonalized culture only',
-        'R_SQUARED': fit2.rsquared,
-        'ADJ_R_SQUARED': fit2.rsquared_adj,
-        'CULTURE_COEF': fit2.params['CULTURE_ORTHO'],
-        'CULTURE_T': fit2.tvalues['CULTURE_ORTHO'],
-        'CULTURE_P': fit2.pvalues['CULTURE_ORTHO'],
-        'N_OBS': int(fit2.nobs),
-    })
-
-    # Spec 3: Both (horse race)
-    X3 = sm.add_constant(df[['CULTURE_RAW', 'CULTURE_ORTHO']])
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        fit3 = sm.OLS(y, X3).fit(cov_type='HAC', cov_kwds={'maxlags': hac_maxlags})
-    results.append({
-        'SPECIFICATION': '3. Horse race (both)',
-        'R_SQUARED': fit3.rsquared,
-        'ADJ_R_SQUARED': fit3.rsquared_adj,
-        'CULTURE_COEF': fit3.params.get('CULTURE_RAW', np.nan),
-        'CULTURE_T': fit3.tvalues.get('CULTURE_RAW', np.nan),
-        'CULTURE_P': fit3.pvalues.get('CULTURE_RAW', np.nan),
-        'N_OBS': int(fit3.nobs),
-    })
-
-    comparison = pd.DataFrame(results)
-    logger.info("Horse race: Raw R2=%.4f, Ortho R2=%.4f, Both R2=%.4f",
-                fit1.rsquared, fit2.rsquared, fit3.rsquared)
-    return comparison
 
 
 # ═══════════════════════════════════════════════════════════════════════

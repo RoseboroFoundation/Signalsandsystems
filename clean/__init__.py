@@ -89,7 +89,6 @@ from .orthogonalize import (
     build_political_proxies,
     build_culture_index,
     orthogonalize_culture,
-    compare_raw_vs_orthogonal,
     run_orthogonalization_pipeline,
     OrthogonalizationResult,
 )
