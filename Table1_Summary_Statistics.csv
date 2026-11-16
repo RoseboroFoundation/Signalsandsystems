@@ -1,0 +1,40 @@
+Variable,N,Mean,Std. Dev.,Max
+Panel A: Events,,,,
+Political Events,"1,712",,,
+"  Fundamental","1,419",,,
+"    Congressional Vote",792,,,
+"    Court Decision",392,,,
+"    Executive Order",235,,,
+"  Cultural",293,,,
+"  Culture War (treatment)",160,,,
+"    Liberal",71,,,
+"    Conservative",33,,,
+"    Mixed",56,,,
+"  Matched Control-Firm Events",133,,,
+"  Initiation Arm: Firm-Initiated",198,,,
+"  Initiation Arm: External","1,452",,,
+"  Initiation Arm: Reactive",62,,,
+Events with Sufficient Trading Data,"1,653",,,
+Events with Post-Event CAR,"1,281",,,
+Culture War Events with CAR,141,,,
+Unique Firms,133,,,
+"Culture War Firms (treatment)",97,,,
+,,,,
+Panel B: Insider Trades,,,,
+"Form 4 Trades","38,882",,,
+"  Sells","26,859",,,
+"  Buys","12,023",,,
+"Unique Insiders","2,897",,,
+"Mark-to-Market Trade Sample","38,882",,,
+"Trade Value ($ thousands)","38,882","3,581.3","45,174.3","3,242,400.0"
+"Trade CAR [0, +30]","32,636",-0.0252,0.1551,1.4450
+"Trade CAR [0, +60]","32,636",-0.0495,0.3002,2.0758
+Matched Control Trades (with CAR),"14,361",,,
+"  Trade Value ($ thousands)","17,969","2,865.4","67,184.7","6,828,270.0"
+"  Trade CAR [0, +30]","14,361",-0.0143,0.1472,0.9081
+,,,,
+Panel C: Event Abnormal Returns,,,,
+"Post-Event CAR","1,281",-0.0225,0.1111,1.1765
+"Announcement CAR [0, +1]","1,280",-0.0034,0.0266,0.1324
+"Drift CAR [+2, +60]","1,280",-0.0755,0.3097,1.9595
+"Remaining CAR","1,268",-0.0654,0.2761,1.6418

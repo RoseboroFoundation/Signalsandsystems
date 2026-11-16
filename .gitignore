@@ -25,3 +25,6 @@ full_macro_data_*.csv
 
 # OS files
 .DS_Store
+
+# Claude Code
+.claude/
